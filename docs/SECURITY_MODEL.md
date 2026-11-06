@@ -27,7 +27,7 @@ The HTTP probe currently:
 - measures time to response headers and cancels the response body;
 - does not accept arbitrary customer headers or credentials.
 
-This is not a production SSRF boundary. Cloudflare Workers' standard fetch interface does not provide application code with a DNS answer that it can validate and pin to the exact outbound socket. Consequently, hostname checks in this repository cannot guarantee protection against DNS rebinding or a public hostname resolving to a private address.
+This is not a production SSRF boundary. Cloudflare Workers supports both HTTP fetch and an outbound TCP socket API. The current implementation uses fetch, which does not expose a DNS answer that application code can validate and pin to the exact outbound socket. The TCP socket API may enable a custom HTTP/TLS prober, but the project has not yet demonstrated a complete DNS-resolution, address-pinning, TLS hostname-verification and redirect-validation flow on that runtime. Consequently, hostname checks in this repository cannot currently guarantee protection against DNS rebinding or a public hostname resolving to a private address.
 
 Do not expose monitor creation or execute arbitrary customer targets in a production environment until one of these approaches is implemented and independently tested:
 
