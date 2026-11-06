@@ -50,11 +50,13 @@ The project deliberately avoids Redis, a VPS and paid infrastructure dependencie
 
 ## Local development
 
-Requirements: Node.js 20+, npm and Wrangler.
+Requirements: Node.js 22.12+, npm and Wrangler.
 
 ```sh
 npm install
 npm run typecheck
+npm test
+python scripts/check-migrations.py
 npx wrangler d1 migrations apply zetuwatch --local
 npm run dev:api
 ```
@@ -76,7 +78,7 @@ Do not expose an admin API or production database credentials publicly. Deployme
 
 ## Security
 
-Customer-supplied monitor URLs are an SSRF risk. The current URL validator is only a preliminary syntax/host check. It does not resolve DNS or pin a validated IP, and therefore is **not sufficient to enable public probes**. A hardened egress architecture, redirect-hop validation, DNS rebinding defenses, response limits, rate limits and abuse controls must be implemented and reviewed before scheduled checks are enabled. See [SECURITY.md](SECURITY.md).
+Customer-supplied monitor URLs are an SSRF risk. The current URL validator is only a preliminary syntax/host check. It does not resolve DNS or pin a validated IP, and therefore is **not sufficient to enable public probes**. A hardened egress architecture, redirect-hop validation, DNS rebinding defenses, response limits, rate limits and abuse controls must be implemented and reviewed before scheduled checks are enabled. See [SECURITY.md](SECURITY.md) and the detailed [security model](docs/SECURITY_MODEL.md).
 
 ## Licensing
 
