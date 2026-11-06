@@ -1,5 +1,6 @@
 import { validateMonitorUrl } from "../../../packages/monitoring-core/src/url-safety";
 import { hashPassword, verifyPassword } from "../../../packages/auth-core/src/password";
+import { canDeleteMonitors, canWriteMonitors } from "../../../packages/auth-core/src/authorization";
 
 interface Env {
   DB: D1Database;
@@ -275,7 +276,7 @@ export default {
       }
       const membership = await env.DB.prepare("SELECT role FROM organization_members WHERE organization_id = ? AND user_id = ?")
         .bind(organizationId, user.id).first<{ role: string }>();
-      if (!membership || membership.role === "viewer") return json({ error: "FORBIDDEN" }, 403);
+      if (!membership || !canWriteMonitors(membership.role)) return json({ error: "FORBIDDEN" }, 403);
       try { validateMonitorUrl(target); } catch (error) {
         return json({ error: "UNSAFE_OR_INVALID_URL", message: error instanceof Error ? error.message : "The URL is not allowed." }, 400);
       }
@@ -310,7 +311,7 @@ export default {
       }
       if (request.method === "GET") return json({ monitor, state: "awaiting_first_check", executionEnabled: false });
       if (request.method === "PATCH") {
-        if (membership.role === "viewer") return json({ error: "FORBIDDEN" }, 403);
+        if (!canWriteMonitors(membership.role)) return json({ error: "FORBIDDEN" }, 403);
         const body = await request.json().catch(() => null) as Record<string, unknown> | null;
         const name = body?.name === undefined ? monitor.name : cleanText(body.name, 80);
         const target = body?.targetUrl === undefined ? monitor.target_url : cleanText(body.targetUrl, 2048);
@@ -335,7 +336,7 @@ export default {
         return json({ message: "Monitor updated.", executionEnabled: false });
       }
       if (request.method === "DELETE") {
-        if (!["owner", "admin"].includes(membership.role)) return json({ error: "FORBIDDEN" }, 403);
+        if (!canDeleteMonitors(membership.role)) return json({ error: "FORBIDDEN" }, 403);
         await env.DB.batch([
           env.DB.prepare("DELETE FROM monitors WHERE id = ? AND organization_id = ?").bind(monitorId, monitor.organization_id),
           env.DB.prepare("INSERT INTO audit_logs (id, organization_id, actor_user_id, action, resource_type, resource_id) VALUES (?, ?, ?, 'monitor.deleted', 'monitor', ?)")
