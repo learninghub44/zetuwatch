@@ -137,7 +137,7 @@ export default {
       } catch {
         return json({ error: "REGISTRATION_FAILED" }, 400);
       }
-      const verifyUrl = `${env.PUBLIC_APP_URL.replace(/\/$/, "")}/verify-email?token=${encodeURIComponent(token)}`;
+      const verifyUrl = `${env.PUBLIC_APP_URL.replace(/\/$/, "")}/auth.html?token=${encodeURIComponent(token)}`;
       const sent = await sendEmail(env, email, "Verify your ZetuWatch email", `<p>Hi ${htmlEscape(name)},</p><p>Confirm your email address to activate your ZetuWatch account.</p><p><a href="${verifyUrl}">Verify email address</a></p><p>This link expires in 24 hours. If you did not create this account, you can ignore this email.</p>`, `verify-${userId}`);
       if (!sent) return json({ error: "VERIFICATION_EMAIL_FAILED", message: "Your account was created but the verification email could not be sent. Contact support to continue." }, 503);
       return json({ message: "Account created. Check your email to verify your address." }, 201);
