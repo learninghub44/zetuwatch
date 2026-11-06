@@ -20,4 +20,4 @@ This project is an early development scaffold, not a hardened production service
 - Redact authorization headers, query secrets and response bodies from logs.
 - Add abuse reporting, account suspension and audit trails.
 
-URL string checks alone are not sufficient SSRF protection.
+URL string checks alone are not sufficient SSRF protection. The current `runHttpProbe` implementation deliberately throws `PROBE_EGRESS_NOT_HARDENED` and performs no network request. The monitor API stores configuration only and reports `executionEnabled: false`. Do not remove this fail-closed guard until a dedicated egress design has been reviewed and tested against private-address DNS answers, rebinding, IPv4-mapped IPv6, redirect chains and metadata endpoints.
