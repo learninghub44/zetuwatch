@@ -1,3 +1,6 @@
-# Local-only secrets. Copy to .dev.vars; never commit real values.
-# RESEND_API_KEY=
-# APP_SECRET=
+# Local-only Worker secrets. Copy to .dev.vars and never commit real values.
+# Required for email verification:
+RESEND_API_KEY=re_your_resend_api_key
+EMAIL_FROM=ZetuWatch <notifications@your-verified-domain.example>
+
+# Set PUBLIC_APP_URL in wrangler.toml to the origin serving apps/web.
