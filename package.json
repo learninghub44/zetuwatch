@@ -4,17 +4,22 @@
   "version": "0.1.0",
   "description": "Open-source website, API and cron monitoring platform",
   "license": "Apache-2.0",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "scripts": {
     "dev:api": "wrangler dev --config wrangler.toml",
     "deploy": "wrangler deploy --config wrangler.toml",
     "db:local": "wrangler d1 migrations apply zetuwatch --local",
     "db:remote": "wrangler d1 migrations apply zetuwatch --remote",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20261101.0",
-    "typescript": "^5.9.3",
-    "wrangler": "^4.45.0"
+    "@cloudflare/workers-types": "5.20261104.1",
+    "typescript": "5.9.3",
+    "vitest": "5.1.0",
+    "wrangler": "4.158.0"
   }
 }
