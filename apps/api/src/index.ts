@@ -61,7 +61,8 @@ function cookie(name: string, value: string, maxAge: number, secure: boolean): s
 function readCookie(request: Request, name: string): string | null {
   const header = request.headers.get("cookie") || "";
   const match = header.split(";").map(v => v.trim()).find(v => v.startsWith(name + "="));
-  return match ? decodeURIComponent(match.slice(name.length + 1)) : null;
+  if (!match) return null;
+  try { return decodeURIComponent(match.slice(name.length + 1)); } catch { return null; }
 }
 async function rateLimit(request: Request, env: Env, route: string, limit: number): Promise<boolean> {
   const ip = request.headers.get("cf-connecting-ip") || "unknown";
