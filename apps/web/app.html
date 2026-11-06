@@ -43,14 +43,26 @@ function renderWizard(){
     $("review-behavior").textContent=$("monitor-type").value.toUpperCase()+" · "+$("monitor-method").value+" · every "+(Number($("monitor-interval").value)/60)+" min · expects "+$("monitor-status").value;
   }
 }
-function openModal(){
+function openModal(monitor=null){
   $("form-error").classList.add("hidden");
   $("monitor-form").reset();
+  editingMonitorId=monitor?.id||null;
+  $("modal-title").textContent=editingMonitorId?"Edit monitor":"Add a monitor";
+  $("save").textContent=editingMonitorId?"Save changes":"Save monitor";
+  if(monitor){
+    $("monitor-name").value=monitor.name||"";
+    $("monitor-url").value=monitor.target_url||"";
+    $("monitor-type").value=monitor.monitor_type||"http";
+    $("monitor-method").value=monitor.method||"GET";
+    $("monitor-interval").value=String(monitor.interval_seconds||300);
+    $("monitor-status").value=String(monitor.expected_status||200);
+  }
   wizardStep=0;renderWizard();
   $("modal-backdrop").classList.remove("hidden");
   $("monitor-name").focus();
 }
-function closeModal(){$("modal-backdrop").classList.add("hidden")}
+function editMonitor(monitor){openModal(monitor)}
+function closeModal(){$("modal-backdrop").classList.add("hidden");editingMonitorId=null}
 $("wizard-back").addEventListener("click",()=>{if(wizardStep>0){wizardStep--;renderWizard()}});
 $("wizard-next").addEventListener("click",()=>{
   $("form-error").classList.add("hidden");
@@ -67,15 +79,21 @@ $("wizard-next").addEventListener("click",()=>{
   wizardStep=Math.min(2,wizardStep+1);renderWizard();
 });
 async function removeMonitor(id,name){if(!confirm("Delete "+name+"? Its check history and related incidents will also be removed."))return;try{await request("/v1/monitors/"+id,{method:"DELETE"});showNotice("Monitor deleted.");await loadMonitors()}catch(e){showNotice(e.message,true)}}
-["add-monitor","top-add","empty-add","setup-add"].forEach(id=>$(id).addEventListener("click",openModal));$("cancel").addEventListener("click",closeModal);$("modal-backdrop").addEventListener("click",e=>{if(e.target===$("modal-backdrop"))closeModal()});
+["add-monitor","top-add","empty-add","setup-add"].forEach(id=>$(id).addEventListener("click",()=>openModal()));$("cancel").addEventListener("click",closeModal);$("modal-backdrop").addEventListener("click",e=>{if(e.target===$("modal-backdrop"))closeModal()});
 $("monitor-form").addEventListener("submit",async e=>{
   e.preventDefault();
   if(wizardStep!==2)return;
   $("save").disabled=true;$("save").textContent="Saving…";
   try{
     const payload={organizationId:orgId,name:$("monitor-name").value.trim(),targetUrl:$("monitor-url").value.trim(),monitorType:$("monitor-type").value,method:$("monitor-method").value,intervalSeconds:Number($("monitor-interval").value),expectedStatus:Number($("monitor-status").value),timeoutMs:10000};
-    await request("/v1/monitors",{method:"POST",body:JSON.stringify(payload)});
-    closeModal();showNotice("Monitor saved. It is awaiting the secure scheduled check service.");await loadMonitors();
+    if(editingMonitorId){
+      await request("/v1/monitors/"+editingMonitorId,{method:"PATCH",body:JSON.stringify(payload)});
+      closeModal();showNotice("Monitor updated. It is awaiting the secure scheduled check service.");
+    }else{
+      await request("/v1/monitors",{method:"POST",body:JSON.stringify(payload)});
+      closeModal();showNotice("Monitor saved. It is awaiting the secure scheduled check service.");
+    }
+    await loadMonitors();
   }catch(e){$("form-error").textContent=e.message;$("form-error").classList.remove("hidden")}
   finally{$("save").disabled=false;$("save").textContent="Save monitor"}
 });
