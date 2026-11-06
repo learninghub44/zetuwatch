@@ -31,7 +31,7 @@ npx wrangler secret put EMAIL_FROM
 Use a sender such as `ZetuWatch <notifications@your-verified-domain.example>`. The sender domain must be verified with the email provider.
 
 4. Set `PUBLIC_APP_URL` in Worker configuration to the exact origin hosting `apps/web` (scheme + host, no path). It is used to build email links and validate browser origins.
-5. In `apps/web/auth.html` and `apps/web/reset-password.html`, change the `api-base` meta value from `/api` to the HTTPS API origin when the API is hosted separately, for example `https://api.your-domain.example`. The API sends credentialed CORS headers only to the configured app origin.
+5. In `apps/web/auth.html`, `apps/web/app.html` and `apps/web/reset-password.html`, change the `api-base` meta value from `/api` to the HTTPS API origin when the API is hosted separately, for example `https://api.your-domain.example`. The API sends credentialed CORS headers only to the configured app origin.
 6. Serve the web files over HTTPS in production. Keep the app and API under the same registrable site where possible so SameSite=Strict cookies work in browser fetch requests.
 
 For local development, configure a local sender/domain supported by your Resend account and set the app/API origins consistently. Do not test real email delivery until the sender domain is verified.
@@ -50,7 +50,7 @@ Apply migrations to a remote database only after reviewing the target account an
 
 - The API uses an exact-origin allowlist for browser requests and rejects disallowed mutation origins. Requests without an Origin header remain available for non-browser clients; those clients must use a future API-key or other explicit authentication mechanism before accessing customer resources.
 - Login and registration endpoints have a basic D1-backed per-IP rate limiter. Add edge-level WAF/rate limiting and account-keyed abuse controls before public launch.
-- Email delivery errors are not logged with message content. Provider delivery webhooks, bounce/suppression handling and retry queue are not implemented yet.
+- Email delivery errors are not logged with message content. Registration responses are intentionally generic to avoid revealing whether an address already has an account. Provider delivery webhooks, bounce/suppression handling and retry queue are not implemented yet.
 - Multi-factor authentication, passkeys, OAuth, account recovery support workflows and session-management UI are not implemented.
 - Workspace creation is currently one owner membership per new account. Full invitation acceptance and role-management APIs remain to be built.
 - Password-reset and verification tokens are one-use and expire, but periodic cleanup of expired tokens and sessions is still required.
