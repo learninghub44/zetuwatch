@@ -65,7 +65,7 @@ export function validateMonitorUrl(input: string): URL {
   if (url.username || url.password) throw new Error("URL_CREDENTIALS_NOT_ALLOWED");
   if (url.port && !["80", "443"].includes(url.port)) throw new Error("PORT_NOT_ALLOWED");
 
-  const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, "").replace(/\.$/, "");
   if (!host || BLOCKED_HOSTS.has(host) || BLOCKED_SUFFIXES.some((suffix) => host.endsWith(suffix))) {
     throw new Error("HOST_NOT_ALLOWED");
   }
