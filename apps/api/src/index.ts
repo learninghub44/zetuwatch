@@ -2,7 +2,6 @@ interface Env {
   DB: D1Database;
   APP_ENV: string;
   PUBLIC_APP_URL: string;
-  SESSION_SECRET: string;
   RESEND_API_KEY?: string;
   EMAIL_FROM?: string;
 }
@@ -95,6 +94,11 @@ function htmlEscape(value: string): string {
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
+    const response = await (async (): Promise<Response> => {
+    if (request.method === "OPTIONS") {
+      if (!originAllowed(request, env)) return json({ error: "ORIGIN_NOT_ALLOWED" }, 403);
+      return new Response(null, { status: 204 });
+    }
     const url = new URL(request.url);
     const secure = env.APP_ENV === "production";
 
@@ -189,5 +193,17 @@ export default {
     }
 
     return json({ error: "NOT_FOUND" }, 404);
+    })();
+
+    const headers = new Headers(response.headers);
+    const origin = request.headers.get("origin");
+    if (origin && originAllowed(request, env)) {
+      headers.set("access-control-allow-origin", origin);
+      headers.set("access-control-allow-credentials", "true");
+      headers.set("access-control-allow-methods", "GET, POST, PATCH, PUT, DELETE, OPTIONS");
+      headers.set("access-control-allow-headers", "Content-Type");
+      headers.append("vary", "Origin");
+    }
+    return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
   }
 };
