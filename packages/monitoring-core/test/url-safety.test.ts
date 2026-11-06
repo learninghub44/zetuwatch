@@ -13,6 +13,7 @@ describe("validateMonitorUrl", () => {
     "ftp://example.com",
     "http://user:pass@example.com",
     "http://localhost",
+    "http://localhost.",
     "http://service.localhost",
     "http://metadata.google.internal",
     "http://127.0.0.1",
