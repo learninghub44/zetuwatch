@@ -1,3 +1,5 @@
+import { validateMonitorUrl } from "../../../packages/monitoring-core/src/url-safety";
+
 interface Env {
   DB: D1Database;
   APP_ENV: string;
@@ -240,6 +242,113 @@ export default {
         FROM organization_members m JOIN organizations o ON o.id = m.organization_id
         WHERE m.user_id = ? ORDER BY o.created_at`).bind(user.id).all();
       return json({ user: { id: user.id, email: user.email, name: user.display_name }, organizations: organizations.results });
+    }
+
+    if (request.method === "GET" && url.pathname === "/v1/monitors") {
+      const user = await currentUser(request, env);
+      if (!user) return json({ error: "UNAUTHENTICATED" }, 401);
+      const organizationId = cleanText(url.searchParams.get("organizationId"), 64);
+      if (!organizationId) return json({ error: "ORGANIZATION_REQUIRED" }, 400);
+      const membership = await env.DB.prepare("SELECT role FROM organization_members WHERE organization_id = ? AND user_id = ?")
+        .bind(organizationId, user.id).first<{ role: string }>();
+      if (!membership) return json({ error: "FORBIDDEN" }, 403);
+      const result = await env.DB.prepare(`SELECT id, name, monitor_type, target_url, method, expected_status,
+        interval_seconds, timeout_ms, is_enabled, consecutive_failures, last_checked_at, next_check_at, created_at, updated_at
+        FROM monitors WHERE organization_id = ? ORDER BY created_at DESC LIMIT 100`).bind(organizationId).all();
+      return json({ monitors: result.results, executionEnabled: false, note: "Scheduled checks are not enabled yet; monitors are saved but have not been probed." });
+    }
+
+    if (request.method === "POST" && url.pathname === "/v1/monitors") {
+      const user = await currentUser(request, env);
+      if (!user) return json({ error: "UNAUTHENTICATED" }, 401);
+      if (!(await rateLimit(request, env, "monitor-create", 30))) return json({ error: "RATE_LIMITED" }, 429);
+      const body = await request.json().catch(() => null) as Record<string, unknown> | null;
+      const organizationId = cleanText(body?.organizationId, 64);
+      const name = cleanText(body?.name, 80);
+      const target = cleanText(body?.targetUrl, 2048);
+      const monitorType = body?.monitorType === "api" ? "api" : body?.monitorType === "http" || !body?.monitorType ? "http" : "";
+      const method = typeof body?.method === "string" ? body.method.toUpperCase() : "GET";
+      const expectedStatus = Number(body?.expectedStatus ?? 200);
+      const intervalSeconds = Number(body?.intervalSeconds ?? 300);
+      const timeoutMs = Number(body?.timeoutMs ?? 10000);
+      if (!organizationId || !name || !target || !monitorType ||
+          !["GET", "HEAD"].includes(method) ||
+          !Number.isInteger(expectedStatus) || expectedStatus < 100 || expectedStatus > 599 ||
+          !Number.isInteger(intervalSeconds) || intervalSeconds < 60 || intervalSeconds > 3600 ||
+          !Number.isInteger(timeoutMs) || timeoutMs < 1000 || timeoutMs > 30000) {
+        return json({ error: "INVALID_MONITOR_INPUT", message: "Check the name, URL, monitor type, method, expected status, interval and timeout." }, 400);
+      }
+      const membership = await env.DB.prepare("SELECT role FROM organization_members WHERE organization_id = ? AND user_id = ?")
+        .bind(organizationId, user.id).first<{ role: string }>();
+      if (!membership || membership.role === "viewer") return json({ error: "FORBIDDEN" }, 403);
+      try { validateMonitorUrl(target); } catch (error) {
+        return json({ error: "UNSAFE_OR_INVALID_URL", message: error instanceof Error ? error.message : "The URL is not allowed." }, 400);
+      }
+      const monitorId = id();
+      await env.DB.batch([
+        env.DB.prepare(`INSERT INTO monitors (id, organization_id, name, monitor_type, target_url, method, expected_status,
+          interval_seconds, timeout_ms, is_enabled, next_check_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP)`)
+          .bind(monitorId, organizationId, name, monitorType, target, method, expectedStatus, intervalSeconds, timeoutMs),
+        env.DB.prepare("INSERT INTO audit_logs (id, organization_id, actor_user_id, action, resource_type, resource_id) VALUES (?, ?, ?, 'monitor.created', 'monitor', ?)")
+          .bind(id(), organizationId, user.id, monitorId)
+      ]);
+      return json({ monitor: { id: monitorId, organizationId, name, monitorType, targetUrl: target, method, expectedStatus, intervalSeconds, timeoutMs, state: "awaiting_first_check" }, executionEnabled: false }, 201);
+    }
+
+    const monitorMatch = url.pathname.match(/^\/v1\/monitors\/([0-9a-f-]{36})(\/checks)?$/i);
+    if (monitorMatch) {
+      const user = await currentUser(request, env);
+      if (!user) return json({ error: "UNAUTHENTICATED" }, 401);
+      const monitorId = monitorMatch[1];
+      const monitor = await env.DB.prepare("SELECT id, organization_id, name, target_url, monitor_type, method, expected_status, interval_seconds, timeout_ms, is_enabled FROM monitors WHERE id = ?")
+        .bind(monitorId).first<{ id: string; organization_id: string; name: string; target_url: string; monitor_type: string; method: string; expected_status: number; interval_seconds: number; timeout_ms: number; is_enabled: number }>();
+      if (!monitor) return json({ error: "NOT_FOUND" }, 404);
+      const membership = await env.DB.prepare("SELECT role FROM organization_members WHERE organization_id = ? AND user_id = ?")
+        .bind(monitor.organization_id, user.id).first<{ role: string }>();
+      if (!membership) return json({ error: "FORBIDDEN" }, 403);
+
+      if (request.method === "GET" && monitorMatch[2] === "/checks") {
+        const checks = await env.DB.prepare(`SELECT id, checked_at, is_up, status_code, response_time_ms, error_code
+          FROM monitor_checks WHERE monitor_id = ? ORDER BY checked_at DESC LIMIT 100`).bind(monitorId).all();
+        return json({ checks: checks.results, executionEnabled: false });
+      }
+      if (request.method === "GET") return json({ monitor, state: "awaiting_first_check", executionEnabled: false });
+      if (request.method === "PATCH") {
+        if (membership.role === "viewer") return json({ error: "FORBIDDEN" }, 403);
+        const body = await request.json().catch(() => null) as Record<string, unknown> | null;
+        const name = body?.name === undefined ? monitor.name : cleanText(body.name, 80);
+        const target = body?.targetUrl === undefined ? monitor.target_url : cleanText(body.targetUrl, 2048);
+        const method = body?.method === undefined ? monitor.method : cleanText(body.method, 8).toUpperCase();
+        const expectedStatus = body?.expectedStatus === undefined ? monitor.expected_status : Number(body.expectedStatus);
+        const intervalSeconds = body?.intervalSeconds === undefined ? monitor.interval_seconds : Number(body.intervalSeconds);
+        const timeoutMs = body?.timeoutMs === undefined ? monitor.timeout_ms : Number(body.timeoutMs);
+        if (!name || !target || !["GET", "HEAD"].includes(method) ||
+            !Number.isInteger(expectedStatus) || expectedStatus < 100 || expectedStatus > 599 ||
+            !Number.isInteger(intervalSeconds) || intervalSeconds < 60 || intervalSeconds > 3600 ||
+            !Number.isInteger(timeoutMs) || timeoutMs < 1000 || timeoutMs > 30000) return json({ error: "INVALID_MONITOR_INPUT" }, 400);
+        try { validateMonitorUrl(target); } catch (error) {
+          return json({ error: "UNSAFE_OR_INVALID_URL", message: error instanceof Error ? error.message : "The URL is not allowed." }, 400);
+        }
+        await env.DB.batch([
+          env.DB.prepare(`UPDATE monitors SET name = ?, target_url = ?, method = ?, expected_status = ?,
+            interval_seconds = ?, timeout_ms = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ?`)
+            .bind(name, target, method, expectedStatus, intervalSeconds, timeoutMs, monitorId, monitor.organization_id),
+          env.DB.prepare("INSERT INTO audit_logs (id, organization_id, actor_user_id, action, resource_type, resource_id) VALUES (?, ?, ?, 'monitor.updated', 'monitor', ?)")
+            .bind(id(), monitor.organization_id, user.id, monitorId)
+        ]);
+        return json({ message: "Monitor updated.", executionEnabled: false });
+      }
+      if (request.method === "DELETE") {
+        if (!["owner", "admin"].includes(membership.role)) return json({ error: "FORBIDDEN" }, 403);
+        await env.DB.batch([
+          env.DB.prepare("DELETE FROM monitors WHERE id = ? AND organization_id = ?").bind(monitorId, monitor.organization_id),
+          env.DB.prepare("INSERT INTO audit_logs (id, organization_id, actor_user_id, action, resource_type, resource_id) VALUES (?, ?, ?, 'monitor.deleted', 'monitor', ?)")
+            .bind(id(), monitor.organization_id, user.id, monitorId)
+        ]);
+        return json({ message: "Monitor deleted." });
+      }
+      return json({ error: "METHOD_NOT_ALLOWED" }, 405);
     }
 
     return json({ error: "NOT_FOUND" }, 404);
