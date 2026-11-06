@@ -55,3 +55,7 @@ Apply migrations to a remote database only after reviewing the target account an
 - Workspace creation is currently one owner membership per new account. Full invitation acceptance and role-management APIs remain to be built.
 - Password-reset and verification tokens are one-use and expire, but periodic cleanup of expired tokens and sessions is still required.
 - A successful typecheck, migration test and end-to-end browser test are still required before treating this as production-ready.
+
+## Runtime capacity check before public launch
+
+The current password implementation uses PBKDF2-HMAC-SHA-256 with 310,000 iterations. Cloudflare's Free Workers plan currently documents a 10 ms CPU limit per invocation; authentication workloads can exceed that limit depending on runtime and implementation. Benchmark registration and login on the actual Worker plan before enabling public sign-up. If the hash exceeds the available CPU budget, use a managed authentication provider or a Workers plan with a suitable CPU limit. Do not lower password-hash work factors merely to fit an unmeasured free-tier limit. See [Cloudflare Workers limits](https://developers.cloudflare.com/workers/platform/limits/).
