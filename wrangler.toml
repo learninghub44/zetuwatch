@@ -1,0 +1,17 @@
+name = "zetuwatch-api"
+main = "apps/api/src/index.ts"
+compatibility_date = "2026-11-01"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+APP_ENV = "development"
+PUBLIC_APP_URL = "http://localhost:8787"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "zetuwatch"
+database_id = "REPLACE_WITH_CLOUDFLARE_D1_DATABASE_ID"
+migrations_dir = "database/migrations"
+
+[triggers]
+crons = ["*/5 * * * *"]
