@@ -46,12 +46,14 @@ async function verifyPassword(password: string, stored: string): Promise<boolean
 }
 async function sendEmail(env: Env, to: string, subject: string, html: string, key: string): Promise<boolean> {
   if (!env.RESEND_API_KEY || !env.EMAIL_FROM) return false;
-  const response = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: { authorization: `Bearer ${env.RESEND_API_KEY}`, "content-type": "application/json", "Idempotency-Key": key, "User-Agent": "ZetuWatch/0.1" },
-    body: JSON.stringify({ from: env.EMAIL_FROM, to: [to], subject, html })
-  });
-  return response.ok;
+  try {
+    const response = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { authorization: `Bearer ${env.RESEND_API_KEY}`, "content-type": "application/json", "Idempotency-Key": key, "User-Agent": "ZetuWatch/0.1" },
+      body: JSON.stringify({ from: env.EMAIL_FROM, to: [to], subject, html })
+    });
+    return response.ok;
+  } catch { return false; }
 }
 function cookie(name: string, value: string, maxAge: number, secure: boolean): string {
   return `${name}=${value}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${secure ? "; Secure" : ""}`;
@@ -123,8 +125,18 @@ export default {
       if (!emailPattern.test(email) || password.length < 12 || password.length > 128 || !name) {
         return json({ error: "INVALID_INPUT", message: "Provide a valid email, name and password of 12–128 characters." }, 400);
       }
-      const existing = await env.DB.prepare("SELECT id FROM users WHERE email = ?").bind(email).first<{ id: string }>();
-      if (existing) return json({ error: "REGISTRATION_UNAVAILABLE", message: "If this address can be registered, a verification message will be sent." }, 202);
+      const existing = await env.DB.prepare("SELECT id, display_name, email_verified_at FROM users WHERE email = ?")
+        .bind(email).first<{ id: string; display_name: string | null; email_verified_at: string | null }>();
+      if (existing) {
+        if (!existing.email_verified_at) {
+          const token = randomToken();
+          await env.DB.prepare("INSERT INTO auth_tokens (id, user_id, token_hash, purpose, expires_at) VALUES (?, ?, ?, 'verify_email', ?)")
+            .bind(id(), existing.id, await sha256(token), isoAfter(86400)).run();
+          const link = `${env.PUBLIC_APP_URL.replace(/\/$/, "")}/auth.html?token=${encodeURIComponent(token)}`;
+          await sendEmail(env, email, "Verify your ZetuWatch email", `<p>Hi ${htmlEscape(existing.display_name || "there")},</p><p><a href="${link}">Verify your email address</a></p><p>This link expires in 24 hours.</p>`, `verify-resend-${existing.id}-${await sha256(token)}`);
+        }
+        return json({ message: "If this address can be registered, a verification email will be sent. Check your inbox." }, 202);
+      }
       const userId = id(), orgId = id(), token = randomToken(), tokenHash = await sha256(token);
       const passwordHash = await hashPassword(password);
       const orgSlug = `${slugify(workspace)}-${crypto.randomUUID().slice(0, 6)}`;
@@ -141,8 +153,7 @@ export default {
       }
       const verifyUrl = `${env.PUBLIC_APP_URL.replace(/\/$/, "")}/auth.html?token=${encodeURIComponent(token)}`;
       const sent = await sendEmail(env, email, "Verify your ZetuWatch email", `<p>Hi ${htmlEscape(name)},</p><p>Confirm your email address to activate your ZetuWatch account.</p><p><a href="${verifyUrl}">Verify email address</a></p><p>This link expires in 24 hours. If you did not create this account, you can ignore this email.</p>`, `verify-${userId}`);
-      if (!sent) return json({ error: "VERIFICATION_EMAIL_FAILED", message: "Your account was created but the verification email could not be sent. Contact support to continue." }, 503);
-      return json({ message: "Account created. Check your email to verify your address." }, 201);
+      return json({ message: "If this address can be registered, a verification email will be sent. Check your inbox." }, 202);
     }
 
     if (request.method === "POST" && url.pathname === "/auth/verify") {
