@@ -1,6 +1,6 @@
-# ADR 0001: Authentication foundation
+# ADR 0001: Authentication library evaluation
 
-- Status: Accepted for implementation
+- Status: Deferred; not implemented
 - Date: 2026-11-06
 
 ## Context
@@ -9,45 +9,40 @@ ZetuWatch needs email/password registration, email verification, password recove
 
 Authentication must not be improvised with custom password hashing, homemade session tokens or ad hoc verification links.
 
-## Decision
+## Evaluated option: Better Auth
 
-Use Better Auth with its built-in Cloudflare D1 support as the first authentication foundation.
+Better Auth is MIT-licensed, framework-agnostic, supports email/password and verification flows, and documents first-class D1 support. The stable 1.7.18 release is available; the 1.7 line received a security release in November 2026 addressing multiple advisories. D1 uses batch operations and does not provide interactive transactions, so multi-record workflows need explicit atomicity tests.
 
-- Use the stable 1.7 release line, pinned to 1.7.18 or a newer reviewed patch in that line.
-- Do not use the 1.8 beta line for production.
-- Enable email/password sign-up and require email verification before creating an authenticated session.
-- Configure password reset and verification email callbacks through a server-side email adapter.
-- Keep Better Auth's generated schema in its own migration, separate from application-owned tables.
-- Use secure, HttpOnly, SameSite cookies; configure trusted origins and the production base URL explicitly.
-- Keep the Better Auth secret and email provider credentials in Worker secrets, never in source control.
-- Implement ZetuWatch organization membership and roles with explicit server-side authorization checks. Authentication alone does not grant access to a tenant.
-- Avoid adding social login until a provider is selected and its OAuth credentials are available.
+Official references:
+- https://better-auth.com/docs/installation
+- https://better-auth.com/docs/authentication/email-password
+- https://better-auth.com/blog/security-release-2026-11-03
 
-## Rationale
+## Current repository implementation
 
-Better Auth is MIT-licensed, framework-agnostic, supports email/password and verification flows, and documents first-class D1 support. Its D1 adapter uses D1 batch operations; D1 does not provide interactive transactions, so workflows requiring cross-record atomicity must be designed around supported batch semantics and tested.
+The current Worker API contains a first-party interim authentication implementation:
+- PBKDF2-HMAC-SHA-256 password hashes with per-user random salts;
+- one-time email verification and password-reset tokens stored as SHA-256 hashes;
+- opaque random session tokens stored as hashes and delivered in HttpOnly cookies;
+- D1-backed per-IP rate limiting;
+- Resend REST API integration for verification and password-reset email.
 
-A security release published in November 2026 fixed multiple advisories in the 1.7 line. Pin a patched stable release and review subsequent advisories before each deployment.
+This implementation is not Better Auth. It has not passed complete security review, concurrency/abuse testing or browser end-to-end testing. It must not be described as production-ready.
 
-## Email delivery
+## Decision and next step
 
-Use a small provider adapter that calls the Resend HTTP API from the Worker. This avoids SMTP socket complexity and keeps the provider replaceable. Do not send verification/reset messages until a sender domain and API key have been configured. Do not log tokens or full verification URLs.
+Do not add Better Auth dependencies or claim Better Auth is integrated until a migration plan is implemented and tested. Before public launch, compare the interim implementation against Better Auth's maintained auth/session flows and either:
 
-Required secrets/configuration before live email verification:
-- Better Auth secret (at least 32 random bytes, generated securely)
-- Resend API key
-- Verified sender address/domain
-- Canonical application origin and allowed trusted origins
+1. migrate to a patched stable Better Auth release with a separately versioned schema and tested D1 batch semantics; or
+2. retain the first-party implementation only after independent security review, password/session/token tests, CSRF/origin tests, rate-limit abuse tests and recovery-flow integration tests pass.
 
-## Consequences
+Whichever option is selected must enforce email verification before authenticated access, secure cookie settings, trusted origins, token expiry/one-use semantics, session revocation, email enumeration resistance and auditability.
 
-Positive:
-- No paid auth vendor is required for the initial deployment.
-- Password storage, session lifecycle, verification and reset flows use a maintained auth library.
-- D1 remains the initial persistence layer.
+## Required live configuration
 
-Constraints:
-- The generated auth schema and current application schema need an explicit migration plan.
-- D1 batch behavior and auth callbacks require integration tests in Workers-compatible runtime.
-- Live email verification cannot be tested until Resend credentials and a verified sender are supplied.
-- Tenant isolation still requires separate organization-scoped data access helpers and tests.
+- At least 32 random bytes for the auth signing secret if required by the selected implementation.
+- Resend API key with sending-only permission.
+- Verified sender address/domain.
+- Canonical application origin and explicit trusted origins.
+
+Keep all credentials in Worker secrets, never in source control. Do not log passwords, tokens, full verification URLs or sensitive message content.
