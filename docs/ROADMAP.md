@@ -74,6 +74,7 @@ Do not mark a phase complete because files or mock screens exist. Verify behavio
 - Added workspace creation on registration and session-protected workspace lookup.
 - Added tenant-scoped monitor configuration endpoints and a responsive monitor setup screen.
 - Added migration smoke-test script and wired it into CI.
+- Added unit tests for URL policy and fail-closed probe behavior.
 - Added API/auth setup documentation.
 
 **Not yet verified:** GitHub Actions result, TypeScript compilation, browser end-to-end flows, actual Resend delivery, Cloudflare D1 migration on the target runtime, and production cookie/CORS behavior.
