@@ -9,8 +9,9 @@ The product is built in vertical slices. A slice is complete only when UI, API, 
 - [x] Conservative HTTP probe foundation
 - [x] Product scope and user journey specification
 - [x] CI typecheck workflow added (must pass in GitHub Actions)
-- [ ] Unit and integration test suite
-- [ ] Dependency/version verification and lockfile
+- [ ] Unit and integration test suite (initial URL-policy and HTTP-probe unit tests added; CI result still needs verification)
+- [x] Direct development-tool versions checked against current package releases and pinned
+- [ ] Lockfile generation and clean-install verification
 
 ## Phase 1 — secure account foundation
 - [ ] Select and implement production authentication/session provider
