@@ -35,8 +35,9 @@ def main() -> None:
     db.execute("INSERT INTO users (id, email, password_hash) VALUES ('u1', 'test@example.com', 'hash')")
     db.execute("INSERT INTO organizations (id, name, slug) VALUES ('o1', 'Test', 'test')")
     db.execute("INSERT INTO organization_members (organization_id, user_id, role) VALUES ('o1', 'u1', 'owner')")
+    db.execute("INSERT INTO users (id, email) VALUES ('u2', 'second@example.com')")
     try:
-        db.execute("INSERT INTO organization_members (organization_id, user_id, role) VALUES ('o1', 'u1', 'root')")
+        db.execute("INSERT INTO organization_members (organization_id, user_id, role) VALUES ('o1', 'u2', 'root')")
     except sqlite3.IntegrityError:
         pass
     else:
