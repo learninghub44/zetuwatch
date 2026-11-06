@@ -14,15 +14,15 @@ The product is built in vertical slices. A slice is complete only when UI, API, 
 - [ ] Lockfile generation and clean-install verification
 
 ## Phase 1 — secure account foundation
-- [ ] Select and implement production authentication/session provider
-- [ ] Email verification, password reset and invitation acceptance
-- [ ] Organization creation, membership and role-based authorization
-- [ ] Tenant-safe schema constraints and migration tests
-- [ ] Audit events, rate limits and abuse reporting
+- [ ] Authentication foundation: registration, email verification, password login/reset and opaque sessions are implemented; security and end-to-end tests remain
+- [ ] Invitation acceptance and full team/member management
+- [ ] Organization creation and basic membership checks exist; full role-management workflows and tenant-isolation tests remain
+- [ ] Tenant-safe schema constraints and migration tests (migration smoke-test added; CI result pending)
+- [ ] Audit events and basic per-IP auth/monitor rate limits exist; broader abuse controls remain
 
 ## Phase 2 — first working monitoring loop
-- [ ] Monitor CRUD API and responsive UI
-- [ ] Safe URL/egress policy including DNS/IP and redirect-hop checks
+- [ ] Basic tenant-scoped monitor create/list/read/update/delete API and responsive setup screen implemented; automated authorization tests remain
+- [ ] Safe URL/egress policy including DNS/IP resolution/pinning, redirect-hop checks and DNS-rebinding defense
 - [ ] Bounded scheduled runner and atomic due-work claiming
 - [ ] HTTP/HTTPS checks, history and latency
 - [ ] Incident confirmation, deduplication and recovery
@@ -31,7 +31,7 @@ The product is built in vertical slices. A slice is complete only when UI, API, 
 ## Phase 3 — complete customer experience
 - [ ] Public marketing website, docs and pricing
 - [ ] Multi-step sign-up and resumable onboarding
-- [ ] Overview, monitor list/detail and check history
+- [ ] Workspace overview and monitor list/create/delete screen implemented; full monitor detail, check history and real measurements remain
 - [ ] Incident timeline and customer-facing updates
 - [ ] Status-page builder and public status pages
 - [ ] Team invitations, roles and organization settings
@@ -65,3 +65,17 @@ The product is built in vertical slices. A slice is complete only when UI, API, 
 - [ ] Production deployment and smoke tests completed
 
 Do not mark a phase complete because files or mock screens exist. Verify behavior.
+
+
+## Verified progress snapshot (2026-11-06)
+
+- Added first-party email/password authentication endpoints and responsive account screens.
+- Added email verification, resend-verification and password-reset token flows.
+- Added workspace creation on registration and session-protected workspace lookup.
+- Added tenant-scoped monitor configuration endpoints and a responsive monitor setup screen.
+- Added migration smoke-test script and wired it into CI.
+- Added API/auth setup documentation.
+
+**Not yet verified:** GitHub Actions result, TypeScript compilation, browser end-to-end flows, actual Resend delivery, Cloudflare D1 migration on the target runtime, and production cookie/CORS behavior.
+
+**Deliberately disabled:** scheduled network probes. Current URL validation does not resolve and pin DNS addresses and is not sufficient protection against SSRF or DNS rebinding. No monitor should be represented as actively checked until the secure egress and scheduler phases are complete.
