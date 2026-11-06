@@ -1,4 +1,5 @@
 import { validateMonitorUrl } from "../../../packages/monitoring-core/src/url-safety";
+import { hashPassword, verifyPassword } from "../../../packages/auth-core/src/password";
 
 interface Env {
   DB: D1Database;
@@ -22,28 +23,6 @@ const cleanText = (value: unknown, max: number) => typeof value === "string" ? v
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const slugify = (value: string) => value.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 48) || "workspace";
 
-async function hashPassword(password: string): Promise<string> {
-  const salt = crypto.getRandomValues(new Uint8Array(16));
-  const material = await crypto.subtle.importKey("raw", encoder.encode(password), "PBKDF2", false, ["deriveBits"]);
-  const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt, iterations: 310000 }, material, 256);
-  return `pbkdf2_sha256$310000$${b64url(salt)}$${b64url(new Uint8Array(bits))}`;
-}
-async function verifyPassword(password: string, stored: string): Promise<boolean> {
-  const parts = stored.split("$");
-  if (parts.length !== 4 || parts[0] !== "pbkdf2_sha256" || parts[1] !== "310000") return false;
-  try {
-    const saltText = parts[2].replace(/-/g, "+").replace(/_/g, "/");
-    const expectedText = parts[3].replace(/-/g, "+").replace(/_/g, "/");
-    const salt = Uint8Array.from(atob(saltText + "=".repeat((4 - saltText.length % 4) % 4)), c => c.charCodeAt(0));
-    const expected = Uint8Array.from(atob(expectedText + "=".repeat((4 - expectedText.length % 4) % 4)), c => c.charCodeAt(0));
-    const material = await crypto.subtle.importKey("raw", encoder.encode(password), "PBKDF2", false, ["deriveBits"]);
-    const actual = new Uint8Array(await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt, iterations: 310000 }, material, 256));
-    if (actual.length !== expected.length) return false;
-    let diff = 0;
-    for (let i = 0; i < actual.length; i++) diff |= actual[i] ^ expected[i];
-    return diff === 0;
-  } catch { return false; }
-}
 async function sendEmail(env: Env, to: string, subject: string, html: string, key: string): Promise<boolean> {
   if (!env.RESEND_API_KEY || !env.EMAIL_FROM) return false;
   try {
