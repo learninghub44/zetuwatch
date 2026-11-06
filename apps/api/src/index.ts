@@ -210,12 +210,15 @@ export default {
       const token = cleanText(body?.token, 128);
       const password = typeof body?.password === "string" ? body.password : "";
       if (token.length < 32 || password.length < 12 || password.length > 128) return json({ error: "INVALID_INPUT" }, 400);
+      // Derive the new hash before consuming the one-time token. If the
+      // crypto operation fails or exceeds the runtime budget, the user can
+      // still use the same reset link instead of being locked out.
+      const passwordHash = await hashPassword(password);
       const tokenHash = await sha256(token);
       const row = await env.DB.prepare(`UPDATE auth_tokens SET consumed_at = CURRENT_TIMESTAMP
         WHERE token_hash = ? AND purpose = 'password_reset' AND consumed_at IS NULL AND expires_at > ?
         RETURNING user_id`).bind(tokenHash, new Date().toISOString()).first<{ user_id: string }>();
       if (!row) return json({ error: "INVALID_OR_EXPIRED_TOKEN" }, 400);
-      const passwordHash = await hashPassword(password);
       await env.DB.batch([
         env.DB.prepare("UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(passwordHash, row.user_id),
         env.DB.prepare("DELETE FROM auth_sessions WHERE user_id = ?").bind(row.user_id)
@@ -228,6 +231,7 @@ export default {
       const body = await request.json().catch(() => null) as Record<string, unknown> | null;
       const email = cleanText(body?.email, 254).toLowerCase();
       const password = typeof body?.password === "string" ? body.password : "";
+      if (password.length === 0 || password.length > 128) return json({ error: "INVALID_CREDENTIALS" }, 401);
       const row = await env.DB.prepare("SELECT id, email, display_name, email_verified_at, password_hash FROM users WHERE email = ?")
         .bind(email).first<UserRow & { password_hash: string | null }>();
       const valid = row?.password_hash ? await verifyPassword(password, row.password_hash) : false;
