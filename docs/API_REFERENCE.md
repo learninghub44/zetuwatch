@@ -6,7 +6,7 @@ Base URL is the deployed Worker origin. JSON request bodies use `Content-Type: a
 
 See [AUTH_SETUP.md](AUTH_SETUP.md) for account security and provider setup.
 
-- `POST /auth/register` — `{ name, email, password, workspaceName? }`. Password must be 12–128 characters. Returns a generic 202 response to avoid exposing account existence.
+- `POST /auth/register` — `{ name, email, password, workspaceName? }`. Password must be 12–128 characters. A new account returns 201; an existing address receives a generic 202 response to reduce account enumeration.
 - `POST /auth/verify` — `{ token }`. Consumes a one-use email verification token.
 - `POST /auth/resend-verification` — `{ email }`. Generic response regardless of account state.
 - `POST /auth/login` — `{ email, password }`. Sets an HttpOnly session cookie.
