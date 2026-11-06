@@ -149,14 +149,64 @@ export default {
       const token = cleanText(body?.token, 128);
       if (token.length < 32) return json({ error: "INVALID_OR_EXPIRED_TOKEN" }, 400);
       const tokenHash = await sha256(token);
-      const row = await env.DB.prepare(`SELECT id, user_id FROM auth_tokens WHERE token_hash = ? AND purpose = 'verify_email'
-        AND consumed_at IS NULL AND expires_at > ?`).bind(tokenHash, new Date().toISOString()).first<{ id: string; user_id: string }>();
+      const row = await env.DB.prepare(`UPDATE auth_tokens SET consumed_at = CURRENT_TIMESTAMP
+        WHERE token_hash = ? AND purpose = 'verify_email' AND consumed_at IS NULL AND expires_at > ?
+        RETURNING user_id`).bind(tokenHash, new Date().toISOString()).first<{ user_id: string }>();
       if (!row) return json({ error: "INVALID_OR_EXPIRED_TOKEN" }, 400);
-      await env.DB.batch([
-        env.DB.prepare("UPDATE users SET email_verified_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(row.user_id),
-        env.DB.prepare("UPDATE auth_tokens SET consumed_at = CURRENT_TIMESTAMP WHERE id = ? AND consumed_at IS NULL").bind(row.id)
-      ]);
+      await env.DB.prepare("UPDATE users SET email_verified_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+        .bind(row.user_id).run();
       return json({ message: "Email verified. You can now sign in." });
+    }
+
+    if (request.method === "POST" && url.pathname === "/auth/resend-verification") {
+      if (!(await rateLimit(request, env, "resend-verification", 5))) return json({ error: "RATE_LIMITED" }, 429);
+      const body = await request.json().catch(() => null) as Record<string, unknown> | null;
+      const email = cleanText(body?.email, 254).toLowerCase();
+      const user = await env.DB.prepare("SELECT id, display_name, email_verified_at FROM users WHERE email = ?")
+        .bind(email).first<{ id: string; display_name: string | null; email_verified_at: string | null }>();
+      if (user && !user.email_verified_at && env.RESEND_API_KEY && env.EMAIL_FROM) {
+        const token = randomToken();
+        await env.DB.prepare("INSERT INTO auth_tokens (id, user_id, token_hash, purpose, expires_at) VALUES (?, ?, ?, 'verify_email', ?)")
+          .bind(id(), user.id, await sha256(token), isoAfter(86400)).run();
+        const link = `${env.PUBLIC_APP_URL.replace(/\/$/, "")}/auth.html?token=${encodeURIComponent(token)}`;
+        await sendEmail(env, email, "Verify your ZetuWatch email", `<p>Hi ${htmlEscape(user.display_name || "there")},</p><p><a href="${link}">Verify your email address</a></p><p>This link expires in 24 hours.</p>`, `verify-resend-${user.id}-${await sha256(token)}`);
+      }
+      return json({ message: "If this account needs verification, a new link will be sent." }, 202);
+    }
+
+    if (request.method === "POST" && url.pathname === "/auth/password-reset/request") {
+      if (!(await rateLimit(request, env, "password-reset", 5))) return json({ error: "RATE_LIMITED" }, 429);
+      const body = await request.json().catch(() => null) as Record<string, unknown> | null;
+      const email = cleanText(body?.email, 254).toLowerCase();
+      const user = await env.DB.prepare("SELECT id, email_verified_at FROM users WHERE email = ?")
+        .bind(email).first<{ id: string; email_verified_at: string | null }>();
+      if (user?.email_verified_at && env.RESEND_API_KEY && env.EMAIL_FROM) {
+        const token = randomToken();
+        await env.DB.prepare("INSERT INTO auth_tokens (id, user_id, token_hash, purpose, expires_at) VALUES (?, ?, ?, 'password_reset', ?)")
+          .bind(id(), user.id, await sha256(token), isoAfter(3600)).run();
+        const link = `${env.PUBLIC_APP_URL.replace(/\/$/, "")}/reset-password.html?token=${encodeURIComponent(token)}`;
+        await sendEmail(env, email, "Reset your ZetuWatch password", `<p>We received a request to reset your password.</p><p><a href="${link}">Choose a new password</a></p><p>This link expires in one hour. If you did not request this, ignore this email.</p>`, `password-reset-${user.id}-${await sha256(token)}`);
+      }
+      return json({ message: "If a verified account exists for that address, password reset instructions will be sent." }, 202);
+    }
+
+    if (request.method === "POST" && url.pathname === "/auth/password-reset/confirm") {
+      if (!(await rateLimit(request, env, "password-reset-confirm", 8))) return json({ error: "RATE_LIMITED" }, 429);
+      const body = await request.json().catch(() => null) as Record<string, unknown> | null;
+      const token = cleanText(body?.token, 128);
+      const password = typeof body?.password === "string" ? body.password : "";
+      if (token.length < 32 || password.length < 12 || password.length > 128) return json({ error: "INVALID_INPUT" }, 400);
+      const tokenHash = await sha256(token);
+      const row = await env.DB.prepare(`UPDATE auth_tokens SET consumed_at = CURRENT_TIMESTAMP
+        WHERE token_hash = ? AND purpose = 'password_reset' AND consumed_at IS NULL AND expires_at > ?
+        RETURNING user_id`).bind(tokenHash, new Date().toISOString()).first<{ user_id: string }>();
+      if (!row) return json({ error: "INVALID_OR_EXPIRED_TOKEN" }, 400);
+      const passwordHash = await hashPassword(password);
+      await env.DB.batch([
+        env.DB.prepare("UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(passwordHash, row.user_id),
+        env.DB.prepare("DELETE FROM auth_sessions WHERE user_id = ?").bind(row.user_id)
+      ]);
+      return json({ message: "Password updated. Sign in with your new password." });
     }
 
     if (request.method === "POST" && url.pathname === "/auth/login") {
