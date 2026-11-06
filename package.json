@@ -1,0 +1,20 @@
+{
+  "name": "zetuwatch",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Open-source website, API and cron monitoring platform",
+  "license": "Apache-2.0",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "dev:api": "wrangler dev --config wrangler.toml",
+    "deploy": "wrangler deploy --config wrangler.toml",
+    "db:local": "wrangler d1 migrations apply zetuwatch --local",
+    "db:remote": "wrangler d1 migrations apply zetuwatch --remote",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20261101.0",
+    "typescript": "^5.9.3",
+    "wrangler": "^4.45.0"
+  }
+}
