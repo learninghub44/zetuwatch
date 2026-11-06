@@ -9,7 +9,7 @@ const BLOCKED_HOSTS = new Set(["localhost", "localhost.localdomain", "metadata.g
 
 function isPrivateIpv4(host: string): boolean {
   const parts = host.split(".");
-  if (parts.length !== 4 || parts.some((part) => !/^\\d{1,3}$/.test(part))) return false;
+  if (parts.length !== 4 || parts.some((part) => !/^\d{1,3}$/.test(part))) return false;
   const nums = parts.map(Number);
   if (nums.some((n) => n < 0 || n > 255)) return true;
   const [a, b] = nums;
@@ -29,7 +29,7 @@ export function validateMonitorUrl(input: string): URL {
   if (url.protocol !== "https:" && url.protocol !== "http:") throw new Error("UNSUPPORTED_PROTOCOL");
   if (url.username || url.password) throw new Error("URL_CREDENTIALS_NOT_ALLOWED");
   if (url.port && !["80", "443"].includes(url.port)) throw new Error("PORT_NOT_ALLOWED");
-  const host = url.hostname.toLowerCase().replace(/^\\[|\\]$/g, "");
+  const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
   if (!host || BLOCKED_HOSTS.has(host) || host.endsWith(".localhost") || host.endsWith(".local")) {
     throw new Error("HOST_NOT_ALLOWED");
   }
