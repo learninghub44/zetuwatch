@@ -4,7 +4,7 @@
 
 ZetuWatch is an open-source website and API monitoring SaaS under active development. It is designed around Cloudflare Workers and D1 to keep the initial infrastructure footprint small while preserving a path to dedicated probe infrastructure as usage grows.
 
-> **Project status: early development. Not production-ready.** Authentication groundwork and the public marketing/authentication screens exist, but monitor scheduling, secure egress, incidents, customer dashboard operations, billing and deployment verification remain incomplete. No uptime SLA is offered.
+> **Project status: early development. Not production-ready.** Authentication groundwork and the public marketing/authentication screens exist, and basic workspace/monitor configuration screens exist. Scheduled checks, hardened egress, incident operations, status pages, billing and deployment verification remain incomplete. No uptime SLA is offered.
 
 ## Product direction
 
@@ -24,10 +24,10 @@ See [Product specification](docs/PRODUCT_SPEC.md), [UX flows](docs/UX_FLOWS.md) 
 - Email/password registration, email verification, login, logout and password-reset API routes
 - Opaque hashed session tokens in HttpOnly cookies
 - Basic D1-backed per-IP auth rate limits and exact-origin CORS
-- Responsive marketing page and sign-in/registration/password-reset screens
+- Responsive marketing page, sign-in/registration/password-reset screens and authenticated workspace monitor setup
 - GitHub Actions typecheck workflow
 
-The authentication foundation requires a configured Resend sender and app/API origins. See [Authentication setup](docs/AUTH_SETUP.md). It has not yet passed end-to-end browser and production integration testing.
+The authentication and monitor-configuration foundations require a configured Resend sender, D1 migrations and matching app/API origins. See [Authentication setup](docs/AUTH_SETUP.md) and [API reference](docs/API_REFERENCE.md). They have not yet passed end-to-end browser and production integration testing.
 
 ## Architecture
 
