@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  canAssignRole, canDeleteMonitors, canInviteRole, canReadOrganization,
+  canAssignRole, canDeleteMonitors, canInviteRole, canReadOrganization, canRemoveOwner,
   canRemoveMember, canWriteMonitors, isOrganizationRole
 } from "../src/authorization";
 
@@ -52,5 +52,18 @@ describe("team administration policy", () => {
   it("prevents owners from deleting another owner through member removal", () => {
     expect(canRemoveMember("owner", "admin", false)).toBe(true);
     expect(canRemoveMember("owner", "owner", false)).toBe(false);
+  });
+});
+
+describe("workspace owner continuity", () => {
+  it("requires another owner before an owner can be removed or demoted", () => {
+    expect(canRemoveOwner(0)).toBe(false);
+    expect(canRemoveOwner(1)).toBe(false);
+    expect(canRemoveOwner(2)).toBe(true);
+    expect(canRemoveOwner(3)).toBe(true);
+  });
+  it("rejects invalid owner counts", () => {
+    expect(canRemoveOwner(-1)).toBe(false);
+    expect(canRemoveOwner(1.5)).toBe(false);
   });
 });
