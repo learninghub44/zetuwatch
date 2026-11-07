@@ -40,7 +40,7 @@ All team endpoints require a verified signed-in session. The caller must already
 - `POST /v1/organizations/<organization-id>/invitations` — invite with body `{ email, role? }`. Only owner/admin; admins can invite member/viewer. Email delivery must succeed or the pending invitation is deleted.
 - `POST /v1/invitations/accept` — accept with body `{ token }`. The signed-in verified account email must exactly match the invited email.
 
-Role changes, removals, invitation creation and acceptance write audit events. These endpoints are implemented but API integration tests and the full team-management browser UI are still outstanding. Do not consider team management launch-complete until those tests and UI states pass.
+Role changes, removals, invitation creation and acceptance write audit events. These endpoints and an initial responsive workspace team screen are implemented. API integration tests, invitation acceptance browser testing, and the complete team-management UI states are still outstanding. Do not consider team management launch-complete until those tests pass.
 
 ## Monitor execution status
 
