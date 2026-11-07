@@ -242,7 +242,7 @@ export default {
 
 
     // Team management: all routes are scoped through a verified organization membership.
-    const teamMatch = url.pathname.match(/^\\/v1\\/organizations\\/([0-9a-f-]{36})\\/(members|invitations)(?:\\/([0-9a-f-]{36}))?$/i);
+    const teamMatch = url.pathname.match(/^\/v1\/organizations\/([0-9a-f-]{36})\/(members|invitations)(?:\/([0-9a-f-]{36}))?$/i);
     if (teamMatch) {
       const user = await currentUser(request, env);
       if (!user) return json({ error: "UNAUTHENTICATED" }, 401);
@@ -294,7 +294,7 @@ export default {
           env.DB.prepare("INSERT INTO audit_logs (id, organization_id, actor_user_id, action, resource_type, resource_id) VALUES (?, ?, ?, 'team.invitation_created', 'invitation', ?)")
             .bind(id(), organizationId, user.id, invitationId)
         ]);
-        const acceptUrl = env.PUBLIC_APP_URL.replace(/\\/$/, "") + "/auth.html?invite=" + encodeURIComponent(token);
+        const acceptUrl = env.PUBLIC_APP_URL.replace(/\/$/, "") + "/auth.html?invite=" + encodeURIComponent(token);
         const sent = await sendEmail(env, email, "Invitation to " + (organization?.name || "a ZetuWatch workspace"),
           "<p>You have been invited to join <strong>" + htmlEscape(organization?.name || "a ZetuWatch workspace") + "</strong> as " + htmlEscape(role) + ".</p><p><a href=\"" + acceptUrl + "\">Accept invitation</a></p><p>This invitation expires in seven days. Sign in or create an account using this email address before accepting.</p>",
           "team-invite-" + invitationId);
