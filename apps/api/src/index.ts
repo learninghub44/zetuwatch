@@ -1,6 +1,6 @@
 import { validateMonitorUrl } from "../../../packages/monitoring-core/src/url-safety";
 import { hashPassword, verifyPassword } from "../../../packages/auth-core/src/password";
-import { canDeleteMonitors, canWriteMonitors, canAssignRole, canInviteRole, canRemoveMember, isOrganizationRole, canRemoveOwner } from "../../../packages/auth-core/src/authorization";
+import { canDeleteMonitors, canWriteMonitors, canAssignRole, canInviteRole, canRemoveMember, isOrganizationRole } from "../../../packages/auth-core/src/authorization";
 
 interface Env {
   DB: D1Database;
