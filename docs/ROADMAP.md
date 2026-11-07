@@ -15,7 +15,7 @@ The product is built in vertical slices. A slice is complete only when UI, API, 
 
 ## Phase 1 — secure account foundation
 - [ ] Authentication foundation: registration, email verification, password login/reset and opaque sessions are implemented; security and end-to-end tests remain
-- [ ] Invitation acceptance and full team/member management (member listing, role policy, invitations, acceptance, role changes and removal API implemented; API integration tests and full browser UI remain)
+- [ ] Invitation acceptance and full team/member management (member listing, role policy, invitations, acceptance, role changes, removal API and initial responsive team screen implemented; API integration and browser acceptance tests remain)
 - [ ] Organization creation and basic membership checks exist; team-management API now enforces owner/admin/member/viewer policy and last-owner protection; tenant-isolation integration tests remain
 - [ ] Tenant-safe schema constraints and migration tests (two current migrations pass the CI SQLite smoke-test; tenant isolation and production D1 behavior remain unverified)
 - [ ] Audit events and basic per-IP auth/monitor rate limits exist; broader abuse controls remain
@@ -34,7 +34,7 @@ The product is built in vertical slices. A slice is complete only when UI, API, 
 - [ ] Workspace overview and monitor list/create/delete screen implemented; full monitor detail, check history and real measurements remain
 - [ ] Incident timeline and customer-facing updates
 - [ ] Status-page builder and public status pages
-- [ ] Team invitations, roles and organization settings
+- [ ] Team invitations, roles and organization settings (initial member/invitation screen and API implemented; complete settings and integration QA remain)
 - [ ] Analytics, exports and maintenance windows
 
 ## Phase 4 — revenue and integrations
@@ -99,3 +99,6 @@ Do not mark a phase complete because files or mock screens exist. Verify behavio
 - Added organization-scoped API endpoints to list members, create/list invitations, accept invitations, change roles and remove members. Membership is checked on every organization route; invitation acceptance requires a verified session whose email matches the invitation.
 - Invitation tokens are random, stored as SHA-256 hashes, expire after seven days and are delivered through the configured Resend integration. Failed email delivery removes the pending invitation. Sensitive team actions emit audit events.
 - Added role-policy unit coverage. API integration tests, concurrent invitation acceptance tests, UI team-management screens and real Resend delivery verification are still required. The phase remains incomplete.
+
+
+- Follow-up verification on 2026-11-07: added a workspace team screen with member listing, role controls, invitation form and pending-invitation view. The screen uses the authenticated workspace role to limit controls; the API remains authoritative. Last-owner continuity is now a separately tested authorization policy. CI is running against the latest changes; no pass is recorded until GitHub Actions reports success.
