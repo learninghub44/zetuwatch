@@ -39,3 +39,8 @@ export function canRemoveMember(actorRole: string, targetRole: string, isSelf: b
   if (actorRole === "admin") return targetRole === "member" || targetRole === "viewer";
   return false;
 }
+
+/** A workspace must retain at least one owner. */
+export function canRemoveOwner(ownerCount: number): boolean {
+  return Number.isSafeInteger(ownerCount) && ownerCount > 1;
+}
