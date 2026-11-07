@@ -1,6 +1,6 @@
 import { validateMonitorUrl } from "../../../packages/monitoring-core/src/url-safety";
 import { hashPassword, verifyPassword } from "../../../packages/auth-core/src/password";
-import { canDeleteMonitors, canWriteMonitors } from "../../../packages/auth-core/src/authorization";
+import { canDeleteMonitors, canWriteMonitors, canAssignRole, canInviteRole, canRemoveMember, isOrganizationRole } from "../../../packages/auth-core/src/authorization";
 
 interface Env {
   DB: D1Database;
@@ -238,6 +238,136 @@ export default {
         FROM organization_members m JOIN organizations o ON o.id = m.organization_id
         WHERE m.user_id = ? ORDER BY o.created_at`).bind(user.id).all();
       return json({ user: { id: user.id, email: user.email, name: user.display_name }, organizations: organizations.results });
+    }
+
+
+    // Team management: all routes are scoped through a verified organization membership.
+    const teamMatch = url.pathname.match(/^\\/v1\\/organizations\\/([0-9a-f-]{36})\\/(members|invitations)(?:\\/([0-9a-f-]{36}))?$/i);
+    if (teamMatch) {
+      const user = await currentUser(request, env);
+      if (!user) return json({ error: "UNAUTHENTICATED" }, 401);
+      const organizationId = teamMatch[1];
+      const resource = teamMatch[2];
+      const targetId = teamMatch[3];
+      const actor = await env.DB.prepare("SELECT role FROM organization_members WHERE organization_id = ? AND user_id = ?")
+        .bind(organizationId, user.id).first<{ role: string }>();
+      if (!actor) return json({ error: "FORBIDDEN" }, 403);
+
+      if (resource === "members" && request.method === "GET" && !targetId) {
+        const rows = await env.DB.prepare("SELECT u.id, u.email, u.display_name, m.role, m.created_at FROM organization_members m JOIN users u ON u.id = m.user_id WHERE m.organization_id = ? ORDER BY CASE m.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 WHEN 'member' THEN 2 ELSE 3 END, m.created_at ASC")
+          .bind(organizationId).all();
+        return json({ members: rows.results });
+      }
+
+      if (resource === "invitations" && request.method === "GET" && !targetId) {
+        if (!canInviteRole(actor.role, "member")) return json({ error: "FORBIDDEN" }, 403);
+        const rows = await env.DB.prepare("SELECT id, email, role, expires_at, created_at FROM organization_invitations WHERE organization_id = ? AND accepted_at IS NULL AND expires_at > ? ORDER BY created_at DESC")
+          .bind(organizationId, new Date().toISOString()).all();
+        return json({ invitations: rows.results });
+      }
+
+      if (resource === "invitations" && request.method === "POST" && !targetId) {
+        if (!canInviteRole(actor.role, "member")) return json({ error: "FORBIDDEN" }, 403);
+        if (!(await rateLimit(request, env, "team-invite", 20))) return json({ error: "RATE_LIMITED" }, 429);
+        if (!env.RESEND_API_KEY || !env.EMAIL_FROM) return json({ error: "EMAIL_PROVIDER_NOT_CONFIGURED" }, 503);
+        const body = await request.json().catch(() => null) as Record<string, unknown> | null;
+        const email = cleanText(body?.email, 254).toLowerCase();
+        const role = cleanText(body?.role, 16) || "member";
+        if (!emailPattern.test(email) || !isOrganizationRole(role) || !canInviteRole(actor.role, role)) {
+          return json({ error: "INVALID_INVITATION" }, 400);
+        }
+        const existing = await env.DB.prepare("SELECT 1 FROM organization_members m JOIN users u ON u.id = m.user_id WHERE m.organization_id = ? AND lower(u.email) = ?")
+          .bind(organizationId, email).first();
+        if (existing) return json({ error: "ALREADY_A_MEMBER" }, 409);
+        const pending = await env.DB.prepare("SELECT id FROM organization_invitations WHERE organization_id = ? AND lower(email) = ? AND accepted_at IS NULL AND expires_at > ?")
+          .bind(organizationId, email, new Date().toISOString()).first();
+        if (pending) return json({ error: "INVITATION_ALREADY_PENDING" }, 409);
+        const token = randomToken();
+        const invitationId = id();
+        const tokenHash = await sha256(token);
+        const expiresAt = isoAfter(7 * 86400);
+        const organization = await env.DB.prepare("SELECT name FROM organizations WHERE id = ?")
+          .bind(organizationId).first<{ name: string }>();
+        await env.DB.batch([
+          env.DB.prepare("INSERT INTO organization_invitations (id, organization_id, email, role, token_hash, invited_by, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+            .bind(invitationId, organizationId, email, role, tokenHash, user.id, expiresAt),
+          env.DB.prepare("INSERT INTO audit_logs (id, organization_id, actor_user_id, action, resource_type, resource_id) VALUES (?, ?, ?, 'team.invitation_created', 'invitation', ?)")
+            .bind(id(), organizationId, user.id, invitationId)
+        ]);
+        const acceptUrl = env.PUBLIC_APP_URL.replace(/\\/$/, "") + "/auth.html?invite=" + encodeURIComponent(token);
+        const sent = await sendEmail(env, email, "Invitation to " + (organization?.name || "a ZetuWatch workspace"),
+          "<p>You have been invited to join <strong>" + htmlEscape(organization?.name || "a ZetuWatch workspace") + "</strong> as " + htmlEscape(role) + ".</p><p><a href=\"" + acceptUrl + "\">Accept invitation</a></p><p>This invitation expires in seven days. Sign in or create an account using this email address before accepting.</p>",
+          "team-invite-" + invitationId);
+        if (!sent) {
+          await env.DB.prepare("DELETE FROM organization_invitations WHERE id = ?").bind(invitationId).run();
+          return json({ error: "INVITATION_EMAIL_FAILED" }, 502);
+        }
+        return json({ message: "Invitation sent.", invitation: { id: invitationId, email, role, expiresAt } }, 201);
+      }
+
+      if (resource === "members" && targetId && request.method === "PATCH") {
+        const body = await request.json().catch(() => null) as Record<string, unknown> | null;
+        const nextRole = cleanText(body?.role, 16);
+        if (!isOrganizationRole(nextRole) || !canAssignRole(actor.role, nextRole)) return json({ error: "FORBIDDEN" }, 403);
+        const target = await env.DB.prepare("SELECT role FROM organization_members WHERE organization_id = ? AND user_id = ?")
+          .bind(organizationId, targetId).first<{ role: string }>();
+        if (!target) return json({ error: "MEMBER_NOT_FOUND" }, 404);
+        if (target.role === "owner" && nextRole !== "owner") {
+          const owners = await env.DB.prepare("SELECT COUNT(*) AS count FROM organization_members WHERE organization_id = ? AND role = 'owner'")
+            .bind(organizationId).first<{ count: number }>();
+          if ((owners?.count ?? 0) <= 1) return json({ error: "LAST_OWNER_REQUIRED" }, 409);
+        }
+        if (targetId === user.id && nextRole !== "owner") return json({ error: "CANNOT_DEMOTE_SELF" }, 409);
+        await env.DB.batch([
+          env.DB.prepare("UPDATE organization_members SET role = ? WHERE organization_id = ? AND user_id = ?")
+            .bind(nextRole, organizationId, targetId),
+          env.DB.prepare("INSERT INTO audit_logs (id, organization_id, actor_user_id, action, resource_type, resource_id, metadata_json) VALUES (?, ?, ?, 'team.member_role_changed', 'user', ?, ?)")
+            .bind(id(), organizationId, user.id, targetId, JSON.stringify({ from: target.role, to: nextRole }))
+        ]);
+        return json({ message: "Member role updated." });
+      }
+
+      if (resource === "members" && targetId && request.method === "DELETE") {
+        const target = await env.DB.prepare("SELECT role FROM organization_members WHERE organization_id = ? AND user_id = ?")
+          .bind(organizationId, targetId).first<{ role: string }>();
+        if (!target) return json({ error: "MEMBER_NOT_FOUND" }, 404);
+        if (!canRemoveMember(actor.role, target.role, targetId === user.id)) return json({ error: "FORBIDDEN" }, 403);
+        if (target.role === "owner") {
+          const owners = await env.DB.prepare("SELECT COUNT(*) AS count FROM organization_members WHERE organization_id = ? AND role = 'owner'")
+            .bind(organizationId).first<{ count: number }>();
+          if ((owners?.count ?? 0) <= 1) return json({ error: "LAST_OWNER_REQUIRED" }, 409);
+        }
+        await env.DB.batch([
+          env.DB.prepare("DELETE FROM organization_members WHERE organization_id = ? AND user_id = ?")
+            .bind(organizationId, targetId),
+          env.DB.prepare("INSERT INTO audit_logs (id, organization_id, actor_user_id, action, resource_type, resource_id) VALUES (?, ?, ?, 'team.member_removed', 'user', ?)")
+            .bind(id(), organizationId, user.id, targetId)
+        ]);
+        return json({ message: "Member removed from workspace." });
+      }
+    }
+
+    if (request.method === "POST" && url.pathname === "/v1/invitations/accept") {
+      const user = await currentUser(request, env);
+      if (!user) return json({ error: "UNAUTHENTICATED" }, 401);
+      if (!(await rateLimit(request, env, "invitation-accept", 10))) return json({ error: "RATE_LIMITED" }, 429);
+      const body = await request.json().catch(() => null) as Record<string, unknown> | null;
+      const token = cleanText(body?.token, 128);
+      if (token.length < 32) return json({ error: "INVALID_OR_EXPIRED_INVITATION" }, 400);
+      const tokenHash = await sha256(token);
+      const invitation = await env.DB.prepare("SELECT id, organization_id, email, role FROM organization_invitations WHERE token_hash = ? AND accepted_at IS NULL AND expires_at > ?")
+        .bind(tokenHash, new Date().toISOString()).first<{ id: string; organization_id: string; email: string; role: string }>();
+      if (!invitation || invitation.email.toLowerCase() !== user.email.toLowerCase()) return json({ error: "INVALID_OR_EXPIRED_INVITATION" }, 400);
+      const results = await env.DB.batch([
+        env.DB.prepare("UPDATE organization_invitations SET accepted_at = CURRENT_TIMESTAMP WHERE id = ? AND accepted_at IS NULL AND expires_at > ?")
+          .bind(invitation.id, new Date().toISOString()),
+        env.DB.prepare("INSERT INTO organization_members (organization_id, user_id, role) SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM organization_invitations WHERE id = ? AND accepted_at IS NOT NULL) ON CONFLICT(organization_id, user_id) DO NOTHING")
+          .bind(invitation.organization_id, user.id, invitation.role, invitation.id),
+        env.DB.prepare("INSERT INTO audit_logs (id, organization_id, actor_user_id, action, resource_type, resource_id) SELECT ?, ?, ?, 'team.invitation_accepted', 'invitation', ? WHERE EXISTS (SELECT 1 FROM organization_invitations WHERE id = ? AND accepted_at IS NOT NULL)")
+          .bind(id(), invitation.organization_id, user.id, invitation.id, invitation.id)
+      ]);
+      if ((results[0] as D1Result).meta?.changes !== 1) return json({ error: "INVITATION_ALREADY_USED" }, 409);
+      return json({ message: "You joined the workspace.", organizationId: invitation.organization_id, role: invitation.role });
     }
 
     if (request.method === "GET" && url.pathname === "/v1/monitors") {
