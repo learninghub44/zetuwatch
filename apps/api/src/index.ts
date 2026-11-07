@@ -312,18 +312,16 @@ export default {
         const target = await env.DB.prepare("SELECT role FROM organization_members WHERE organization_id = ? AND user_id = ?")
           .bind(organizationId, targetId).first<{ role: string }>();
         if (!target) return json({ error: "MEMBER_NOT_FOUND" }, 404);
-        if (target.role === "owner" && nextRole !== "owner") {
-          const owners = await env.DB.prepare("SELECT COUNT(*) AS count FROM organization_members WHERE organization_id = ? AND role = 'owner'")
-            .bind(organizationId).first<{ count: number }>();
-          if (!canRemoveOwner(owners?.count ?? 0)) return json({ error: "LAST_OWNER_REQUIRED" }, 409);
-        }
         if (targetId === user.id && nextRole !== "owner") return json({ error: "CANNOT_DEMOTE_SELF" }, 409);
-        await env.DB.batch([
-          env.DB.prepare("UPDATE organization_members SET role = ? WHERE organization_id = ? AND user_id = ?")
-            .bind(nextRole, organizationId, targetId),
-          env.DB.prepare("INSERT INTO audit_logs (id, organization_id, actor_user_id, action, resource_type, resource_id, metadata_json) VALUES (?, ?, ?, 'team.member_role_changed', 'user', ?, ?)")
+        const changed = await env.DB.batch([
+          env.DB.prepare("UPDATE organization_members SET role = ? WHERE organization_id = ? AND user_id = ? AND role <> ? AND (role <> 'owner' OR ? = 'owner' OR (SELECT COUNT(*) FROM organization_members WHERE organization_id = ? AND role = 'owner') > 1)")
+            .bind(nextRole, organizationId, targetId, nextRole, nextRole, organizationId),
+          env.DB.prepare("INSERT INTO audit_logs (id, organization_id, actor_user_id, action, resource_type, resource_id, metadata_json) SELECT ?, ?, ?, 'team.member_role_changed', 'user', ?, ? WHERE changes() > 0")
             .bind(id(), organizationId, user.id, targetId, JSON.stringify({ from: target.role, to: nextRole }))
         ]);
+        if ((changed[0] as D1Result).meta?.changes !== 1) {
+          return json({ error: target.role === nextRole ? "ROLE_UNCHANGED" : "LAST_OWNER_REQUIRED" }, 409);
+        }
         return json({ message: "Member role updated." });
       }
 
@@ -332,17 +330,13 @@ export default {
           .bind(organizationId, targetId).first<{ role: string }>();
         if (!target) return json({ error: "MEMBER_NOT_FOUND" }, 404);
         if (!canRemoveMember(actor.role, target.role, targetId === user.id)) return json({ error: "FORBIDDEN" }, 403);
-        if (target.role === "owner") {
-          const owners = await env.DB.prepare("SELECT COUNT(*) AS count FROM organization_members WHERE organization_id = ? AND role = 'owner'")
-            .bind(organizationId).first<{ count: number }>();
-          if ((owners?.count ?? 0) <= 1) return json({ error: "LAST_OWNER_REQUIRED" }, 409);
-        }
-        await env.DB.batch([
-          env.DB.prepare("DELETE FROM organization_members WHERE organization_id = ? AND user_id = ?")
-            .bind(organizationId, targetId),
-          env.DB.prepare("INSERT INTO audit_logs (id, organization_id, actor_user_id, action, resource_type, resource_id) VALUES (?, ?, ?, 'team.member_removed', 'user', ?)")
+        const removed = await env.DB.batch([
+          env.DB.prepare("DELETE FROM organization_members WHERE organization_id = ? AND user_id = ? AND (role <> 'owner' OR (SELECT COUNT(*) FROM organization_members WHERE organization_id = ? AND role = 'owner') > 1)")
+            .bind(organizationId, targetId, organizationId),
+          env.DB.prepare("INSERT INTO audit_logs (id, organization_id, actor_user_id, action, resource_type, resource_id) SELECT ?, ?, ?, 'team.member_removed', 'user', ? WHERE changes() > 0")
             .bind(id(), organizationId, user.id, targetId)
         ]);
+        if ((removed[0] as D1Result).meta?.changes !== 1) return json({ error: "LAST_OWNER_REQUIRED" }, 409);
         return json({ message: "Member removed from workspace." });
       }
     }
@@ -361,10 +355,10 @@ export default {
       const results = await env.DB.batch([
         env.DB.prepare("UPDATE organization_invitations SET accepted_at = CURRENT_TIMESTAMP WHERE id = ? AND accepted_at IS NULL AND expires_at > ?")
           .bind(invitation.id, new Date().toISOString()),
-        env.DB.prepare("INSERT INTO organization_members (organization_id, user_id, role) SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM organization_invitations WHERE id = ? AND accepted_at IS NOT NULL) ON CONFLICT(organization_id, user_id) DO NOTHING")
-          .bind(invitation.organization_id, user.id, invitation.role, invitation.id),
-        env.DB.prepare("INSERT INTO audit_logs (id, organization_id, actor_user_id, action, resource_type, resource_id) SELECT ?, ?, ?, 'team.invitation_accepted', 'invitation', ? WHERE EXISTS (SELECT 1 FROM organization_invitations WHERE id = ? AND accepted_at IS NOT NULL)")
-          .bind(id(), invitation.organization_id, user.id, invitation.id, invitation.id)
+        env.DB.prepare("INSERT INTO organization_members (organization_id, user_id, role) SELECT ?, ?, ? WHERE changes() > 0 ON CONFLICT(organization_id, user_id) DO NOTHING")
+          .bind(invitation.organization_id, user.id, invitation.role),
+        env.DB.prepare("INSERT INTO audit_logs (id, organization_id, actor_user_id, action, resource_type, resource_id) SELECT ?, ?, ?, 'team.invitation_accepted', 'invitation', ? WHERE changes() > 0")
+          .bind(id(), invitation.organization_id, user.id, invitation.id)
       ]);
       if ((results[0] as D1Result).meta?.changes !== 1) return json({ error: "INVITATION_ALREADY_USED" }, 409);
       return json({ message: "You joined the workspace.", organizationId: invitation.organization_id, role: invitation.role });
