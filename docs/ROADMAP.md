@@ -8,8 +8,8 @@ The product is built in vertical slices. A slice is complete only when UI, API, 
 - [x] Worker API health endpoint
 - [x] Conservative HTTP probe foundation
 - [x] Product scope and user journey specification
-- [x] CI typecheck workflow added (must pass in GitHub Actions)
-- [ ] Unit and integration test suite (URL policy, HTTP probe, password hashing and role-policy unit tests added; CI result still needs verification)
+- [x] CI typecheck workflow added and verified in GitHub Actions
+- [ ] Unit and integration test suite (53 unit tests across URL policy, fail-closed probe behavior, password hashing and role policy pass in CI; API integration and lifecycle coverage remain)
 - [x] Direct development-tool versions checked against current package releases and pinned
 - [ ] Lockfile generation and clean-install verification
 
@@ -17,7 +17,7 @@ The product is built in vertical slices. A slice is complete only when UI, API, 
 - [ ] Authentication foundation: registration, email verification, password login/reset and opaque sessions are implemented; security and end-to-end tests remain
 - [ ] Invitation acceptance and full team/member management
 - [ ] Organization creation and basic membership checks exist; full role-management workflows and tenant-isolation tests remain
-- [ ] Tenant-safe schema constraints and migration tests (migration smoke-test added; CI result pending)
+- [ ] Tenant-safe schema constraints and migration tests (two current migrations pass the CI SQLite smoke-test; tenant isolation and production D1 behavior remain unverified)
 - [ ] Audit events and basic per-IP auth/monitor rate limits exist; broader abuse controls remain
 
 ## Phase 2 — first working monitoring loop
@@ -66,7 +66,6 @@ The product is built in vertical slices. A slice is complete only when UI, API, 
 
 Do not mark a phase complete because files or mock screens exist. Verify behavior.
 
-
 ## Verified progress snapshot (2026-11-06)
 
 - Added first-party email/password authentication endpoints and responsive account screens.
@@ -78,8 +77,17 @@ Do not mark a phase complete because files or mock screens exist. Verify behavio
 - Added unit tests for URL policy and fail-closed probe behavior.
 - Added API/auth setup documentation.
 
-**Locally verified in this run:** isolated TypeScript compilation and runtime checks for URL policy, HTTP probe and password hashing; SQLite migration smoke-test against the two current migration schemas. These are not a substitute for the complete repository CI run.
-
-**Not yet verified:** GitHub Actions result, full-project TypeScript compilation, Vitest suite, browser end-to-end flows, actual Resend delivery, Cloudflare D1 migration on the target runtime, and production cookie/CORS behavior.
+**Verification recorded on 2026-11-06:** isolated TypeScript compilation and runtime checks for URL policy, HTTP probe and password hashing; SQLite migration smoke-test against the two current migration schemas. The complete repository CI had not yet been verified at that point.
 
 **Deliberately disabled:** scheduled network probes. Current URL validation does not resolve and pin DNS addresses and is not sufficient protection against SSRF or DNS rebinding. No monitor should be represented as actively checked until the secure egress and scheduler phases are complete.
+
+## Verification update (2026-11-07)
+
+- Fixed a TypeScript 5.9 Web Crypto type error by copying decoded PBKDF2 salts into an owned `ArrayBuffer` before deriving bits. The password format and 310,000-iteration work factor are unchanged.
+- Replaced an obsolete HTTP probe test that expected direct outbound fetches with an assertion that the probe remains blocked until SSRF-safe egress exists.
+- GitHub Actions [CI run #71](https://github.com/learninghub44/zetuwatch/actions/runs/42346873713) completed successfully on commit `c7203ed2840f47cc608989dcd35fea39442f511e`.
+- Verified in that run: full TypeScript typecheck; SQLite migration smoke-test (2 migrations, 16 required tables); Vitest (6 files, 53 tests).
+
+**Still unverified:** API-level authentication and tenant-isolation integration tests, browser end-to-end flows, real Resend delivery, Cloudflare D1 behavior in the target account, production cookie/CORS behavior, scheduler and incident lifecycles, and payment/notification integrations.
+
+**Security boundary unchanged:** no scheduled probes were enabled. Cloudflare Workers TCP sockets expose outbound connections but the documented API does not provide a demonstrated DNS-answer-to-socket pinning and TLS hostname-verification flow for this project. A dedicated, reviewed egress design is still required before running customer-controlled targets.
