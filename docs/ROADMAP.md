@@ -15,8 +15,8 @@ The product is built in vertical slices. A slice is complete only when UI, API, 
 
 ## Phase 1 — secure account foundation
 - [ ] Authentication foundation: registration, email verification, password login/reset and opaque sessions are implemented; security and end-to-end tests remain
-- [ ] Invitation acceptance and full team/member management
-- [ ] Organization creation and basic membership checks exist; full role-management workflows and tenant-isolation tests remain
+- [ ] Invitation acceptance and full team/member management (member listing, role policy, invitations, acceptance, role changes and removal API implemented; API integration tests and full browser UI remain)
+- [ ] Organization creation and basic membership checks exist; team-management API now enforces owner/admin/member/viewer policy and last-owner protection; tenant-isolation integration tests remain
 - [ ] Tenant-safe schema constraints and migration tests (two current migrations pass the CI SQLite smoke-test; tenant isolation and production D1 behavior remain unverified)
 - [ ] Audit events and basic per-IP auth/monitor rate limits exist; broader abuse controls remain
 
@@ -91,3 +91,11 @@ Do not mark a phase complete because files or mock screens exist. Verify behavio
 **Still unverified:** API-level authentication and tenant-isolation integration tests, browser end-to-end flows, real Resend delivery, Cloudflare D1 behavior in the target account, production cookie/CORS behavior, scheduler and incident lifecycles, and payment/notification integrations.
 
 **Security boundary unchanged:** no scheduled probes were enabled. Cloudflare Workers TCP sockets expose outbound connections but the documented API does not provide a demonstrated DNS-answer-to-socket pinning and TLS hostname-verification flow for this project. A dedicated, reviewed egress design is still required before running customer-controlled targets.
+
+
+## Team management implementation update (2026-11-07)
+
+- Added explicit role policy helpers for assigning roles, inviting users and removing members. Admins cannot grant admin/owner; only owners can grant admin; members can leave but cannot remove others.
+- Added organization-scoped API endpoints to list members, create/list invitations, accept invitations, change roles and remove members. Membership is checked on every organization route; invitation acceptance requires a verified session whose email matches the invitation.
+- Invitation tokens are random, stored as SHA-256 hashes, expire after seven days and are delivered through the configured Resend integration. Failed email delivery removes the pending invitation. Sensitive team actions emit audit events.
+- Added role-policy unit coverage. API integration tests, concurrent invitation acceptance tests, UI team-management screens and real Resend delivery verification are still required. The phase remains incomplete.
