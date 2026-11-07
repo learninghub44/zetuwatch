@@ -1,6 +1,6 @@
 import { validateMonitorUrl } from "../../../packages/monitoring-core/src/url-safety";
 import { hashPassword, verifyPassword } from "../../../packages/auth-core/src/password";
-import { canDeleteMonitors, canWriteMonitors, canAssignRole, canInviteRole, canRemoveMember, isOrganizationRole } from "../../../packages/auth-core/src/authorization";
+import { canDeleteMonitors, canWriteMonitors, canAssignRole, canInviteRole, canRemoveMember, isOrganizationRole, canRemoveOwner } from "../../../packages/auth-core/src/authorization";
 
 interface Env {
   DB: D1Database;
@@ -315,7 +315,7 @@ export default {
         if (target.role === "owner" && nextRole !== "owner") {
           const owners = await env.DB.prepare("SELECT COUNT(*) AS count FROM organization_members WHERE organization_id = ? AND role = 'owner'")
             .bind(organizationId).first<{ count: number }>();
-          if ((owners?.count ?? 0) <= 1) return json({ error: "LAST_OWNER_REQUIRED" }, 409);
+          if (!canRemoveOwner(owners?.count ?? 0)) return json({ error: "LAST_OWNER_REQUIRED" }, 409);
         }
         if (targetId === user.id && nextRole !== "owner") return json({ error: "CANNOT_DEMOTE_SELF" }, 409);
         await env.DB.batch([
