@@ -16,6 +16,17 @@ function decodeBase64Url(value: string): Uint8Array {
   );
 }
 
+/**
+ * Web Crypto's BufferSource type requires an ArrayBuffer-backed view.
+ * Decoded byte arrays may be typed as ArrayBufferLike, so copy the salt into
+ * an owned ArrayBuffer before passing it to PBKDF2.
+ */
+function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const buffer = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(buffer).set(bytes);
+  return buffer;
+}
+
 export async function hashPassword(password: string): Promise<string> {
   if (typeof password !== "string" || password.length < 12 || password.length > 128) {
     throw new Error("PASSWORD_LENGTH_INVALID");
@@ -29,7 +40,7 @@ export async function hashPassword(password: string): Promise<string> {
     ["deriveBits"]
   );
   const bits = await crypto.subtle.deriveBits(
-    { name: "PBKDF2", hash: "SHA-256", salt, iterations: ITERATIONS },
+    { name: "PBKDF2", hash: "SHA-256", salt: toArrayBuffer(salt), iterations: ITERATIONS },
     material,
     256
   );
@@ -54,7 +65,7 @@ export async function verifyPassword(password: string, stored: string): Promise<
       ["deriveBits"]
     );
     const actual = new Uint8Array(await crypto.subtle.deriveBits(
-      { name: "PBKDF2", hash: "SHA-256", salt, iterations: ITERATIONS },
+      { name: "PBKDF2", hash: "SHA-256", salt: toArrayBuffer(salt), iterations: ITERATIONS },
       material,
       256
     ));
