@@ -28,6 +28,20 @@ All monitor endpoints require a verified signed-in session and an organization m
 
 Viewers can read. Members/admins/owners can create and update. Only owners/admins can delete. Every query is scoped through the monitor's organization membership; never trust an organization ID supplied by a client without checking membership.
 
+
+## Organization team management
+
+All team endpoints require a verified signed-in session. The caller must already belong to the requested organization. Invitation creation additionally requires the Resend provider to be configured; invitation tokens are stored only as SHA-256 hashes and expire after seven days.
+
+- `GET /v1/organizations/<organization-id>/members` — list members and their roles.
+- `PATCH /v1/organizations/<organization-id>/members/<user-id>` — change a member role with body `{ role: "admin"|"member"|"viewer" }`. Only owners can grant or remove administrator privileges; admins may assign member/viewer.
+- `DELETE /v1/organizations/<organization-id>/members/<user-id>` — remove a member. Members may remove themselves, admins may remove members/viewers, and owners may remove non-owners. The last owner cannot be demoted or removed.
+- `GET /v1/organizations/<organization-id>/invitations` — list pending, unexpired invitations (owner/admin).
+- `POST /v1/organizations/<organization-id>/invitations` — invite with body `{ email, role? }`. Only owner/admin; admins can invite member/viewer. Email delivery must succeed or the pending invitation is deleted.
+- `POST /v1/invitations/accept` — accept with body `{ token }`. The signed-in verified account email must exactly match the invited email.
+
+Role changes, removals, invitation creation and acceptance write audit events. These endpoints are implemented but API integration tests and the full team-management browser UI are still outstanding. Do not consider team management launch-complete until those tests and UI states pass.
+
 ## Monitor execution status
 
 The current API deliberately returns `executionEnabled: false`. Creating a monitor stores its configuration but does not run a network request or schedule a check. The current URL validator is preliminary and does not provide DNS resolution/pinning or DNS-rebinding protection. Do not enable scheduled probes until the egress security architecture is implemented and reviewed.
