@@ -22,7 +22,7 @@ The product is built in vertical slices. A slice is complete only when UI, API, 
 
 ## Phase 2 — first working monitoring loop
 - [ ] Basic tenant-scoped monitor create/list/read/update/delete API and responsive setup screen implemented; 9 D1-backed API tests now cover core cross-tenant reads/creates, member/viewer permissions, single-use invitation acceptance and concurrent owner protection, while the full route matrix and browser acceptance remain
-- [ ] Safe URL/egress policy including DNS/IP resolution/pinning, redirect-hop checks and DNS-rebinding defense
+- [ ] Safe URL/egress policy including DNS/IP resolution/pinning, redirect-hop checks and DNS-rebinding defense (syntactic validation exists; Cloudflare DNS/socket primitives are documented, but the pinned HTTP/HTTPS transport and TLS hostname-verification flow still require implementation and runtime verification)
 - [ ] Bounded scheduled runner and atomic due-work claiming
 - [ ] HTTP/HTTPS checks, history and latency
 - [ ] Incident confirmation, deduplication and recovery
@@ -114,4 +114,18 @@ Do not mark a phase complete because files or mock screens exist. Verify behavio
 
 **Coverage boundary:** these tests verify core API session, tenant and role boundaries, not the complete authentication security/edge-case matrix, browser UX, live Resend delivery, production D1 account behavior, scheduler/incident lifecycles or provider callbacks. The corresponding launch gates remain open.
 
-**Security boundary unchanged:** scheduled probes remain disabled. Customer-controlled URLs must not be executed until a reviewed egress design provides DNS/IP validation, redirect-hop validation, rebinding resistance, bounded network execution and abuse controls.
+**Security boundary unchanged:** scheduled probes remain disabled. Cloudflare documents Workers DNS-over-HTTPS resolution and Node TCP/TLS APIs, but the exact pinned-IP HTTP/HTTPS path is not yet implemented or verified in the actual Worker runtime. Customer-controlled URLs must not be executed until the complete transport passes the SSRF, redirect, rebinding, timeout, response-size and abuse-control tests.
+
+
+## Secure egress feasibility update (2026-11-08)
+
+The current Cloudflare Workers runtime exposes useful primitives for a DNS-pinned design:
+
+- [Node.js DNS compatibility](https://developers.cloudflare.com/workers/runtime-apis/nodejs/dns/) documents `dns.promises.resolve4()` and `resolve6()` through Cloudflare DNS-over-HTTPS at 1.1.1.1. It explicitly says `lookup()`, `lookupService()` and `resolve()` are not implemented; DNS calls count as subrequests.
+- [Node.js net compatibility](https://developers.cloudflare.com/workers/runtime-apis/nodejs/net/) documents direct TCP connections through Workers sockets.
+- [Node.js TLS compatibility](https://developers.cloudflare.com/workers/runtime-apis/nodejs/tls/) documents TLS client connections and certificate authorization APIs.
+- [Workers TCP sockets](https://developers.cloudflare.com/workers/runtime-apis/tcp-sockets/) documents outbound socket restrictions and recommends ordinary `fetch()` for HTTP on ports 80/443. The exact interaction between direct-IP sockets, HTTP on those ports and TLS SNI/certificate verification therefore needs a real Worker prototype; the component APIs alone are not sufficient proof.
+
+**Candidate implementation to verify:** resolve all A records; reject the hostname if any selected address is non-public; connect using a validated literal IP rather than resolving the hostname again; for HTTPS, preserve the original DNS hostname for SNI and certificate verification; send the original host in the HTTP Host header; disable automatic redirects and resolve/validate every redirect target before connecting. Keep IPv6 unsupported until its address classification and pinned transport are implemented. Bound DNS, connect, TLS and header time; cap redirects and response bytes; keep scheduled execution disabled until the complete path is verified.
+
+No Cloudflare resources were created and no deployment was attempted. This is feasibility research, not an implemented or production-verified egress path.
