@@ -6,8 +6,14 @@
     "strict": true,
     "noEmit": true,
     "lib": ["ES2022", "WebWorker"],
-    "types": ["@cloudflare/workers-types"],
+    "types": ["@cloudflare/workers-types", "@cloudflare/vitest-plugin/types"],
     "skipLibCheck": true
   },
-  "include": ["apps/**/*.ts", "packages/**/*.ts"]
+  "include": [
+    "apps/**/*.ts",
+    "packages/**/*.ts",
+    "tests/**/*.ts",
+    "tests/**/*.d.ts",
+    "vitest.config.ts"
+  ]
 }
