@@ -14,7 +14,7 @@
     "db:remote": "wrangler d1 migrations apply zetuwatch --remote",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:integration": "vitest run tests/api.integration.test.ts",
+    "test:integration": "vitest run tests/*.integration.test.ts",
     "test:watch": "vitest"
   },
   "devDependencies": {
