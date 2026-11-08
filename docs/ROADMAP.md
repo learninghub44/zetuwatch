@@ -9,19 +9,19 @@ The product is built in vertical slices. A slice is complete only when UI, API, 
 - [x] Conservative HTTP probe foundation
 - [x] Product scope and user journey specification
 - [x] CI typecheck workflow added and verified in GitHub Actions
-- [ ] Unit and integration test suite (53 unit tests across URL policy, fail-closed probe behavior, password hashing and role policy pass in CI; API integration and lifecycle coverage remain)
+- [ ] Unit and integration test suite (68 tests across 7 files now pass in CI, including 7 D1-backed API integration tests for session rejection, monitor/team tenant isolation and role access; invitation, scheduler, incident and payment lifecycle coverage remains)
 - [x] Direct development-tool versions checked against current package releases and pinned
 - [ ] Lockfile generation and clean-install verification
 
 ## Phase 1 — secure account foundation
 - [ ] Authentication foundation: registration, email verification, password login/reset and opaque sessions are implemented; security and end-to-end tests remain
-- [ ] Invitation acceptance and full team/member management (member listing, role policy, invitations, acceptance, role changes, removal API and initial responsive team screen implemented; API integration and browser acceptance tests remain)
-- [ ] Organization creation and basic membership checks exist; team-management API now enforces owner/admin/member/viewer policy and last-owner protection; tenant-isolation integration tests remain
-- [ ] Tenant-safe schema constraints and migration tests (two current migrations pass the CI SQLite smoke-test; tenant isolation and production D1 behavior remain unverified)
+- [ ] Invitation acceptance and full team/member management (member listing, role policy, invitations, acceptance, role changes, removal API and initial responsive team screen implemented; team member-list isolation is covered by D1 integration tests, but invitation acceptance/concurrency and browser acceptance tests remain)
+- [ ] Organization creation and basic membership checks exist; team-management API now enforces owner/admin/member/viewer policy and last-owner protection; monitor and team-member tenant boundaries pass the new D1-backed API tests, while broader route coverage remains
+- [ ] Tenant-safe schema constraints and migration tests (two migrations pass the CI SQLite smoke-test and the API suite runs against isolated local D1; production-account D1 behavior remains unverified)
 - [ ] Audit events and basic per-IP auth/monitor rate limits exist; broader abuse controls remain
 
 ## Phase 2 — first working monitoring loop
-- [ ] Basic tenant-scoped monitor create/list/read/update/delete API and responsive setup screen implemented; automated authorization tests remain
+- [ ] Basic tenant-scoped monitor create/list/read/update/delete API and responsive setup screen implemented; 7 D1-backed API tests now cover core cross-tenant reads/creates and member/viewer permissions, while the full route matrix and browser acceptance remain
 - [ ] Safe URL/egress policy including DNS/IP resolution/pinning, redirect-hop checks and DNS-rebinding defense
 - [ ] Bounded scheduled runner and atomic due-work claiming
 - [ ] HTTP/HTTPS checks, history and latency
@@ -34,7 +34,7 @@ The product is built in vertical slices. A slice is complete only when UI, API, 
 - [ ] Workspace overview and monitor list/create/delete screen implemented; full monitor detail, check history and real measurements remain
 - [ ] Incident timeline and customer-facing updates
 - [ ] Status-page builder and public status pages
-- [ ] Team invitations, roles and organization settings (initial member/invitation screen and API implemented; complete settings and integration QA remain)
+- [ ] Team invitations, roles and organization settings (initial member/invitation screen and API implemented; tenant-isolated member listing is integration-tested, while invitation acceptance/concurrency, complete settings and browser QA remain)
 - [ ] Analytics, exports and maintenance windows
 
 ## Phase 4 — revenue and integrations
@@ -98,7 +98,19 @@ Do not mark a phase complete because files or mock screens exist. Verify behavio
 - Added explicit role policy helpers for assigning roles, inviting users and removing members. Admins cannot grant admin/owner; only owners can grant admin; members can leave but cannot remove others.
 - Added organization-scoped API endpoints to list members, create/list invitations, accept invitations, change roles and remove members. Membership is checked on every organization route; invitation acceptance requires a verified session whose email matches the invitation.
 - Invitation tokens are random, stored as SHA-256 hashes, expire after seven days and are delivered through the configured Resend integration. Failed email delivery removes the pending invitation. Sensitive team actions emit audit events.
-- Added role-policy unit coverage. API integration tests, concurrent invitation acceptance tests, UI team-management screens and real Resend delivery verification are still required. The phase remains incomplete.
+- Added role-policy unit coverage. The D1-backed API suite now verifies that a member cannot inspect another tenant's team. Invitation acceptance/concurrency tests, UI browser acceptance and real Resend delivery verification are still required. The phase remains incomplete.
 
 
-- Follow-up verification on 2026-11-07: added a workspace team screen with member listing, role controls, invitation form and pending-invitation view. The screen uses the authenticated workspace role to limit controls; the API remains authoritative. Last-owner continuity is now a separately tested authorization policy. CI is running against the latest changes; no pass is recorded until GitHub Actions reports success.
+- Follow-up verification on 2026-11-07: added a workspace team screen with member listing, role controls, invitation form and pending-invitation view. The screen uses the authenticated workspace role to limit controls; the API remains authoritative. Last-owner continuity is a separately tested authorization policy.
+
+
+## Verification update (2026-11-08)
+
+- Added Cloudflare Workers Vitest integration with the MIT-licensed `@cloudflare/vitest-plugin` pinned to `1.6.0`. The test runtime uses the same compatibility date declared in Wrangler and isolated local D1 storage; it does not create or access a Cloudflare account resource.
+- Added seven API integration tests against the actual Worker entrypoint and migrated D1 schema: unauthenticated session rejection; cross-tenant monitor listing, detail and check-history denial; cross-tenant monitor creation denial with a no-write assertion; member create/read versus delete restrictions; viewer read-only restrictions; and cross-tenant team-member listing denial.
+- GitHub Actions [CI run #93](https://github.com/learninghub44/zetuwatch/actions/runs/42456582691) completed successfully on commit `3378e002541588937cd245961c531c6c7de7ec7f`.
+- Verified in that run: full TypeScript typecheck; SQLite migration smoke-test (2 migrations, 16 required tables); Vitest (7 files, 68 tests), including all 7 new D1-backed API integration tests.
+
+**Coverage boundary:** these tests verify core API session, tenant and role boundaries, not the complete authentication lifecycle, invitation acceptance races, browser UX, production D1 account behavior, scheduler/incident lifecycles or provider callbacks. The corresponding launch gates remain open.
+
+**Security boundary unchanged:** scheduled probes remain disabled. Customer-controlled URLs must not be executed until a reviewed egress design provides DNS/IP validation, redirect-hop validation, rebinding resistance, bounded network execution and abuse controls.
