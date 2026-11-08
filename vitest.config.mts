@@ -9,10 +9,6 @@ export default defineConfig(async () => {
       cloudflareTest({
         wrangler: { configPath: "./wrangler.toml" },
         miniflare: {
-          // Pin tests to the newest compatibility date supported by the
-          // workerd binary bundled with this plugin. Production config stays
-          // unchanged; this override applies only to the isolated test runtime.
-          compatibilityDate: "2026-10-26",
           // Migrations are read by Vitest's Node process and passed into the
           // isolated workerd runtime as a test-only binding.
           bindings: { TEST_MIGRATIONS: migrations }
