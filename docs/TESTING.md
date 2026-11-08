@@ -22,7 +22,7 @@ python scripts/check-migrations.py
 
 The integration suite loads the repository's numbered SQL migrations into an isolated D1 database before the tests run. It seeds disposable identities, organizations, sessions and monitors in that local test database only.
 
-## API integration coverage
+## API integration coverage (9 D1-backed tests)
 
 - Missing sessions are rejected.
 - Organization-scoped monitor listing rejects users outside the requested organization.
@@ -31,5 +31,7 @@ The integration suite loads the repository's numbered SQL migrations into an iso
 - Members can create/read their own monitors but cannot delete them.
 - Viewers can read but cannot create or update monitors.
 - Team membership cannot be read across tenant boundaries.
+- A team invitation is consumed at most once when two acceptance requests race; only one membership and one acceptance audit event are created.
+- Concurrent owner demotions cannot remove the final workspace owner.
 
-These tests verify the Worker routes against D1's SQLite-compatible runtime. They do not replace production D1 verification, browser end-to-end tests, provider delivery tests or a security review of outbound network execution. No scheduled probes are enabled by this test setup.
+The full CI suite currently passes 70 tests across 7 files, including these 9 API integration tests. These tests verify the Worker routes against D1's SQLite-compatible runtime. They do not replace production D1 verification, browser end-to-end tests, provider delivery tests or a security review of outbound network execution. No scheduled probes are enabled by this test setup.
