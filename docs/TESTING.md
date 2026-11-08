@@ -22,6 +22,16 @@ python scripts/check-migrations.py
 
 The integration suite loads the repository's numbered SQL migrations into an isolated D1 database before the tests run. It seeds disposable identities, organizations, sessions and monitors in that local test database only.
 
+## Authentication integration coverage (1 D1-backed test)
+
+- Registration creates the user, workspace, owner membership and verification token.
+- The verification email is captured by a test-only `fetch` stub; no real email is sent.
+- Unverified login is rejected, the verification token is single-use, and verified login creates a session.
+- The authenticated profile returns the newly created workspace.
+- Password reset consumes its token once, revokes existing sessions, rejects the old password and accepts the new password.
+
+The Resend endpoint and test-only API key are inert fixtures. The Worker test runtime intercepts the outbound `fetch`; these tests do not contact Resend.
+
 ## API integration coverage (9 D1-backed tests)
 
 - Missing sessions are rejected.
@@ -34,4 +44,4 @@ The integration suite loads the repository's numbered SQL migrations into an iso
 - A team invitation is consumed at most once when two acceptance requests race; only one membership and one acceptance audit event are created.
 - Concurrent owner demotions cannot remove the final workspace owner.
 
-The full CI suite currently passes 70 tests across 7 files, including these 9 API integration tests. These tests verify the Worker routes against D1's SQLite-compatible runtime. They do not replace production D1 verification, browser end-to-end tests, provider delivery tests or a security review of outbound network execution. No scheduled probes are enabled by this test setup.
+The full CI suite currently passes 71 tests across 8 files, including these 9 API integration tests and the authentication lifecycle test. These tests verify the Worker routes against D1's SQLite-compatible runtime. They do not replace production D1 verification, browser end-to-end tests, provider delivery tests or a security review of outbound network execution. No scheduled probes are enabled by this test setup.

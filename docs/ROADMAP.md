@@ -9,12 +9,12 @@ The product is built in vertical slices. A slice is complete only when UI, API, 
 - [x] Conservative HTTP probe foundation
 - [x] Product scope and user journey specification
 - [x] CI typecheck workflow added and verified in GitHub Actions
-- [ ] Unit and integration test suite (70 tests across 7 files now pass in CI, including 9 D1-backed API integration tests for session rejection, monitor/team tenant isolation, role access, single-use invitation acceptance and concurrent owner protection; scheduler, incident and payment lifecycle coverage remains)
+- [ ] Unit and integration test suite (71 tests across 8 files now pass in CI, including 9 D1-backed API integration tests plus an authentication lifecycle test for registration, verification, login, password reset and session revocation; scheduler, incident and payment lifecycle coverage remains)
 - [x] Direct development-tool versions checked against current package releases and pinned
 - [ ] Lockfile generation and clean-install verification
 
 ## Phase 1 — secure account foundation
-- [ ] Authentication foundation: registration, email verification, password login/reset and opaque sessions are implemented; security and end-to-end tests remain
+- [ ] Authentication foundation: registration, email verification, password login/reset and opaque sessions are implemented; a D1-backed test now covers registration → verification → login → password reset → session revocation with email delivery stubbed; browser E2E, live provider delivery and security edge-case tests remain
 - [ ] Invitation acceptance and full team/member management (member listing, role policy, invitations, acceptance, role changes, removal API and initial responsive team screen implemented; team member-list isolation, single-use concurrent invitation acceptance and concurrent owner demotion are covered by D1 integration tests; browser acceptance and real email delivery remain)
 - [ ] Organization creation and basic membership checks exist; team-management API now enforces owner/admin/member/viewer policy and last-owner protection; monitor/team tenant boundaries, invitation consumption and concurrent owner protection pass D1-backed API tests, while broader route coverage remains
 - [ ] Tenant-safe schema constraints and migration tests (two migrations pass the CI SQLite smoke-test and the API suite runs against isolated local D1; production-account D1 behavior remains unverified)
@@ -108,9 +108,10 @@ Do not mark a phase complete because files or mock screens exist. Verify behavio
 
 - Added Cloudflare Workers Vitest integration with the MIT-licensed `@cloudflare/vitest-plugin` pinned to `1.6.0`. The test runtime uses the same compatibility date declared in Wrangler and isolated local D1 storage; it does not create or access a Cloudflare account resource.
 - Added nine API integration tests against the actual Worker entrypoint and migrated D1 schema. In addition to session rejection, cross-tenant monitor listing/detail/history/create denial, member/viewer permission boundaries and cross-tenant team-member listing denial, the suite verifies single-use invitation acceptance under concurrent requests and protects the final owner when two owners concurrently attempt demotion.
-- GitHub Actions [CI run #95](https://github.com/learninghub44/zetuwatch/actions/runs/42456712404) completed successfully on commit `2d41637b1eb5c3c46dd6a52225c326862e6c52b0`.
-- Verified in that run: full TypeScript typecheck; SQLite migration smoke-test (2 migrations, 16 required tables); Vitest (7 files, 70 tests), including all 9 D1-backed API integration tests.
+- Added a D1-backed authentication lifecycle test covering registration, verification-token consumption, unverified-login rejection, session creation, workspace lookup, password-reset-token consumption and revocation of existing sessions. The Resend `fetch` call is stubbed inside the Worker test runtime; no real email is sent.
+- GitHub Actions [CI run #99](https://github.com/learninghub44/zetuwatch/actions/runs/42456934904) completed successfully on commit `96454cd193a5b6f8f3c6ef7a0c4997cb4ab3bf0c`.
+- Verified in that run: full TypeScript typecheck; SQLite migration smoke-test (2 migrations, 16 required tables); Vitest (8 files, 71 tests), including 9 tenant/team API integration tests and 1 authentication lifecycle integration test.
 
-**Coverage boundary:** these tests verify core API session, tenant and role boundaries, not the complete authentication lifecycle, browser UX, production D1 account behavior, scheduler/incident lifecycles or provider callbacks. The corresponding launch gates remain open.
+**Coverage boundary:** these tests verify core API session, tenant and role boundaries, not the complete authentication security/edge-case matrix, browser UX, live Resend delivery, production D1 account behavior, scheduler/incident lifecycles or provider callbacks. The corresponding launch gates remain open.
 
 **Security boundary unchanged:** scheduled probes remain disabled. Customer-controlled URLs must not be executed until a reviewed egress design provides DNS/IP validation, redirect-hop validation, rebinding resistance, bounded network execution and abuse controls.
