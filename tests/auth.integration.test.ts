@@ -85,7 +85,7 @@ describe("Worker authentication lifecycle", () => {
     });
     expect(loginResponse.status).toBe(200);
     const cookie = loginResponse.headers.get("set-cookie") ?? "";
-    const sessionToken = cookie.match(/(?:^|;\\s*)zw_session=([^;]+)/)?.[1];
+    const sessionToken = cookie.split(";").map(part => part.trim()).find(part => part.startsWith("zw_session="))?.slice("zw_session=".length);
     expect(sessionToken).toBeTruthy();
 
     const meResponse = await api("/auth/me", { token: sessionToken });
