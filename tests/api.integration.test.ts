@@ -7,6 +7,7 @@ interface Identity {
   userId: string;
   organizationId: string;
   sessionToken: string;
+  email: string;
 }
 
 interface MonitorResponse {
@@ -26,11 +27,12 @@ async function createIdentity(role: Role = "owner"): Promise<Identity> {
     crypto.getRandomValues(new Uint8Array(32)),
     byte => byte.toString(16).padStart(2, "0")
   ).join("");
+  const email = `${userId}@example.test`;
 
   await env.DB.batch([
     env.DB.prepare(
       "INSERT INTO users (id, email, display_name, email_verified_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)"
-    ).bind(userId, `${userId}@example.test`, "Integration test user"),
+    ).bind(userId, email, "Integration test user"),
     env.DB.prepare("INSERT INTO organizations (id, name, slug) VALUES (?, ?, ?)")
       .bind(organizationId, "Integration workspace", `workspace-${organizationId}`),
     env.DB.prepare("INSERT INTO organization_members (organization_id, user_id, role) VALUES (?, ?, ?)")
@@ -39,7 +41,48 @@ async function createIdentity(role: Role = "owner"): Promise<Identity> {
       .bind(crypto.randomUUID(), userId, await sha256(sessionToken), new Date(Date.now() + 60 * 60 * 1000).toISOString())
   ]);
 
-  return { userId, organizationId, sessionToken };
+  return { userId, organizationId, sessionToken, email };
+}
+
+async function addOwnerToOrganization(identity: Identity): Promise<Identity> {
+  const userId = crypto.randomUUID();
+  const email = `${userId}@example.test`;
+  const sessionToken = Array.from(
+    crypto.getRandomValues(new Uint8Array(32)),
+    byte => byte.toString(16).padStart(2, "0")
+  ).join("");
+
+  await env.DB.batch([
+    env.DB.prepare(
+      "INSERT INTO users (id, email, display_name, email_verified_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)"
+    ).bind(userId, email, "Second owner"),
+    env.DB.prepare("INSERT INTO organization_members (organization_id, user_id, role) VALUES (?, ?, 'owner')")
+      .bind(identity.organizationId, userId),
+    env.DB.prepare("INSERT INTO auth_sessions (id, user_id, token_hash, expires_at) VALUES (?, ?, ?, ?)")
+      .bind(crypto.randomUUID(), userId, await sha256(sessionToken), new Date(Date.now() + 60 * 60 * 1000).toISOString())
+  ]);
+
+  return { userId, organizationId: identity.organizationId, sessionToken, email };
+}
+
+async function createInvitation(organizationId: string, invitedBy: string, email: string): Promise<string> {
+  const token = Array.from(
+    crypto.getRandomValues(new Uint8Array(32)),
+    byte => byte.toString(16).padStart(2, "0")
+  ).join("");
+
+  await env.DB.prepare(
+    "INSERT INTO organization_invitations (id, organization_id, email, role, token_hash, invited_by, expires_at) VALUES (?, ?, ?, 'member', ?, ?, ?)"
+  ).bind(
+    crypto.randomUUID(),
+    organizationId,
+    email,
+    await sha256(token),
+    invitedBy,
+    new Date(Date.now() + 60 * 60 * 1000).toISOString()
+  ).run();
+
+  return token;
 }
 
 async function createForeignOrganization(): Promise<string> {
@@ -205,4 +248,67 @@ describe("Worker API tenant isolation", () => {
     expect(response.status).toBe(403);
     expect(await response.json()).toMatchObject({ error: "FORBIDDEN" });
   });
+  it("consumes a team invitation only once under concurrent acceptance", async () => {
+    const invitee = await createIdentity("member");
+    const inviter = await createIdentity("owner");
+    const invitationToken = await createInvitation(inviter.organizationId, inviter.userId, invitee.email);
+
+    const responses = await Promise.all([
+      api("/v1/invitations/accept", {
+        token: invitee.sessionToken,
+        method: "POST",
+        body: { token: invitationToken }
+      }),
+      api("/v1/invitations/accept", {
+        token: invitee.sessionToken,
+        method: "POST",
+        body: { token: invitationToken }
+      })
+    ]);
+
+    const statuses = responses.map(response => response.status);
+    expect(statuses.filter(status => status === 200)).toHaveLength(1);
+    expect(statuses.filter(status => status !== 200).every(status => status === 400 || status === 409)).toBe(true);
+
+    const membership = await env.DB.prepare(
+      "SELECT COUNT(*) AS count FROM organization_members WHERE organization_id = ? AND user_id = ?"
+    ).bind(inviter.organizationId, invitee.userId).first<{ count: number }>();
+    const acceptedEvents = await env.DB.prepare(
+      "SELECT COUNT(*) AS count FROM audit_logs WHERE organization_id = ? AND action = 'team.invitation_accepted'"
+    ).bind(inviter.organizationId).first<{ count: number }>();
+
+    expect(membership?.count).toBe(1);
+    expect(acceptedEvents?.count).toBe(1);
+  });
+
+  it("serializes concurrent owner demotions and preserves one workspace owner", async () => {
+    const firstOwner = await createIdentity("owner");
+    const secondOwner = await addOwnerToOrganization(firstOwner);
+
+    const responses = await Promise.all([
+      api(`/v1/organizations/${firstOwner.organizationId}/members/${secondOwner.userId}`, {
+        token: firstOwner.sessionToken,
+        method: "PATCH",
+        body: { role: "admin" }
+      }),
+      api(`/v1/organizations/${firstOwner.organizationId}/members/${firstOwner.userId}`, {
+        token: secondOwner.sessionToken,
+        method: "PATCH",
+        body: { role: "admin" }
+      })
+    ]);
+
+    expect(responses.filter(response => response.status === 200)).toHaveLength(1);
+
+    const ownerCount = await env.DB.prepare(
+      "SELECT COUNT(*) AS count FROM organization_members WHERE organization_id = ? AND role = 'owner'"
+    ).bind(firstOwner.organizationId).first<{ count: number }>();
+    const roles = await env.DB.prepare(
+      "SELECT role FROM organization_members WHERE organization_id = ? ORDER BY role"
+    ).bind(firstOwner.organizationId).all<{ role: string }>();
+
+    expect(ownerCount?.count).toBe(1);
+    expect(roles.results.map(row => row.role).sort()).toEqual(["admin", "owner"]);
+  });
+
 });
