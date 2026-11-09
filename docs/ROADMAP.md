@@ -138,3 +138,10 @@ No Cloudflare resources were created and no deployment was attempted. This is fe
 - Added a DNS answer-set guard that rejects empty, malformed, oversized or mixed public/non-public A/AAAA results; it never selects only the first apparently safe answer.
 - Updated URL validation to use the shared IPv4 classifier and added regression coverage for unusual numeric IPv4 URL spellings. IPv6 URL literals remain rejected until a pinned IPv6 transport exists.
 - This is a tested policy component only. It is not wired to a resolver or socket, does not prevent rebinding by itself and does not enable probes. The scheduled runner remains disabled.
+
+
+## Address-classification CI verification (2026-11-09)
+
+- GitHub Actions [CI run #103](https://github.com/learninghub44/zetuwatch/actions/runs/42572146791) completed successfully on commit `f467a24e9c2ee597abf1e0573d36bc6c1c43c382`.
+- Verified: TypeScript typecheck; SQLite migration validation (2 migrations, 16 required tables); Vitest (9 files, 79 tests), including the new IPv4/IPv6 classification and mixed DNS-answer policy tests.
+- The passing tests validate the pure policy code only. No runtime DNS resolver, pinned transport, redirect validation, scheduler or outbound probe was enabled.
