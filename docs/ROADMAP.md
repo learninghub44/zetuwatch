@@ -22,7 +22,7 @@ The product is built in vertical slices. A slice is complete only when UI, API, 
 
 ## Phase 2 — first working monitoring loop
 - [ ] Basic tenant-scoped monitor create/list/read/update/delete API and responsive setup screen implemented; 9 D1-backed API tests now cover core cross-tenant reads/creates, member/viewer permissions, single-use invitation acceptance and concurrent owner protection, while the full route matrix and browser acceptance remain
-- [ ] Safe URL/egress policy including DNS/IP resolution/pinning, redirect-hop checks and DNS-rebinding defense (syntactic validation exists; Cloudflare DNS/socket primitives are documented, but the pinned HTTP/HTTPS transport and TLS hostname-verification flow still require implementation and runtime verification)
+- [ ] Safe URL/egress policy: syntactic validation and a dependency-free IPv4/IPv6 address classifier with mixed DNS-answer rejection are unit-tested; runtime DNS resolution, validated-address pinning, redirect-hop checks and rebinding defense remain unimplemented
 - [ ] Bounded scheduled runner and atomic due-work claiming
 - [ ] HTTP/HTTPS checks, history and latency
 - [ ] Incident confirmation, deduplication and recovery
@@ -129,3 +129,12 @@ The current Cloudflare Workers runtime exposes useful primitives for a DNS-pinne
 **Candidate implementation to verify:** resolve all A records; reject the hostname if any selected address is non-public; connect using a validated literal IP rather than resolving the hostname again; for HTTPS, preserve the original DNS hostname for SNI and certificate verification; send the original host in the HTTP Host header; disable automatic redirects and resolve/validate every redirect target before connecting. Keep IPv6 unsupported until its address classification and pinned transport are implemented. Bound DNS, connect, TLS and header time; cap redirects and response bytes; keep scheduled execution disabled until the complete path is verified.
 
 No Cloudflare resources were created and no deployment was attempted. This is feasibility research, not an implemented or production-verified egress path.
+
+
+## Address-classification implementation update (2026-11-09)
+
+- Added a dependency-free IPv4/IPv6 parser and conservative global-address classifier for the egress layer.
+- IPv4 special-use ranges include private, loopback, link-local, carrier-grade NAT, protocol assignments, documentation, benchmarking, multicast and reserved space. IPv6 is allowed by the classifier only within global-unicast space and excludes special-purpose, documentation and 6to4 transition ranges.
+- Added a DNS answer-set guard that rejects empty, malformed, oversized or mixed public/non-public A/AAAA results; it never selects only the first apparently safe answer.
+- Updated URL validation to use the shared IPv4 classifier and added regression coverage for unusual numeric IPv4 URL spellings. IPv6 URL literals remain rejected until a pinned IPv6 transport exists.
+- This is a tested policy component only. It is not wired to a resolver or socket, does not prevent rebinding by itself and does not enable probes. The scheduled runner remains disabled.

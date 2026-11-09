@@ -15,8 +15,11 @@ The monitoring-core URL validator currently provides a syntactic first gate:
 - permits only HTTP and HTTPS;
 - rejects embedded URL credentials;
 - restricts ports to 80 and 443;
-- rejects localhost and selected non-public IPv4 ranges;
-- rejects IPv6 literals until a complete address classifier and pinning-capable egress layer exists;
+- rejects localhost, internal/test suffixes and single-label hostnames;
+- rejects non-public IPv4 literals, including private, loopback, link-local, carrier-grade NAT, benchmarking, documentation, multicast and reserved ranges;
+- rejects all IPv6 URL literals until a pinned IPv6 transport is implemented.
+
+A separate, dependency-free address classifier parses canonical IPv4 and IPv6 records and permits only conservative global-unicast ranges. Its DNS answer-set helper rejects empty, malformed, oversized or mixed public/private A/AAAA sets rather than selecting only the first apparently safe record. IPv6 DNS answers are classified even though IPv6 monitor destinations remain disabled.
 - rejects local/test/internal suffixes and single-label hostnames;
 - caps URL length.
 
@@ -48,6 +51,8 @@ The egress service must not become an unauthenticated general-purpose proxy. It 
 - Slow headers, slow body, oversized body, connection errors and abort behavior.
 - Attempts to access cloud metadata endpoints and internal service names.
 
+The pure IP classifier and mixed-answer-set policy now have unit coverage for the address ranges and malformed representations listed above. Resolver behavior, rebinding between validation and connection, redirect transport, timeout/size enforcement and abuse controls remain unimplemented and unverified.
+
 ## Operational requirements before public launch
 
 - Per-user, per-organization and global monitor creation/check quotas.
@@ -59,4 +64,4 @@ The egress service must not become an unauthenticated general-purpose proxy. It 
 
 ## Current status
 
-The URL policy and HTTP probe have unit tests, but no production-grade DNS resolver/pinning egress layer exists yet. Treat outbound monitor execution as blocked for public production use until that gap is closed.
+The URL policy and fail-closed HTTP probe have unit tests. The new pure IP classifier is also unit-tested, but no production-grade DNS resolver/pinning egress layer exists yet. Treat outbound monitor execution as blocked for public production use until that gap is closed.
