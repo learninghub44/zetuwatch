@@ -153,3 +153,10 @@ No Cloudflare resources were created and no deployment was attempted. This is fe
 - Added strict hostname validation, redirect rejection, a 16 KiB response-body cap, bounded per-query timeout and fail-closed handling for malformed, truncated and unsuccessful DNS responses.
 - Added injected-fetcher tests; tests do not make live DNS requests or depend on external services.
 - The resolver is a standalone component only. It is not yet wired to monitor execution, and it cannot prevent DNS rebinding until the transport connects to the exact validated IP without performing a second hostname lookup.
+
+
+## DNS resolver CI verification (2026-11-09)
+
+- GitHub Actions [CI run #106](https://github.com/learninghub44/zetuwatch/actions/runs/42573137900) completed successfully on commit `a70090c081bdd2d2b2229a62fd9ab8c92181c139`.
+- Verified: TypeScript typecheck; SQLite migration validation (2 migrations, 16 required tables); Vitest (10 files, 89 tests), including the bounded DoH resolver, malformed-response handling, timeout and response-size tests.
+- All DNS tests use injected responses; CI does not make live DNS requests. The resolver remains disconnected from monitor execution until a DNS-pinned transport is available.
