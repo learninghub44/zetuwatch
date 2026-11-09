@@ -88,7 +88,7 @@ describe("resolvePublicHostname", () => {
       }
       return dnsResponse([]);
     };
-    await expect(resolvePublicHostname("example.com", { fetcher })).rejects.toThrow("DNS_NON_PUBLIC_ADDRESS");
+    await expect(resolvePublicHostname("example.com", { fetcher })).rejects.toThrow("DNS_INVALID_RESPONSE");
   });
 
   it("caps DNS response bodies and never follows redirects", async () => {

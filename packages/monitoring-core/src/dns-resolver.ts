@@ -111,9 +111,19 @@ async function queryAddressRecords(
       throw new Error("DNS_INVALID_RESPONSE");
     }
 
-    return (payload.Answer || [])
-      .filter((answer) => answer !== null && typeof answer === "object" && answer.type === recordType)
-      .map((answer) => typeof answer.data === "string" ? answer.data : "");
+    const answers = payload.Answer || [];
+    if (answers.some((answer) =>
+      !answer ||
+      typeof answer !== "object" ||
+      typeof answer.type !== "number" ||
+      !Number.isInteger(answer.type) ||
+      typeof answer.data !== "string"
+    )) {
+      throw new Error("DNS_INVALID_RESPONSE");
+    }
+    return answers
+      .filter((answer) => answer.type === recordType)
+      .map((answer) => answer.data as string);
   } catch (error) {
     if (controller.signal.aborted) throw new Error("DNS_TIMEOUT");
     if (error instanceof Error && error.message.startsWith("DNS_")) throw error;
