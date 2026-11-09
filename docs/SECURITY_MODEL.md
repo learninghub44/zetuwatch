@@ -17,11 +17,12 @@ The monitoring-core URL validator currently provides a syntactic first gate:
 - restricts ports to 80 and 443;
 - rejects localhost, internal/test suffixes and single-label hostnames;
 - rejects non-public IPv4 literals, including private, loopback, link-local, carrier-grade NAT, benchmarking, documentation, multicast and reserved ranges;
-- rejects all IPv6 URL literals until a pinned IPv6 transport is implemented.
-
-A separate, dependency-free address classifier parses canonical IPv4 and IPv6 records and permits only conservative global-unicast ranges. Its DNS answer-set helper rejects empty, malformed, oversized or mixed public/private A/AAAA sets rather than selecting only the first apparently safe record. IPv6 DNS answers are classified even though IPv6 monitor destinations remain disabled.
-- rejects local/test/internal suffixes and single-label hostnames;
+- rejects all IPv6 URL literals until a pinned IPv6 transport is implemented;
 - caps URL length.
+
+A dependency-free address classifier parses canonical IPv4 and IPv6 records and permits only conservative global-unicast ranges. Its DNS answer-set helper rejects empty, malformed, oversized or mixed public/private A/AAAA sets rather than selecting only the first apparently safe record. IPv6 DNS answers are classified even though IPv6 monitor destinations remain disabled.
+
+A DNS adapter now queries Cloudflare's documented DNS-over-HTTPS JSON endpoint for A and AAAA records in parallel. It bounds each response to 16 KiB and each query to at most five seconds, rejects redirects and non-success DNS responses, and validates the combined answer set. This adapter is not yet called by monitor execution and does not pin the resolved address to a socket.
 
 The HTTP probe currently:
 - permits GET and HEAD only;
@@ -30,9 +31,9 @@ The HTTP probe currently:
 - measures time to response headers and cancels the response body;
 - does not accept arbitrary customer headers or credentials.
 
-This is not a production SSRF boundary. Cloudflare Workers supports both HTTP fetch and an outbound TCP socket API. The current implementation uses fetch, which does not expose a DNS answer that application code can validate and pin to the exact outbound socket. The TCP socket API may enable a custom HTTP/TLS prober, but the project has not yet demonstrated a complete DNS-resolution, address-pinning, TLS hostname-verification and redirect-validation flow on that runtime. Consequently, hostname checks in this repository cannot currently guarantee protection against DNS rebinding or a public hostname resolving to a private address.
+This is not a production SSRF boundary. Cloudflare Workers ordinary fetch() does not expose a DNS answer that application code can validate and pin to the exact outbound socket. The new resolver is a separate policy component; it is not yet connected to the probe transport. The project has not demonstrated a complete DNS-resolution, address-pinning, TLS hostname-verification and redirect-validation flow on the target runtime.
 
-Do not expose monitor creation or execute arbitrary customer targets in a production environment until one of these approaches is implemented and independently tested:
+Do not expose monitor execution in production until one of these approaches is implemented and independently tested:
 
 1. A dedicated egress/probe service that resolves all A/AAAA records, rejects the destination if any answer is non-public, pins the validated address to the actual connection while preserving TLS SNI/Host verification, validates every redirect hop, and enforces connection/read/total timeouts and response-size limits; or
 2. A Cloudflare-supported outbound networking primitive that provides equivalent address validation and connection pinning, verified against current platform documentation and tests.
@@ -51,7 +52,7 @@ The egress service must not become an unauthenticated general-purpose proxy. It 
 - Slow headers, slow body, oversized body, connection errors and abort behavior.
 - Attempts to access cloud metadata endpoints and internal service names.
 
-The pure IP classifier and mixed-answer-set policy now have unit coverage for the address ranges and malformed representations listed above. Resolver behavior, rebinding between validation and connection, redirect transport, timeout/size enforcement and abuse controls remain unimplemented and unverified.
+The pure IP classifier, mixed-answer-set policy and DNS-over-HTTPS adapter have unit coverage. The adapter's timeout, response-size and fail-closed behavior are tested with injected responses; live resolver behavior and DNS rebinding between validation and connection remain unverified. Redirect transport, HTTP response limits and abuse controls remain unimplemented.
 
 ## Operational requirements before public launch
 
@@ -64,4 +65,4 @@ The pure IP classifier and mixed-answer-set policy now have unit coverage for th
 
 ## Current status
 
-The URL policy and fail-closed HTTP probe have unit tests. The new pure IP classifier is also unit-tested, but no production-grade DNS resolver/pinning egress layer exists yet. Treat outbound monitor execution as blocked for public production use until that gap is closed.
+The URL policy, fail-closed HTTP probe, pure IP classifier and bounded DNS resolver component have unit tests. No DNS-pinned transport or complete production-grade egress layer exists yet. Treat outbound monitor execution as blocked for public production use until that gap is closed.

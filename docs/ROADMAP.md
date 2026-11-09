@@ -22,7 +22,7 @@ The product is built in vertical slices. A slice is complete only when UI, API, 
 
 ## Phase 2 — first working monitoring loop
 - [ ] Basic tenant-scoped monitor create/list/read/update/delete API and responsive setup screen implemented; 9 D1-backed API tests now cover core cross-tenant reads/creates, member/viewer permissions, single-use invitation acceptance and concurrent owner protection, while the full route matrix and browser acceptance remain
-- [ ] Safe URL/egress policy: syntactic validation and a dependency-free IPv4/IPv6 address classifier with mixed DNS-answer rejection are unit-tested; runtime DNS resolution, validated-address pinning, redirect-hop checks and rebinding defense remain unimplemented
+- [ ] Safe URL/egress policy: syntactic validation, dependency-free IPv4/IPv6 classification, mixed-answer rejection and a bounded Cloudflare DoH A/AAAA resolver are implemented as unit-testable components; the resolver is not connected to monitor execution, and validated-address pinning, redirect-hop checks and rebinding defense remain unimplemented
 - [ ] Bounded scheduled runner and atomic due-work claiming
 - [ ] HTTP/HTTPS checks, history and latency
 - [ ] Incident confirmation, deduplication and recovery
@@ -145,3 +145,11 @@ No Cloudflare resources were created and no deployment was attempted. This is fe
 - GitHub Actions [CI run #103](https://github.com/learninghub44/zetuwatch/actions/runs/42572146791) completed successfully on commit `f467a24e9c2ee597abf1e0573d36bc6c1c43c382`.
 - Verified: TypeScript typecheck; SQLite migration validation (2 migrations, 16 required tables); Vitest (9 files, 79 tests), including the new IPv4/IPv6 classification and mixed DNS-answer policy tests.
 - The passing tests validate the pure policy code only. No runtime DNS resolver, pinned transport, redirect validation, scheduler or outbound probe was enabled.
+
+
+## DNS resolver implementation update (2026-11-09)
+
+- Added a Cloudflare DNS-over-HTTPS adapter using the documented JSON endpoint. It queries A and AAAA records in parallel and validates the combined set, rejecting any non-public answer.
+- Added strict hostname validation, redirect rejection, a 16 KiB response-body cap, bounded per-query timeout and fail-closed handling for malformed, truncated and unsuccessful DNS responses.
+- Added injected-fetcher tests; tests do not make live DNS requests or depend on external services.
+- The resolver is a standalone component only. It is not yet wired to monitor execution, and it cannot prevent DNS rebinding until the transport connects to the exact validated IP without performing a second hostname lookup.
