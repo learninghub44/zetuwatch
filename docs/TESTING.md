@@ -15,6 +15,7 @@ The test-only `@cloudflare/vitest-plugin` dependency is MIT-licensed. It runs te
 ```sh
 npm install
 npm run typecheck
+npm run check:inline-js
 npm test
 npm run test:integration
 python scripts/check-migrations.py
@@ -72,3 +73,8 @@ The suite does not yet cover incident list/detail API authorization, user-author
 
 
 The incident read endpoints are exercised through the actual Worker entrypoint with isolated D1. No incident write endpoint or customer-authored timeline event is exposed.
+
+
+## Browser script syntax validation
+
+CI runs `npm run check:inline-js`, which parses (but does not execute) inline JavaScript in each HTML file under `apps/web`. The current verified run parsed four scripts across four HTML files. This catches syntax errors in the static HTML application but is not a substitute for browser E2E, responsive-layout, keyboard-navigation or accessibility testing.
