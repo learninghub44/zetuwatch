@@ -15,7 +15,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:integration": "vitest run tests/*.integration.test.ts",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "check:inline-js": "node scripts/check-inline-js.mjs"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "1.6.0",
