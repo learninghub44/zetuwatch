@@ -481,7 +481,7 @@ export default {
       ).bind(organizationId, user.id).first<{ role: string }>();
       if (!membership) return json({ error: "FORBIDDEN" }, 403);
 
-      const result = await env.DB.prepare(\`SELECT
+      const result = await env.DB.prepare(`SELECT
           i.id,
           i.monitor_id AS monitorId,
           m.name AS monitorName,
@@ -495,18 +495,18 @@ export default {
         JOIN monitors m ON m.id = i.monitor_id
         WHERE m.organization_id = ?
         ORDER BY i.started_at DESC, i.id DESC
-        LIMIT 100\`)
+        LIMIT 100`)
         .bind(organizationId)
         .all();
       return json({ incidents: result.results });
     }
 
-    const incidentMatch = url.pathname.match(/^\\/v1\\/incidents\\/([0-9a-f-]{36})$/i);
+    const incidentMatch = url.pathname.match(/^\/v1\/incidents\/([0-9a-f-]{36})$/i);
     if (request.method === "GET" && incidentMatch) {
       const user = await currentUser(request, env);
       if (!user) return json({ error: "UNAUTHENTICATED" }, 401);
       const incidentId = incidentMatch[1];
-      const incident = await env.DB.prepare(\`SELECT
+      const incident = await env.DB.prepare(`SELECT
           i.id,
           i.monitor_id AS monitorId,
           m.organization_id AS organizationId,
@@ -519,7 +519,7 @@ export default {
           i.created_at AS createdAt
         FROM incidents i
         JOIN monitors m ON m.id = i.monitor_id
-        WHERE i.id = ?\`)
+        WHERE i.id = ?`)
         .bind(incidentId)
         .first<{
           id: string;
@@ -540,14 +540,14 @@ export default {
       ).bind(incident.organizationId, user.id).first<{ role: string }>();
       if (!membership) return json({ error: "FORBIDDEN" }, 403);
 
-      const events = await env.DB.prepare(\`SELECT
+      const events = await env.DB.prepare(`SELECT
           id,
           event_type AS eventType,
           message,
           created_at AS createdAt
         FROM incident_events
         WHERE incident_id = ?
-        ORDER BY created_at ASC, id ASC\`)
+        ORDER BY created_at ASC, id ASC`)
         .bind(incidentId)
         .all();
       return json({ incident, events: events.results });
