@@ -39,11 +39,11 @@ export interface FinalizeCheckInput {
 
 function timestamp(value: Date | string, label: string): { milliseconds: number; sql: string; iso: string } {
   if (typeof value === "string" && !/^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$/.test(value)) {
-    throw new Error(\`SCHEDULER_\${label}_INVALID\`);
+    throw new Error("SCHEDULER_" + label + "_INVALID");
   }
   const date = value instanceof Date ? new Date(value.getTime()) : new Date(value);
   const milliseconds = date.getTime();
-  if (!Number.isFinite(milliseconds)) throw new Error(\`SCHEDULER_\${label}_INVALID\`);
+  if (!Number.isFinite(milliseconds)) throw new Error("SCHEDULER_" + label + "_INVALID");
   const iso = date.toISOString();
   return { milliseconds, iso, sql: iso.slice(0, 19).replace("T", " ") };
 }
@@ -87,37 +87,43 @@ export async function claimDueMonitors(
   const { now, leaseMs, limit, token } = validateClaimOptions(options);
   const leaseUntil = new Date(now.milliseconds + leaseMs).toISOString();
 
+  const claimSql = [
+    "UPDATE monitors",
+    "SET check_lease_token = ?, check_lease_until = ?, last_claimed_at = ?",
+    "WHERE id IN (",
+    "  SELECT id FROM monitors",
+    "  WHERE is_enabled = 1",
+    "    AND next_check_at <= ?",
+    "    AND (check_lease_until IS NULL OR check_lease_until <= ?)",
+    "  ORDER BY next_check_at ASC, id ASC",
+    "  LIMIT ?",
+    ")",
+    "AND is_enabled = 1",
+    "AND next_check_at <= ?",
+    "AND (check_lease_until IS NULL OR check_lease_until <= ?)"
+  ].join("\n");
+
+  const selectSql = [
+    "SELECT",
+    "  id,",
+    "  organization_id AS organizationId,",
+    "  name,",
+    "  target_url AS targetUrl,",
+    "  method,",
+    "  expected_status AS expectedStatus,",
+    "  interval_seconds AS intervalSeconds,",
+    "  timeout_ms AS timeoutMs,",
+    "  next_check_at AS nextCheckAt,",
+    "  check_lease_token AS leaseToken,",
+    "  check_lease_until AS leaseUntil",
+    "FROM monitors",
+    "WHERE check_lease_token = ? AND check_lease_until = ?",
+    "ORDER BY next_check_at ASC, id ASC"
+  ].join("\n");
+
   const results = await db.batch([
-    db.prepare(\`UPDATE monitors
-      SET check_lease_token = ?, check_lease_until = ?, last_claimed_at = ?
-      WHERE id IN (
-        SELECT id FROM monitors
-        WHERE is_enabled = 1
-          AND next_check_at <= ?
-          AND (check_lease_until IS NULL OR check_lease_until <= ?)
-        ORDER BY next_check_at ASC, id ASC
-        LIMIT ?
-      )
-      AND is_enabled = 1
-      AND next_check_at <= ?
-      AND (check_lease_until IS NULL OR check_lease_until <= ?)\`)
-      .bind(token, leaseUntil, now.iso, now.sql, now.iso, limit, now.sql, now.iso),
-    db.prepare(\`SELECT
-        id,
-        organization_id AS organizationId,
-        name,
-        target_url AS targetUrl,
-        method,
-        expected_status AS expectedStatus,
-        interval_seconds AS intervalSeconds,
-        timeout_ms AS timeoutMs,
-        next_check_at AS nextCheckAt,
-        check_lease_token AS leaseToken,
-        check_lease_until AS leaseUntil
-      FROM monitors
-      WHERE check_lease_token = ? AND check_lease_until = ?
-      ORDER BY next_check_at ASC, id ASC\`)
-      .bind(token, leaseUntil)
+    db.prepare(claimSql).bind(token, leaseUntil, now.iso, now.sql, now.iso, limit, now.sql, now.iso),
+    db.prepare(selectSql).bind(token, leaseUntil)
   ]);
 
   return (results[1]?.results ?? []) as unknown as ClaimedMonitor[];
@@ -130,11 +136,9 @@ export async function releaseMonitorClaim(
   leaseToken: string
 ): Promise<boolean> {
   if (!monitorId || !leaseToken || leaseToken.length > 128) throw new Error("SCHEDULER_CLAIM_INVALID");
-  const result = await db.prepare(\`UPDATE monitors
-    SET check_lease_token = NULL, check_lease_until = NULL
-    WHERE id = ? AND check_lease_token = ?\`)
-    .bind(monitorId, leaseToken)
-    .run();
+  const result = await db.prepare(
+    "UPDATE monitors SET check_lease_token = NULL, check_lease_until = NULL WHERE id = ? AND check_lease_token = ?"
+  ).bind(monitorId, leaseToken).run();
   return (result.meta?.changes ?? 0) === 1;
 }
 
@@ -172,20 +176,25 @@ export async function finalizeMonitorCheck(
   const checkId = input.checkId ?? crypto.randomUUID();
   if (!checkId || checkId.length > 128) throw new Error("SCHEDULER_CHECK_ID_INVALID");
 
+  const updateSql = [
+    "UPDATE monitors",
+    "SET last_checked_at = ?,",
+    "    next_check_at = ?,",
+    "    consecutive_failures = CASE WHEN ? = 1 THEN 0 ELSE consecutive_failures + 1 END,",
+    "    check_lease_token = NULL,",
+    "    check_lease_until = NULL",
+    "WHERE id = ? AND check_lease_token = ?"
+  ].join("\n");
+  const insertSql = [
+    "INSERT INTO monitor_checks",
+    "(id, monitor_id, checked_at, is_up, status_code, response_time_ms, error_code)",
+    "SELECT ?, ?, ?, ?, ?, ?, ? WHERE changes() = 1"
+  ].join("\n");
+
   const results = await db.batch([
-    db.prepare(\`UPDATE monitors
-      SET last_checked_at = ?,
-          next_check_at = ?,
-          consecutive_failures = CASE WHEN ? = 1 THEN 0 ELSE consecutive_failures + 1 END,
-          check_lease_token = NULL,
-          check_lease_until = NULL
-      WHERE id = ? AND check_lease_token = ?\`)
-      .bind(checkedAt.sql, nextCheckAt.sql, input.isUp ? 1 : 0, input.monitorId, input.leaseToken),
-    db.prepare(\`INSERT INTO monitor_checks
-      (id, monitor_id, checked_at, is_up, status_code, response_time_ms, error_code)
-      SELECT ?, ?, ?, ?, ?, ?, ? WHERE changes() = 1\`)
-      .bind(checkId, input.monitorId, checkedAt.sql, input.isUp ? 1 : 0,
-        input.statusCode, input.responseTimeMs, errorCode)
+    db.prepare(updateSql).bind(checkedAt.sql, nextCheckAt.sql, input.isUp ? 1 : 0, input.monitorId, input.leaseToken),
+    db.prepare(insertSql).bind(checkId, input.monitorId, checkedAt.sql, input.isUp ? 1 : 0,
+      input.statusCode, input.responseTimeMs, errorCode)
   ]);
 
   return (results[0]?.meta?.changes ?? 0) === 1 &&
