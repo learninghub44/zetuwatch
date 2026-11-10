@@ -9,7 +9,7 @@ The product is built in vertical slices. A slice is complete only when UI, API, 
 - [x] Conservative HTTP probe foundation
 - [x] Product scope and user journey specification
 - [x] CI typecheck workflow added and verified in GitHub Actions
-- [ ] Unit and integration test suite (71 tests across 8 files now pass in CI, including 9 D1-backed API integration tests plus an authentication lifecycle test for registration, verification, login, password reset and session revocation; scheduler, incident and payment lifecycle coverage remains)
+- [ ] Unit and integration test suite (95 tests across 11 files pass in CI, including authentication, tenant/team, SSRF policy/DNS and six D1-backed scheduler claim/finalization tests; incident and payment lifecycle coverage, browser E2E and provider tests remain)
 - [x] Direct development-tool versions checked against current package releases and pinned
 - [ ] Lockfile generation and clean-install verification
 
@@ -17,13 +17,14 @@ The product is built in vertical slices. A slice is complete only when UI, API, 
 - [ ] Authentication foundation: registration, email verification, password login/reset and opaque sessions are implemented; a D1-backed test now covers registration → verification → login → password reset → session revocation with email delivery stubbed; browser E2E, live provider delivery and security edge-case tests remain
 - [ ] Invitation acceptance and full team/member management (member listing, role policy, invitations, acceptance, role changes, removal API and initial responsive team screen implemented; team member-list isolation, single-use concurrent invitation acceptance and concurrent owner demotion are covered by D1 integration tests; browser acceptance and real email delivery remain)
 - [ ] Organization creation and basic membership checks exist; team-management API now enforces owner/admin/member/viewer policy and last-owner protection; monitor/team tenant boundaries, invitation consumption and concurrent owner protection pass D1-backed API tests, while broader route coverage remains
-- [ ] Tenant-safe schema constraints and migration tests (two migrations pass the CI SQLite smoke-test and the API suite runs against isolated local D1; production-account D1 behavior remains unverified)
+- [ ] Tenant-safe schema constraints and migration tests (three migrations pass the CI SQLite smoke-test and API/scheduler suites run against isolated local D1; production-account D1 behavior remains unverified)
 - [ ] Audit events and basic per-IP auth/monitor rate limits exist; broader abuse controls remain
 
 ## Phase 2 — first working monitoring loop
 - [ ] Basic tenant-scoped monitor create/list/read/update/delete API and responsive setup screen implemented; 9 D1-backed API tests now cover core cross-tenant reads/creates, member/viewer permissions, single-use invitation acceptance and concurrent owner protection, while the full route matrix and browser acceptance remain
 - [ ] Safe URL/egress policy: syntactic validation, dependency-free IPv4/IPv6 classification, mixed-answer rejection and a bounded Cloudflare DoH A/AAAA resolver are implemented as unit-testable components; the resolver is not connected to monitor execution, and validated-address pinning, redirect-hop checks and rebinding defense remain unimplemented
-- [ ] Bounded scheduled runner and atomic due-work claiming
+- [x] Atomic due-work claim leases and D1-backed check finalization primitive (bounded batches, lease expiry/reclaim, token ownership and check-history persistence are integration-tested; no Cron execution or real probes are enabled)
+- [ ] Bounded scheduled runner / Cron Trigger integration (load, lag and retry behavior remain untested; real execution is blocked on hardened DNS-pinned egress)
 - [ ] HTTP/HTTPS checks, history and latency
 - [ ] Incident confirmation, deduplication and recovery
 - [ ] Verified email alerts and delivery history
@@ -160,3 +161,14 @@ No Cloudflare resources were created and no deployment was attempted. This is fe
 - GitHub Actions [CI run #106](https://github.com/learninghub44/zetuwatch/actions/runs/42573137900) completed successfully on commit `a70090c081bdd2d2b2229a62fd9ab8c92181c139`.
 - Verified: TypeScript typecheck; SQLite migration validation (2 migrations, 16 required tables); Vitest (10 files, 89 tests), including the bounded DoH resolver, malformed-response handling, timeout and response-size tests.
 - All DNS tests use injected responses; CI does not make live DNS requests. The resolver remains disconnected from monitor execution until a DNS-pinned transport is available.
+
+
+## Scheduler claim/finalization implementation and CI verification (2026-11-10)
+
+- Added migration `0003_scheduler_leases.sql` with monitor lease token, expiry and last-claimed timestamps plus a claim-selection index.
+- Added `packages/scheduler-core/src/claims.ts`: D1 batch-based atomic claiming of due enabled monitors, a default batch of 10 with a hard maximum of 25, bounded 30–300 second leases, expired-lease reclamation, token-checked release and token-checked result finalization.
+- Finalization appends one monitor check, advances the next-check time and updates the consecutive-failure counter in the same D1 batch. Stale workers cannot append a result after another invocation has reclaimed the lease.
+- Added six isolated-D1 integration tests for due/disabled/future selection, batch bounds, overlapping claims, lease expiry/reclaim, stale token rejection, failure persistence and recovery of the failure streak.
+- GitHub Actions [CI run #112](https://github.com/learninghub44/zetuwatch/actions/runs/42767560283) completed successfully on commit `8a682c85b4fdeafb8e55efc5d5de531b4de76a44`.
+- Verified: TypeScript typecheck; SQLite migration validation (3 migrations, 16 required tables); Vitest (11 files, 95 tests), including six D1-backed scheduler integration tests.
+- This is the durable claim/finalization layer only. No Cron Trigger is configured, no probe is executed and no live measurement is written. Scheduled execution remains disabled until the DNS-pinned HTTP/HTTPS transport and complete SSRF/redirect/abuse controls are implemented and verified.
