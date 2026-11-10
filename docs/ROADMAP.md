@@ -26,14 +26,14 @@ The product is built in vertical slices. A slice is complete only when UI, API, 
 - [x] Atomic due-work claim leases and D1-backed check finalization primitive (bounded batches, lease expiry/reclaim, token ownership and check-history persistence are integration-tested; no Cron execution or real probes are enabled)
 - [ ] Bounded scheduled runner / Cron Trigger integration (load, lag and retry behavior remain untested; real execution is blocked on hardened DNS-pinned egress)
 - [ ] HTTP/HTTPS checks, history and latency
-- [ ] Incident confirmation, deduplication and recovery (D1-backed finalization confirms, deduplicates, monitors, resolves and reopens incidents; tenant-scoped incident list/detail APIs now return the timeline to workspace members. Dashboard UI, customer-authored updates and notification delivery remain. Event updates are blocked, but monitor deletion still cascades timeline data until a soft-delete/retention workflow exists.)
+- [ ] Incident confirmation, deduplication and recovery (D1-backed finalization confirms, deduplicates, monitors, resolves and reopens incidents; tenant-scoped incident list/detail APIs now return the timeline to workspace members. Full incident workflow UI (acknowledgement and status updates), customer-authored updates and notification delivery remain. Event updates are blocked, but monitor deletion still cascades timeline data until a soft-delete/retention workflow exists.)
 - [ ] Verified email alerts and delivery history
 
 ## Phase 3 — complete customer experience
 - [ ] Public marketing website, docs and pricing
 - [ ] Multi-step sign-up and resumable onboarding
 - [ ] Workspace overview and monitor list/create/delete screen implemented; full monitor detail, check history and real measurements remain
-- [ ] Incident timeline and customer-facing updates (tenant-scoped list/detail API and read-only timeline are implemented; customer dashboard presentation, user-authored updates and notifications remain)
+- [ ] Incident timeline and customer-facing updates (tenant-scoped list/detail API and responsive read-only incident/timeline panel are implemented; browser QA/accessibility, user-authored updates and notifications remain)
 - [ ] Status-page builder and public status pages
 - [ ] Team invitations, roles and organization settings (initial member/invitation screen and API implemented; tenant-isolated member listing, concurrent invitation acceptance and owner-demotion protection are integration-tested, while complete settings, email delivery and browser QA remain)
 - [ ] Analytics, exports and maintenance windows
@@ -194,3 +194,15 @@ No Cloudflare resources were created and no deployment was attempted. This is fe
 - GitHub Actions [CI run #124](https://github.com/learninghub44/zetuwatch/actions/runs/42768598741) completed successfully on commit `f9f208e1bbdc51f168da92d5c7b06145a8a934b3`.
 - Verified: TypeScript typecheck; SQLite migration validation (4 migrations, 16 required tables); Vitest (12 files, 100 tests), including 11 API integration tests.
 - Incident API coverage is read-only. Incident UI, customer-authored updates, notification fan-out, soft deletion and retention-aware timeline preservation remain incomplete.
+
+
+## Incident dashboard read-only view and browser-script CI (2026-11-10)
+
+- Enabled the Incidents navigation item on desktop and added a mobile shortcut to the incident section.
+- Added a workspace incident list with monitor/target, start time, current state and resolution time. The open-incident statistic is derived from the API response.
+- Added a read-only incident detail view with ordered timeline events. All dynamic content is inserted with DOM text nodes; the page does not render server-provided event text as HTML.
+- Empty states explicitly say that live checks are not enabled; no incidents or uptime values are fabricated.
+- Added `scripts/check-inline-js.mjs` and a CI step that syntax-parses inline scripts in all four web HTML files without executing browser code.
+- GitHub Actions [CI run #133](https://github.com/learninghub44/zetuwatch/actions/runs/42769033337) completed successfully on commit `18b205a614b8680db26068b71e651cf5cb2477c8`.
+- Verified: TypeScript typecheck; inline browser-script syntax check (4 scripts across 4 HTML files); SQLite migration validation (4 migrations, 16 required tables); Vitest (12 files, 100 tests).
+- The incident page is read-only and depends on the tenant-scoped API. Browser interaction/accessibility tests, customer-authored updates and notification delivery remain open. No scheduled probes or live incident data are active.
