@@ -9,7 +9,7 @@ The product is built in vertical slices. A slice is complete only when UI, API, 
 - [x] Conservative HTTP probe foundation
 - [x] Product scope and user journey specification
 - [x] CI typecheck workflow added and verified in GitHub Actions
-- [ ] Unit and integration test suite (98 tests across 12 files pass in CI, including authentication, tenant/team, SSRF policy/DNS, six D1-backed scheduler tests and three incident lifecycle tests; payment lifecycle coverage, browser E2E and provider tests remain)
+- [ ] Unit and integration test suite (100 tests across 12 files pass in CI, including authentication, tenant/team and incident API isolation, SSRF policy/DNS, scheduler and incident lifecycle tests; payment lifecycle coverage, browser E2E and provider tests remain)
 - [x] Direct development-tool versions checked against current package releases and pinned
 - [ ] Lockfile generation and clean-install verification
 
@@ -21,19 +21,19 @@ The product is built in vertical slices. A slice is complete only when UI, API, 
 - [ ] Audit events and basic per-IP auth/monitor rate limits exist; broader abuse controls remain
 
 ## Phase 2 — first working monitoring loop
-- [ ] Basic tenant-scoped monitor create/list/read/update/delete API and responsive setup screen implemented; 9 D1-backed API tests now cover core cross-tenant reads/creates, member/viewer permissions, single-use invitation acceptance and concurrent owner protection, while the full route matrix and browser acceptance remain
+- [ ] Basic tenant-scoped monitor create/list/read/update/delete API and responsive setup screen implemented; 11 D1-backed API tests now cover monitor/team boundaries, member/viewer permissions, invitation/owner concurrency and tenant-scoped incident list/detail reads, while the full route matrix and browser acceptance remain
 - [ ] Safe URL/egress policy: syntactic validation, dependency-free IPv4/IPv6 classification, mixed-answer rejection and a bounded Cloudflare DoH A/AAAA resolver are implemented as unit-testable components; the resolver is not connected to monitor execution, and validated-address pinning, redirect-hop checks and rebinding defense remain unimplemented
 - [x] Atomic due-work claim leases and D1-backed check finalization primitive (bounded batches, lease expiry/reclaim, token ownership and check-history persistence are integration-tested; no Cron execution or real probes are enabled)
 - [ ] Bounded scheduled runner / Cron Trigger integration (load, lag and retry behavior remain untested; real execution is blocked on hardened DNS-pinned egress)
 - [ ] HTTP/HTTPS checks, history and latency
-- [ ] Incident confirmation, deduplication and recovery (D1-backed finalization now confirms incidents after configurable consecutive failures, prevents duplicate active incidents, moves to monitoring after a successful check, resolves after the recovery threshold and reopens if recovery is interrupted; incident API/UI, customer-facing updates and notification delivery remain. Event updates are blocked, but monitor deletion still cascades timeline data until a soft-delete/retention workflow exists.)
+- [ ] Incident confirmation, deduplication and recovery (D1-backed finalization confirms, deduplicates, monitors, resolves and reopens incidents; tenant-scoped incident list/detail APIs now return the timeline to workspace members. Dashboard UI, customer-authored updates and notification delivery remain. Event updates are blocked, but monitor deletion still cascades timeline data until a soft-delete/retention workflow exists.)
 - [ ] Verified email alerts and delivery history
 
 ## Phase 3 — complete customer experience
 - [ ] Public marketing website, docs and pricing
 - [ ] Multi-step sign-up and resumable onboarding
 - [ ] Workspace overview and monitor list/create/delete screen implemented; full monitor detail, check history and real measurements remain
-- [ ] Incident timeline and customer-facing updates
+- [ ] Incident timeline and customer-facing updates (tenant-scoped list/detail API and read-only timeline are implemented; customer dashboard presentation, user-authored updates and notifications remain)
 - [ ] Status-page builder and public status pages
 - [ ] Team invitations, roles and organization settings (initial member/invitation screen and API implemented; tenant-isolated member listing, concurrent invitation acceptance and owner-demotion protection are integration-tested, while complete settings, email delivery and browser QA remain)
 - [ ] Analytics, exports and maintenance windows
@@ -184,3 +184,13 @@ No Cloudflare resources were created and no deployment was attempted. This is fe
 - GitHub Actions [CI run #118](https://github.com/learninghub44/zetuwatch/actions/runs/42767973022) completed successfully on commit `163876decfe6a2c5d4fa3dde9a6a462e222ce51b`.
 - Verified: TypeScript typecheck; SQLite migration validation (4 migrations, 16 required tables); Vitest (12 files, 98 tests), including six scheduler and three incident lifecycle integration tests.
 - The state machine is a tested persistence primitive only. There is no active Cron Trigger, real probe execution, incident API/UI, customer-facing status update or notification delivery. Timeline updates are blocked at the database layer, but monitor deletion still cascades timeline rows; a soft-delete/retention workflow is required before claiming full timeline immutability.
+
+
+## Tenant-scoped incident read API and CI verification (2026-11-10)
+
+- Added `GET /v1/incidents?organizationId=<id>` to list up to 100 incidents for a workspace after verifying the signed-in user's membership.
+- Added `GET /v1/incidents/<uuid>` to return the incident and its ordered timeline only after verifying membership in the incident's owning workspace. Viewer roles retain read access; no mutation endpoint is exposed.
+- Added two D1-backed API tests proving workspace incident lists do not include another tenant's incidents and that incident detail/timeline reads reject foreign-tenant access.
+- GitHub Actions [CI run #124](https://github.com/learninghub44/zetuwatch/actions/runs/42768598741) completed successfully on commit `f9f208e1bbdc51f168da92d5c7b06145a8a934b3`.
+- Verified: TypeScript typecheck; SQLite migration validation (4 migrations, 16 required tables); Vitest (12 files, 100 tests), including 11 API integration tests.
+- Incident API coverage is read-only. Incident UI, customer-authored updates, notification fan-out, soft deletion and retention-aware timeline preservation remain incomplete.
