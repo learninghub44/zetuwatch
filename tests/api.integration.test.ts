@@ -101,6 +101,20 @@ async function createMonitor(organizationId: string): Promise<string> {
   return monitorId;
 }
 
+async function createIncident(monitorId: string): Promise<string> {
+  const incidentId = crypto.randomUUID();
+  const eventId = crypto.randomUUID();
+  await env.DB.batch([
+    env.DB.prepare(
+      "INSERT INTO incidents (id, monitor_id, started_at, status, summary) VALUES (?, ?, ?, 'investigating', ?)"
+    ).bind(incidentId, monitorId, "2026-11-10 09:00:00", "Test incident"),
+    env.DB.prepare(
+      "INSERT INTO incident_events (id, incident_id, event_type, message, created_at) VALUES (?, ?, 'incident.opened', ?, ?)"
+    ).bind(eventId, incidentId, "Incident opened for API integration coverage.", "2026-11-10 09:00:00")
+  ]);
+  return incidentId;
+}
+
 function api(
   path: string,
   options: { token?: string; method?: string; body?: Record<string, unknown> } = {}
@@ -310,5 +324,57 @@ describe("Worker API tenant isolation", () => {
     expect(ownerCount?.count).toBe(1);
     expect(roles.results.map(row => row.role).sort()).toEqual(["admin", "owner"]);
   });
+
+
+  it("lists incidents only inside the selected organization", async () => {
+    const identity = await createIdentity("member");
+    const ownMonitorId = await createMonitor(identity.organizationId);
+    const ownIncidentId = await createIncident(ownMonitorId);
+    const foreignOrganizationId = await createForeignOrganization();
+    const foreignMonitorId = await createMonitor(foreignOrganizationId);
+    await createIncident(foreignMonitorId);
+
+    const response = await api(
+      `/v1/incidents?organizationId=${identity.organizationId}`,
+      { token: identity.sessionToken }
+    );
+    expect(response.status).toBe(200);
+    const payload = await response.json() as { incidents: Array<{ id: string; monitorId: string }> };
+    expect(payload.incidents.map((incident) => incident.id)).toEqual([ownIncidentId]);
+    expect(payload.incidents[0].monitorId).toBe(ownMonitorId);
+
+    const foreignList = await api(
+      `/v1/incidents?organizationId=${foreignOrganizationId}`,
+      { token: identity.sessionToken }
+    );
+    expect(foreignList.status).toBe(403);
+  });
+
+  it("returns incident timelines only to members of the owning organization", async () => {
+    const identity = await createIdentity("viewer");
+    const ownMonitorId = await createMonitor(identity.organizationId);
+    const ownIncidentId = await createIncident(ownMonitorId);
+
+    const ownResponse = await api(`/v1/incidents/${ownIncidentId}`, {
+      token: identity.sessionToken
+    });
+    expect(ownResponse.status).toBe(200);
+    const ownPayload = await ownResponse.json() as {
+      incident: { id: string; organizationId: string };
+      events: Array<{ eventType: string }>;
+    };
+    expect(ownPayload.incident.id).toBe(ownIncidentId);
+    expect(ownPayload.incident.organizationId).toBe(identity.organizationId);
+    expect(ownPayload.events.map((event) => event.eventType)).toEqual(["incident.opened"]);
+
+    const foreignOrganizationId = await createForeignOrganization();
+    const foreignMonitorId = await createMonitor(foreignOrganizationId);
+    const foreignIncidentId = await createIncident(foreignMonitorId);
+    const foreignResponse = await api(`/v1/incidents/${foreignIncidentId}`, {
+      token: identity.sessionToken
+    });
+    expect(foreignResponse.status).toBe(403);
+  });
+
 
 });
