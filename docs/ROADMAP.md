@@ -183,7 +183,7 @@ No Cloudflare resources were created and no deployment was attempted. This is fe
 - Added three D1-backed lifecycle tests covering confirmation/deduplication, recovery and resolution, interrupted recovery/reopening, and rejection of timeline event updates.
 - GitHub Actions [CI run #118](https://github.com/learninghub44/zetuwatch/actions/runs/42767973022) completed successfully on commit `163876decfe6a2c5d4fa3dde9a6a462e222ce51b`.
 - Verified: TypeScript typecheck; SQLite migration validation (4 migrations, 16 required tables); Vitest (12 files, 98 tests), including six scheduler and three incident lifecycle integration tests.
-- The state machine is a tested persistence primitive only. There is no active Cron Trigger, real probe execution, incident API/UI, customer-facing status update or notification delivery. Timeline updates are blocked at the database layer, but monitor deletion still cascades timeline rows; a soft-delete/retention workflow is required before claiming full timeline immutability.
+- The state machine is a tested persistence primitive only. Read-only tenant-scoped incident list/detail APIs now exist, but there is no active Cron Trigger, real probe execution, incident UI, customer-facing status update or notification delivery. Timeline updates are blocked at the database layer, but monitor deletion still cascades timeline rows; a soft-delete/retention workflow is required before claiming full timeline immutability.
 
 
 ## Tenant-scoped incident read API and CI verification (2026-11-10)
