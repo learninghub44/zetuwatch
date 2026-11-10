@@ -69,7 +69,7 @@ These tests use isolated local D1. They do not invoke a Cron Trigger, contact cu
 - A failure during recovery reopens the same incident rather than creating a second active incident.
 - Database updates to incident timeline events are rejected by the migration trigger.
 
-The suite does not yet cover incident list/detail API authorization, user-authored status updates, notification fan-out, retention/deletion semantics or live probe-driven incidents.
+Two API integration tests cover incident list/detail authorization across workspace boundaries. The suite does not yet cover user-authored status updates, notification fan-out, retention/deletion semantics or live probe-driven incidents.
 
 
 The incident read endpoints are exercised through the actual Worker entrypoint with isolated D1. No incident write endpoint or customer-authored timeline event is exposed.
