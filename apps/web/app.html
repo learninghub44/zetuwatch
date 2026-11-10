@@ -183,7 +183,7 @@ $("wizard-next").addEventListener("click",()=>{
   }
   wizardStep=Math.min(2,wizardStep+1);renderWizard();
 });
-async function removeMonitor(id,name){if(!confirm("Delete "+name+"? Its check history and related incidents will also be removed."))return;try{await request("/v1/monitors/"+id,{method:"DELETE"});showNotice("Monitor deleted.");await loadMonitors()}catch(e){showNotice(e.message,true)}}
+async function removeMonitor(id,name){if(!confirm("Delete "+name+"? Its check history and related incidents will also be removed."))return;try{await request("/v1/monitors/"+id,{method:"DELETE"});showNotice("Monitor deleted.");await loadMonitors();await loadIncidents()}catch(e){showNotice(e.message,true)}}
 ["add-monitor","top-add","empty-add","setup-add"].forEach(id=>$(id).addEventListener("click",()=>openModal()));$("cancel").addEventListener("click",closeModal);$("modal-backdrop").addEventListener("click",e=>{if(e.target===$("modal-backdrop"))closeModal()});
 $("monitor-form").addEventListener("submit",async e=>{
   e.preventDefault();
