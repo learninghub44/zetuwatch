@@ -10,7 +10,7 @@ const htmlFiles = readdirSync(webDirectory)
 let checkedScripts = 0;
 for (const file of htmlFiles) {
   const html = readFileSync(join(webDirectory, file), "utf8");
-  const scripts = [...html.matchAll(/<script\\b[^>]*>([\\s\\S]*?)<\\/script>/gi)];
+  const scripts = [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)];
 
   scripts.forEach((match, index) => {
     const source = match[1].trim();
@@ -20,11 +20,11 @@ for (const file of htmlFiles) {
       new Function(source);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      throw new Error(`${file}: inline script ${index + 1}: ${message}`);
+      throw new Error(file + ": inline script " + (index + 1) + ": " + message);
     }
     checkedScripts += 1;
   });
 }
 
 if (checkedScripts === 0) throw new Error("No inline browser scripts were found to validate.");
-console.log(`Syntax-checked ${checkedScripts} inline scripts across ${htmlFiles.length} HTML files.`);
+console.log("Syntax-checked " + checkedScripts + " inline scripts across " + htmlFiles.length + " HTML files.");
