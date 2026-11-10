@@ -27,6 +27,8 @@ jobs:
         run: npm install --no-audit --no-fund
       - name: TypeScript typecheck
         run: npm run typecheck
+      - name: Check inline browser JavaScript
+        run: npm run check:inline-js
       - name: Set up Python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
