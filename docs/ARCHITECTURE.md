@@ -18,7 +18,11 @@ Every customer-owned row must carry an organization identifier. Authorization mu
 
 ## Scheduling
 
-Store next-check timestamps in UTC. Claim due work atomically, cap work per invocation and make check processing idempotent. Do not interpret a failed scheduler invocation as an outage at every customer endpoint.
+Store next-check timestamps in UTC. The current D1 claim layer uses a bounded `UPDATE` followed by a `SELECT` in one [D1 batch transaction](https://developers.cloudflare.com/d1/worker-api/d1-database/#batch). It leases only due, enabled monitors, defaults to 10 claims per batch and rejects limits above 25. A lease expires after a bounded interval so abandoned work can be reclaimed. The due timestamp is not advanced until the current lease owner finalizes a result.
+
+Result finalization updates the monitor's last-check time, next due time and consecutive-failure count while appending one check row in the same batch. Every release/finalization is guarded by the lease token, preventing a stale worker from overwriting a newer claim. UTC SQL timestamps use a consistent SQLite format for due-time ordering; lease expiries use normalized ISO timestamps.
+
+These are tested persistence primitives, not an active runner. No [Cron Trigger handler](https://developers.cloudflare.com/workers/runtime-apis/handlers/scheduled/) is configured and no customer target is probed while the pinned-IP HTTP/HTTPS transport remains unverified. Do not interpret a failed scheduler invocation as an outage at every customer endpoint.
 
 ## Incident policy
 
