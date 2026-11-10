@@ -471,6 +471,88 @@ export default {
       return json({ error: "METHOD_NOT_ALLOWED" }, 405);
     }
 
+    if (request.method === "GET" && url.pathname === "/v1/incidents") {
+      const user = await currentUser(request, env);
+      if (!user) return json({ error: "UNAUTHENTICATED" }, 401);
+      const organizationId = cleanText(url.searchParams.get("organizationId"), 64);
+      if (!organizationId) return json({ error: "ORGANIZATION_REQUIRED" }, 400);
+      const membership = await env.DB.prepare(
+        "SELECT role FROM organization_members WHERE organization_id = ? AND user_id = ?"
+      ).bind(organizationId, user.id).first<{ role: string }>();
+      if (!membership) return json({ error: "FORBIDDEN" }, 403);
+
+      const result = await env.DB.prepare(\`SELECT
+          i.id,
+          i.monitor_id AS monitorId,
+          m.name AS monitorName,
+          m.target_url AS targetUrl,
+          i.started_at AS startedAt,
+          i.resolved_at AS resolvedAt,
+          i.status,
+          i.summary,
+          i.created_at AS createdAt
+        FROM incidents i
+        JOIN monitors m ON m.id = i.monitor_id
+        WHERE m.organization_id = ?
+        ORDER BY i.started_at DESC, i.id DESC
+        LIMIT 100\`)
+        .bind(organizationId)
+        .all();
+      return json({ incidents: result.results });
+    }
+
+    const incidentMatch = url.pathname.match(/^\\/v1\\/incidents\\/([0-9a-f-]{36})$/i);
+    if (request.method === "GET" && incidentMatch) {
+      const user = await currentUser(request, env);
+      if (!user) return json({ error: "UNAUTHENTICATED" }, 401);
+      const incidentId = incidentMatch[1];
+      const incident = await env.DB.prepare(\`SELECT
+          i.id,
+          i.monitor_id AS monitorId,
+          m.organization_id AS organizationId,
+          m.name AS monitorName,
+          m.target_url AS targetUrl,
+          i.started_at AS startedAt,
+          i.resolved_at AS resolvedAt,
+          i.status,
+          i.summary,
+          i.created_at AS createdAt
+        FROM incidents i
+        JOIN monitors m ON m.id = i.monitor_id
+        WHERE i.id = ?\`)
+        .bind(incidentId)
+        .first<{
+          id: string;
+          monitorId: string;
+          organizationId: string;
+          monitorName: string;
+          targetUrl: string;
+          startedAt: string;
+          resolvedAt: string | null;
+          status: string;
+          summary: string;
+          createdAt: string;
+        }>();
+      if (!incident) return json({ error: "NOT_FOUND" }, 404);
+
+      const membership = await env.DB.prepare(
+        "SELECT role FROM organization_members WHERE organization_id = ? AND user_id = ?"
+      ).bind(incident.organizationId, user.id).first<{ role: string }>();
+      if (!membership) return json({ error: "FORBIDDEN" }, 403);
+
+      const events = await env.DB.prepare(\`SELECT
+          id,
+          event_type AS eventType,
+          message,
+          created_at AS createdAt
+        FROM incident_events
+        WHERE incident_id = ?
+        ORDER BY created_at ASC, id ASC\`)
+        .bind(incidentId)
+        .all();
+      return json({ incident, events: events.results });
+    }
+
     return json({ error: "NOT_FOUND" }, 404);
     })();
 
