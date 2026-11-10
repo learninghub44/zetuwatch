@@ -44,4 +44,16 @@ The Resend endpoint and test-only API key are inert fixtures. The Worker test ru
 - A team invitation is consumed at most once when two acceptance requests race; only one membership and one acceptance audit event are created.
 - Concurrent owner demotions cannot remove the final workspace owner.
 
-The full CI suite currently passes 71 tests across 8 files, including these 9 API integration tests and the authentication lifecycle test. These tests verify the Worker routes against D1's SQLite-compatible runtime. They do not replace production D1 verification, browser end-to-end tests, provider delivery tests or a security review of outbound network execution. No scheduled probes are enabled by this test setup.
+The full CI suite currently passes 95 tests across 11 files, including the 9 API integration tests, authentication lifecycle test and six scheduler integration tests. These tests verify Worker routes and scheduler persistence against D1's SQLite-compatible runtime. They do not replace production D1 verification, browser end-to-end tests, provider delivery tests or a security review of outbound network execution. No scheduled probes are enabled by this test setup.
+
+
+## Scheduler integration coverage (6 D1-backed tests)
+
+- Claims only enabled monitors whose due time has arrived, in deterministic order, and respects the caller's bounded batch size.
+- Two overlapping claim calls cannot claim the same monitor.
+- Expired leases can be reclaimed; an old lease token cannot release a newer worker's claim.
+- Result finalization appends one check and advances the next-check time only for the current lease owner.
+- Failed checks increment the consecutive-failure count; successful checks reset it.
+- Invalid batch limits, lease durations and check-result fields are rejected.
+
+These tests use isolated local D1. They do not invoke a Cron Trigger, contact customer URLs or assert production scheduler throughput/lag.
