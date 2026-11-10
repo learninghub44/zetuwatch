@@ -19,9 +19,9 @@ async function createMonitor(options: {
   await env.DB.batch([
     env.DB.prepare("INSERT INTO organizations (id, name, slug) VALUES (?, ?, ?)")
       .bind(organizationId, "Scheduler test workspace", "scheduler-" + organizationId),
-    env.DB.prepare(\`INSERT INTO monitors
+    env.DB.prepare(`INSERT INTO monitors
       (id, organization_id, name, target_url, is_enabled, consecutive_failures, next_check_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)\`)
+      VALUES (?, ?, ?, ?, ?, ?, ?)`)
       .bind(
         monitorId,
         organizationId,
