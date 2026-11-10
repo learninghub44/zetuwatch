@@ -3,6 +3,9 @@ export const MAX_CLAIM_LIMIT = 25;
 export const DEFAULT_LEASE_MS = 120_000;
 export const MIN_LEASE_MS = 30_000;
 export const MAX_LEASE_MS = 300_000;
+export const DEFAULT_FAILURE_THRESHOLD = 2;
+export const DEFAULT_RECOVERY_THRESHOLD = 2;
+export const MAX_INCIDENT_THRESHOLD = 10;
 
 export interface ClaimedMonitor {
   id: string;
@@ -35,6 +38,8 @@ export interface FinalizeCheckInput {
   responseTimeMs: number;
   errorCode?: string | null;
   checkId?: string;
+  failureThreshold?: number;
+  recoveryThreshold?: number;
 }
 
 function timestamp(value: Date | string, label: string): { milliseconds: number; sql: string; iso: string } {
@@ -143,9 +148,9 @@ export async function releaseMonitorClaim(
 }
 
 /**
- * Persist one result and advance its schedule only while the caller still owns
- * the lease. The conditional insert prevents stale workers from appending a
- * check after a lease has been reclaimed by another invocation.
+ * Persist a check and its incident transition in one D1 batch. Failure and
+ * recovery thresholds are consecutive-check policies, not timing guarantees.
+ * A stale lease cannot append a check or mutate incident state.
  */
 export async function finalizeMonitorCheck(
   db: D1Database,
@@ -168,6 +173,15 @@ export async function finalizeMonitorCheck(
     throw new Error("SCHEDULER_ERROR_CODE_INVALID");
   }
 
+  const failureThreshold = input.failureThreshold ?? DEFAULT_FAILURE_THRESHOLD;
+  const recoveryThreshold = input.recoveryThreshold ?? DEFAULT_RECOVERY_THRESHOLD;
+  if (!Number.isInteger(failureThreshold) || failureThreshold < 1 || failureThreshold > MAX_INCIDENT_THRESHOLD) {
+    throw new Error("SCHEDULER_FAILURE_THRESHOLD_INVALID");
+  }
+  if (!Number.isInteger(recoveryThreshold) || recoveryThreshold < 2 || recoveryThreshold > MAX_INCIDENT_THRESHOLD) {
+    throw new Error("SCHEDULER_RECOVERY_THRESHOLD_INVALID");
+  }
+
   const checkedAt = timestamp(input.checkedAt, "CHECKED_AT");
   const nextCheckAt = timestamp(input.nextCheckAt, "NEXT_CHECK_AT");
   if (nextCheckAt.milliseconds <= checkedAt.milliseconds) {
@@ -176,25 +190,138 @@ export async function finalizeMonitorCheck(
   const checkId = input.checkId ?? crypto.randomUUID();
   if (!checkId || checkId.length > 128) throw new Error("SCHEDULER_CHECK_ID_INVALID");
 
-  const updateSql = [
+  const incidentId = crypto.randomUUID();
+  const openedEventId = crypto.randomUUID();
+  const monitoringEventId = crypto.randomUUID();
+  const resolvedEventId = crypto.randomUUID();
+  const reopenedEventId = crypto.randomUUID();
+
+  const updateMonitorSql = [
     "UPDATE monitors",
     "SET last_checked_at = ?,",
     "    next_check_at = ?,",
     "    consecutive_failures = CASE WHEN ? = 1 THEN 0 ELSE consecutive_failures + 1 END,",
+    "    consecutive_successes = CASE WHEN ? = 1 THEN consecutive_successes + 1 ELSE 0 END,",
     "    check_lease_token = NULL,",
     "    check_lease_until = NULL",
     "WHERE id = ? AND check_lease_token = ?"
   ].join("\n");
-  const insertSql = [
+  const insertCheckSql = [
     "INSERT INTO monitor_checks",
     "(id, monitor_id, checked_at, is_up, status_code, response_time_ms, error_code)",
     "SELECT ?, ?, ?, ?, ?, ?, ? WHERE changes() = 1"
   ].join("\n");
+  const openIncidentSql = [
+    "INSERT INTO incidents (id, monitor_id, started_at, status, summary)",
+    "SELECT ?, id, ?, 'investigating', 'Monitor failed consecutive checks.'",
+    "FROM monitors",
+    "WHERE id = ?",
+    "  AND consecutive_failures >= ?",
+    "  AND NOT EXISTS (SELECT 1 FROM incidents WHERE monitor_id = ? AND resolved_at IS NULL)",
+    "  AND changes() = 1"
+  ].join("\n");
+  const appendOpenedEventSql = [
+    "INSERT INTO incident_events (id, incident_id, event_type, message, created_at)",
+    "SELECT ?, ?, 'incident.opened', 'Incident opened after consecutive failed checks.', ?",
+    "WHERE changes() = 1"
+  ].join("\n");
+  const markMonitoringSql = [
+    "UPDATE incidents",
+    "SET status = 'monitoring'",
+    "WHERE monitor_id = ? AND resolved_at IS NULL",
+    "  AND status IN ('investigating', 'identified')",
+    "  AND ? = 1",
+    "  AND (SELECT consecutive_successes FROM monitors WHERE id = ?) >= 1",
+    "  AND (SELECT consecutive_successes FROM monitors WHERE id = ?) < ?"
+  ].join("\n");
+  const appendMonitoringEventSql = [
+    "INSERT INTO incident_events (id, incident_id, event_type, message, created_at)",
+    "SELECT ?, id, 'incident.monitoring', 'Recovery checks are passing; monitoring stability.', ?",
+    "FROM incidents",
+    "WHERE monitor_id = ? AND resolved_at IS NULL AND status = 'monitoring' AND changes() = 1"
+  ].join("\n");
+  const resolveIncidentSql = [
+    "UPDATE incidents",
+    "SET status = 'resolved', resolved_at = ?",
+    "WHERE monitor_id = ? AND resolved_at IS NULL AND status = 'monitoring'",
+    "  AND ? = 1",
+    "  AND (SELECT consecutive_successes FROM monitors WHERE id = ?) >= ?"
+  ].join("\n");
+  const appendResolvedEventSql = [
+    "INSERT INTO incident_events (id, incident_id, event_type, message, created_at)",
+    "SELECT ?, id, 'incident.resolved', 'The configured recovery threshold was met.', ?",
+    "FROM incidents",
+    "WHERE monitor_id = ? AND resolved_at = ? AND status = 'resolved' AND changes() = 1"
+  ].join("\n");
+  const reopenIncidentSql = [
+    "UPDATE incidents",
+    "SET status = 'investigating'",
+    "WHERE monitor_id = ? AND resolved_at IS NULL AND status = 'monitoring' AND ? = 0"
+  ].join("\n");
+  const appendReopenedEventSql = [
+    "INSERT INTO incident_events (id, incident_id, event_type, message, created_at)",
+    "SELECT ?, id, 'incident.reopened', 'A failed check interrupted recovery; investigation resumed.', ?",
+    "FROM incidents",
+    "WHERE monitor_id = ? AND resolved_at IS NULL AND status = 'investigating' AND changes() = 1"
+  ].join("\n");
 
   const results = await db.batch([
-    db.prepare(updateSql).bind(checkedAt.sql, nextCheckAt.sql, input.isUp ? 1 : 0, input.monitorId, input.leaseToken),
-    db.prepare(insertSql).bind(checkId, input.monitorId, checkedAt.sql, input.isUp ? 1 : 0,
-      input.statusCode, input.responseTimeMs, errorCode)
+    db.prepare(updateMonitorSql).bind(
+      checkedAt.sql,
+      nextCheckAt.sql,
+      input.isUp ? 1 : 0,
+      input.isUp ? 1 : 0,
+      input.monitorId,
+      input.leaseToken
+    ),
+    db.prepare(insertCheckSql).bind(
+      checkId,
+      input.monitorId,
+      checkedAt.sql,
+      input.isUp ? 1 : 0,
+      input.statusCode,
+      input.responseTimeMs,
+      errorCode
+    ),
+    db.prepare(openIncidentSql).bind(
+      incidentId,
+      checkedAt.sql,
+      input.monitorId,
+      failureThreshold,
+      input.monitorId
+    ),
+    db.prepare(appendOpenedEventSql).bind(openedEventId, incidentId, checkedAt.sql),
+    db.prepare(markMonitoringSql).bind(
+      input.monitorId,
+      input.isUp ? 1 : 0,
+      input.monitorId,
+      input.monitorId,
+      recoveryThreshold
+    ),
+    db.prepare(appendMonitoringEventSql).bind(
+      monitoringEventId,
+      checkedAt.sql,
+      input.monitorId
+    ),
+    db.prepare(resolveIncidentSql).bind(
+      checkedAt.sql,
+      input.monitorId,
+      input.isUp ? 1 : 0,
+      input.monitorId,
+      recoveryThreshold
+    ),
+    db.prepare(appendResolvedEventSql).bind(
+      resolvedEventId,
+      checkedAt.sql,
+      input.monitorId,
+      checkedAt.sql
+    ),
+    db.prepare(reopenIncidentSql).bind(input.monitorId, input.isUp ? 1 : 0),
+    db.prepare(appendReopenedEventSql).bind(
+      reopenedEventId,
+      checkedAt.sql,
+      input.monitorId
+    )
   ]);
 
   return (results[0]?.meta?.changes ?? 0) === 1 &&
