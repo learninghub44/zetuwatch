@@ -32,7 +32,7 @@ The integration suite loads the repository's numbered SQL migrations into an iso
 
 The Resend endpoint and test-only API key are inert fixtures. The Worker test runtime intercepts the outbound `fetch`; these tests do not contact Resend.
 
-## API integration coverage (9 D1-backed tests)
+## API integration coverage (11 D1-backed tests)
 
 - Missing sessions are rejected.
 - Organization-scoped monitor listing rejects users outside the requested organization.
@@ -43,8 +43,10 @@ The Resend endpoint and test-only API key are inert fixtures. The Worker test ru
 - Team membership cannot be read across tenant boundaries.
 - A team invitation is consumed at most once when two acceptance requests race; only one membership and one acceptance audit event are created.
 - Concurrent owner demotions cannot remove the final workspace owner.
+- Incident lists require workspace membership and return only incidents belonging to that tenant.
+- Incident detail and timeline reads reject a foreign-tenant incident ID.
 
-The full CI suite currently passes 98 tests across 12 files, including the 9 API integration tests, authentication lifecycle test, six scheduler integration tests and three incident lifecycle integration tests. These tests verify Worker routes and scheduler/incident persistence against D1's SQLite-compatible runtime. They do not replace production D1 verification, browser end-to-end tests, provider delivery tests or a security review of outbound network execution. No scheduled probes are enabled by this test setup.
+The full CI suite currently passes 100 tests across 12 files, including the 11 API integration tests, authentication lifecycle test, six scheduler integration tests and three incident lifecycle integration tests. These tests verify Worker routes and scheduler/incident persistence against D1's SQLite-compatible runtime. They do not replace production D1 verification, browser end-to-end tests, provider delivery tests or a security review of outbound network execution. No scheduled probes are enabled by this test setup.
 
 
 ## Scheduler integration coverage (6 D1-backed tests)
@@ -67,3 +69,6 @@ These tests use isolated local D1. They do not invoke a Cron Trigger, contact cu
 - Database updates to incident timeline events are rejected by the migration trigger.
 
 The suite does not yet cover incident list/detail API authorization, user-authored status updates, notification fan-out, retention/deletion semantics or live probe-driven incidents.
+
+
+The incident read endpoints are exercised through the actual Worker entrypoint with isolated D1. No incident write endpoint or customer-authored timeline event is exposed.
