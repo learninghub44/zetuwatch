@@ -9,7 +9,7 @@ The product is built in vertical slices. A slice is complete only when UI, API, 
 - [x] Conservative HTTP probe foundation
 - [x] Product scope and user journey specification
 - [x] CI typecheck workflow added and verified in GitHub Actions
-- [ ] Unit and integration test suite (95 tests across 11 files pass in CI, including authentication, tenant/team, SSRF policy/DNS and six D1-backed scheduler claim/finalization tests; incident and payment lifecycle coverage, browser E2E and provider tests remain)
+- [ ] Unit and integration test suite (98 tests across 12 files pass in CI, including authentication, tenant/team, SSRF policy/DNS, six D1-backed scheduler tests and three incident lifecycle tests; payment lifecycle coverage, browser E2E and provider tests remain)
 - [x] Direct development-tool versions checked against current package releases and pinned
 - [ ] Lockfile generation and clean-install verification
 
@@ -17,7 +17,7 @@ The product is built in vertical slices. A slice is complete only when UI, API, 
 - [ ] Authentication foundation: registration, email verification, password login/reset and opaque sessions are implemented; a D1-backed test now covers registration → verification → login → password reset → session revocation with email delivery stubbed; browser E2E, live provider delivery and security edge-case tests remain
 - [ ] Invitation acceptance and full team/member management (member listing, role policy, invitations, acceptance, role changes, removal API and initial responsive team screen implemented; team member-list isolation, single-use concurrent invitation acceptance and concurrent owner demotion are covered by D1 integration tests; browser acceptance and real email delivery remain)
 - [ ] Organization creation and basic membership checks exist; team-management API now enforces owner/admin/member/viewer policy and last-owner protection; monitor/team tenant boundaries, invitation consumption and concurrent owner protection pass D1-backed API tests, while broader route coverage remains
-- [ ] Tenant-safe schema constraints and migration tests (three migrations pass the CI SQLite smoke-test and API/scheduler suites run against isolated local D1; production-account D1 behavior remains unverified)
+- [ ] Tenant-safe schema constraints and migration tests (four migrations pass the CI SQLite smoke-test and API/scheduler/incident suites run against isolated local D1; production-account D1 behavior remains unverified)
 - [ ] Audit events and basic per-IP auth/monitor rate limits exist; broader abuse controls remain
 
 ## Phase 2 — first working monitoring loop
@@ -26,7 +26,7 @@ The product is built in vertical slices. A slice is complete only when UI, API, 
 - [x] Atomic due-work claim leases and D1-backed check finalization primitive (bounded batches, lease expiry/reclaim, token ownership and check-history persistence are integration-tested; no Cron execution or real probes are enabled)
 - [ ] Bounded scheduled runner / Cron Trigger integration (load, lag and retry behavior remain untested; real execution is blocked on hardened DNS-pinned egress)
 - [ ] HTTP/HTTPS checks, history and latency
-- [ ] Incident confirmation, deduplication and recovery
+- [ ] Incident confirmation, deduplication and recovery (D1-backed finalization now confirms incidents after configurable consecutive failures, prevents duplicate active incidents, moves to monitoring after a successful check, resolves after the recovery threshold and reopens if recovery is interrupted; incident API/UI, customer-facing updates and notification delivery remain. Event updates are blocked, but monitor deletion still cascades timeline data until a soft-delete/retention workflow exists.)
 - [ ] Verified email alerts and delivery history
 
 ## Phase 3 — complete customer experience
@@ -172,3 +172,15 @@ No Cloudflare resources were created and no deployment was attempted. This is fe
 - GitHub Actions [CI run #112](https://github.com/learninghub44/zetuwatch/actions/runs/42767560283) completed successfully on commit `8a682c85b4fdeafb8e55efc5d5de531b4de76a44`.
 - Verified: TypeScript typecheck; SQLite migration validation (3 migrations, 16 required tables); Vitest (11 files, 95 tests), including six D1-backed scheduler integration tests.
 - This is the durable claim/finalization layer only. No Cron Trigger is configured, no probe is executed and no live measurement is written. Scheduled execution remains disabled until the DNS-pinned HTTP/HTTPS transport and complete SSRF/redirect/abuse controls are implemented and verified.
+
+
+## Incident lifecycle implementation and CI verification (2026-11-10)
+
+- Added migration `0004_incident_lifecycle.sql` with a consecutive-success counter, a partial unique index enforcing at most one unresolved incident per monitor, and a database trigger that rejects updates to incident timeline events.
+- Extended scheduler result finalization so monitor counters, check history and incident transitions are written in one D1 batch under the current lease token.
+- Default policy: open after two consecutive failures; move an active incident to monitoring after the first successful check; resolve after two consecutive successful checks. Thresholds are configurable within bounded limits.
+- A failed check during recovery reopens the same active incident instead of creating a duplicate. Repeated failures do not append duplicate incident-open events.
+- Added three D1-backed lifecycle tests covering confirmation/deduplication, recovery and resolution, interrupted recovery/reopening, and rejection of timeline event updates.
+- GitHub Actions [CI run #118](https://github.com/learninghub44/zetuwatch/actions/runs/42767973022) completed successfully on commit `163876decfe6a2c5d4fa3dde9a6a462e222ce51b`.
+- Verified: TypeScript typecheck; SQLite migration validation (4 migrations, 16 required tables); Vitest (12 files, 98 tests), including six scheduler and three incident lifecycle integration tests.
+- The state machine is a tested persistence primitive only. There is no active Cron Trigger, real probe execution, incident API/UI, customer-facing status update or notification delivery. Timeline updates are blocked at the database layer, but monitor deletion still cascades timeline rows; a soft-delete/retention workflow is required before claiming full timeline immutability.
