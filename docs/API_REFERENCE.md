@@ -42,6 +42,15 @@ All team endpoints require a verified signed-in session. The caller must already
 
 Role changes, removals, invitation creation and acceptance write audit events. These endpoints and an initial responsive workspace team screen are implemented. API integration tests, invitation acceptance browser testing, and the complete team-management UI states are still outstanding. Do not consider team management launch-complete until those tests pass.
 
+## Incident reads
+
+All incident reads require a verified signed-in session and membership in the incident's owning workspace. Members, admins, owners and viewers may read incidents; there are no incident mutation routes yet.
+
+- `GET /v1/incidents?organizationId=<id>` — list up to 100 incidents for the selected workspace, newest first.
+- `GET /v1/incidents/<uuid>` — retrieve an incident with its ordered timeline events. The API verifies membership through the incident's monitor organization before returning the detail.
+
+Timeline event updates are rejected by a database trigger. Monitor deletion still cascades its incident history; retention-aware soft deletion and export/deletion controls are not yet implemented.
+
 ## Monitor execution status
 
 The current API deliberately returns `executionEnabled: false`. Creating a monitor stores its configuration but does not run a network request or schedule a check. The current URL validator is preliminary and does not provide DNS resolution/pinning or DNS-rebinding protection. Do not enable scheduled probes until the egress security architecture is implemented and reviewed.
