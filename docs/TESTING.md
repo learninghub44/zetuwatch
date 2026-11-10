@@ -44,7 +44,7 @@ The Resend endpoint and test-only API key are inert fixtures. The Worker test ru
 - A team invitation is consumed at most once when two acceptance requests race; only one membership and one acceptance audit event are created.
 - Concurrent owner demotions cannot remove the final workspace owner.
 
-The full CI suite currently passes 95 tests across 11 files, including the 9 API integration tests, authentication lifecycle test and six scheduler integration tests. These tests verify Worker routes and scheduler persistence against D1's SQLite-compatible runtime. They do not replace production D1 verification, browser end-to-end tests, provider delivery tests or a security review of outbound network execution. No scheduled probes are enabled by this test setup.
+The full CI suite currently passes 98 tests across 12 files, including the 9 API integration tests, authentication lifecycle test, six scheduler integration tests and three incident lifecycle integration tests. These tests verify Worker routes and scheduler/incident persistence against D1's SQLite-compatible runtime. They do not replace production D1 verification, browser end-to-end tests, provider delivery tests or a security review of outbound network execution. No scheduled probes are enabled by this test setup.
 
 
 ## Scheduler integration coverage (6 D1-backed tests)
@@ -57,3 +57,13 @@ The full CI suite currently passes 95 tests across 11 files, including the 9 API
 - Invalid batch limits, lease durations and check-result fields are rejected.
 
 These tests use isolated local D1. They do not invoke a Cron Trigger, contact customer URLs or assert production scheduler throughput/lag.
+
+
+## Incident lifecycle integration coverage (3 D1-backed tests)
+
+- An incident is opened only after the configured consecutive-failure threshold; repeated failures keep one active incident and do not duplicate the open event.
+- The first successful check moves the active incident to monitoring; the configured recovery threshold resolves it.
+- A failure during recovery reopens the same incident rather than creating a second active incident.
+- Database updates to incident timeline events are rejected by the migration trigger.
+
+The suite does not yet cover incident list/detail API authorization, user-authored status updates, notification fan-out, retention/deletion semantics or live probe-driven incidents.
