@@ -26,7 +26,11 @@ These are tested persistence primitives, not an active runner. No [Cron Trigger 
 
 ## Incident policy
 
-A single failed check marks a monitor as suspect. Confirm an incident only after consecutive failures or a configured failure window. Recover only after successful follow-up checks. Persist each state transition as an incident event.
+The D1 result finalizer currently implements a consecutive-check state machine. By default it opens an incident after two failures, moves the incident to `monitoring` after the first successful follow-up, resolves it after two consecutive successes, and returns it to `investigating` if a failure interrupts recovery. Failure and recovery thresholds are bounded and configurable. A partial unique index prevents more than one unresolved incident per monitor.
+
+The check row, monitor counters and incident transition are written in the same D1 batch while the caller still owns the monitor lease. Timeline events are inserted only for state transitions; a database trigger rejects event updates. Monitor deletion still cascades incident history, so the timeline is not yet fully immutable across deletion. Add soft deletion and retention-aware export/deletion workflows before changing that claim.
+
+This is tested persistence logic only. Incident list/detail routes, user-authored status updates, notification fan-out and live probe-driven incidents remain unimplemented.
 
 ## Evolution
 
