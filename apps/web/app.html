@@ -121,7 +121,7 @@ async function openIncident(incidentId){
       const marker=document.createElement("span");marker.className="pill";marker.textContent=String(event.eventType||"update").replace("incident.","").replace(/_/g," ");
       const body=document.createElement("div");body.style.minWidth="0";
       const message=document.createElement("div");message.style.cssText="font-size:12px;line-height:1.5";message.textContent=event.message||"Status updated.";
-      const time=document.createElement("small");time.style.cssText="display:block;color:var(--muted);font-size:10px;margin-top:4px";time.textContent=(event.actorName?event.actorName+" · ":"")+formatIncidentDate(event.createdAt)+(event.visibility==="public"?" · Public update":" · Internal note");
+      const time=document.createElement("small");time.style.cssText="display:block;color:var(--muted);font-size:10px;margin-top:4px";time.textContent=(event.actorName?event.actorName+" · ":"")+formatIncidentDate(event.createdAt)+(event.visibility==="public"?" · Public visibility (not published)":" · Internal note");
       body.append(message,time);item.append(marker,body);$("incident-events").appendChild(item);
     }
     const canWriteIncident=["owner","admin","member"].includes(orgs[0]?.role||"viewer");
