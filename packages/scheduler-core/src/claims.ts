@@ -98,12 +98,14 @@ export async function claimDueMonitors(
     "WHERE id IN (",
     "  SELECT id FROM monitors",
     "  WHERE is_enabled = 1",
+    "    AND deleted_at IS NULL",
     "    AND next_check_at <= ?",
     "    AND (check_lease_until IS NULL OR check_lease_until <= ?)",
     "  ORDER BY next_check_at ASC, id ASC",
     "  LIMIT ?",
     ")",
     "AND is_enabled = 1",
+    "AND deleted_at IS NULL",
     "AND next_check_at <= ?",
     "AND (check_lease_until IS NULL OR check_lease_until <= ?)"
   ].join("\n");
@@ -204,7 +206,7 @@ export async function finalizeMonitorCheck(
     "    consecutive_successes = CASE WHEN ? = 1 THEN consecutive_successes + 1 ELSE 0 END,",
     "    check_lease_token = NULL,",
     "    check_lease_until = NULL",
-    "WHERE id = ? AND check_lease_token = ?"
+    "WHERE id = ? AND check_lease_token = ? AND deleted_at IS NULL"
   ].join("\n");
   const insertCheckSql = [
     "INSERT INTO monitor_checks",
