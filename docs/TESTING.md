@@ -47,7 +47,7 @@ The Resend endpoint and test-only API key are inert fixtures. The Worker test ru
 - Incident lists require workspace membership and return only incidents belonging to that tenant.
 - Incident detail and timeline reads reject a foreign-tenant incident ID.
 
-The full CI suite currently passes 100 tests across 12 files, including the 11 API integration tests, authentication lifecycle test, six scheduler integration tests and three incident lifecycle integration tests. These tests verify Worker routes and scheduler/incident persistence against D1's SQLite-compatible runtime. They do not replace production D1 verification, browser end-to-end tests, provider delivery tests or a security review of outbound network execution. No scheduled probes are enabled by this test setup.
+The last previously verified CI suite passed 100 tests across 12 files, including the 11 API integration tests, authentication lifecycle test, six scheduler integration tests and three incident lifecycle integration tests. The incident-action slice adds six D1-backed tests in a new file (106 tests across 13 files are now defined); CI verification of the new migration, API, browser script and tests is pending. These tests verify Worker routes and scheduler/incident persistence against D1's SQLite-compatible runtime. They do not replace production D1 verification, browser end-to-end tests, provider delivery tests or a security review of outbound network execution. No scheduled probes are enabled by this test setup.
 
 
 ## Scheduler integration coverage (6 D1-backed tests)
