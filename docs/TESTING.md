@@ -69,7 +69,7 @@ These tests use isolated local D1. They do not invoke a Cron Trigger, contact cu
 - A failure during recovery reopens the same incident rather than creating a second active incident.
 - Database updates to incident timeline events are rejected by the migration trigger.
 
-## Incident action integration coverage (6 D1-backed tests)
+## Incident action integration coverage (7 D1-backed tests)
 
 - Members can append internal and public timeline notes; the API returns actor attribution and visibility.
 - Members can advance an incident through the supported investigation, identified, monitoring and resolved states.
