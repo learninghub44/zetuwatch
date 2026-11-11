@@ -49,7 +49,7 @@ All incident reads require a verified signed-in session and membership in the in
 - `GET /v1/incidents?organizationId=<id>` — list up to 100 incidents for the selected workspace, newest first.
 - `GET /v1/incidents/<uuid>` — retrieve an incident with its ordered timeline. Each event includes its visibility and, when the account still exists, the actor's display name.
 - `PATCH /v1/incidents/<uuid>` — advance or regress an active incident using `{ status, message?, visibility? }`. Supported transitions are investigating → identified, identified → investigating/monitoring, and monitoring → identified/resolved. A resolved incident is terminal. Status changes and their timeline/audit events are written in one D1 batch; a concurrent stale transition receives 409.
-- `POST /v1/incidents/<uuid>/updates` — append a workspace note using `{ message, visibility? }`. Messages are limited to 500 characters and control characters are rejected. Updates cannot be added after resolution.
+- `POST /v1/incidents/<uuid>/updates` — append a workspace note using `{ message, visibility? }`. Messages are limited to 500 characters and control characters are rejected. Status and note writes are separately rate-limited to 30 requests per 15 minutes per source IP. Updates cannot be added after resolution.
 
 Timeline visibility is `internal` by default or `public` when explicitly selected. Public visibility is stored for a future status-page publisher; these updates are not currently published to an external page. Timeline events remain append-only through the existing database update trigger. Monitor deletion still cascades incident history; retention-aware soft deletion and export/deletion controls are not yet implemented.
 
