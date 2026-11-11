@@ -69,10 +69,17 @@ These tests use isolated local D1. They do not invoke a Cron Trigger, contact cu
 - A failure during recovery reopens the same incident rather than creating a second active incident.
 - Database updates to incident timeline events are rejected by the migration trigger.
 
-Two API integration tests cover incident list/detail authorization across workspace boundaries. The suite does not yet cover user-authored status updates, notification fan-out, retention/deletion semantics or live probe-driven incidents.
+## Incident action integration coverage (6 D1-backed tests)
 
+- Members can append internal and public timeline notes; the API returns actor attribution and visibility.
+- Members can advance an incident through the supported investigation, identified, monitoring and resolved states.
+- A resolved incident rejects later customer-authored updates.
+- Viewers cannot add notes or change incident status.
+- Cross-tenant incident mutations are denied without appending timeline or audit records.
+- Invalid transitions, empty/oversized/control-character messages and unsupported visibility values are rejected.
+- Concurrent status transitions append only one event; the stale request receives a conflict response.
 
-The incident read endpoints are exercised through the actual Worker entrypoint with isolated D1. No incident write endpoint or customer-authored timeline event is exposed.
+These tests exercise the actual Worker entrypoint against isolated D1. Public visibility is stored for future status-page publishing but does not publish an external page. Notification fan-out, retention/deletion semantics and live probe-driven incidents remain untested.
 
 
 ## Browser script syntax validation
