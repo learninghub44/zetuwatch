@@ -71,7 +71,7 @@ Do not mark a phase complete because files or mock screens exist. Verify behavio
 ## Incident action implementation update (2026-11-11)
 
 - Added migration `0005_incident_updates.sql` with optional timeline actor attribution, internal/public visibility and a visibility/time index.
-- Added owner/admin/member-only incident status transitions with a guarded state machine, conflict handling for concurrent transitions, resolved timestamps, append-only timeline entries and audit events.
+- Added owner/admin/member-only incident status transitions with a guarded state machine, conflict handling for concurrent transitions, resolved timestamps, timeline event inserts and audit events. Existing database protection blocks event updates, but monitor deletion still cascades event history.
 - Added owner/admin/member-only customer-authored timeline notes with a 500-character limit, control-character rejection and explicit internal/public visibility.
 - Incident detail reads now include event visibility and actor display names when the account still exists.
 - Added six D1-backed integration tests for authorship, visibility, status lifecycle, viewer denial, cross-tenant denial, validation and concurrent transitions.
