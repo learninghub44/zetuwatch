@@ -374,7 +374,7 @@ export default {
       if (!membership) return json({ error: "FORBIDDEN" }, 403);
       const result = await env.DB.prepare(`SELECT id, name, monitor_type, target_url, method, expected_status,
         interval_seconds, timeout_ms, is_enabled, consecutive_failures, last_checked_at, next_check_at, created_at, updated_at
-        FROM monitors WHERE organization_id = ? ORDER BY created_at DESC LIMIT 100`).bind(organizationId).all();
+        FROM monitors WHERE organization_id = ? AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 100`).bind(organizationId).all();
       return json({ monitors: result.results, executionEnabled: false, note: "Scheduled checks are not enabled yet; monitors are saved but have not been probed." });
     }
 
@@ -421,7 +421,7 @@ export default {
       const user = await currentUser(request, env);
       if (!user) return json({ error: "UNAUTHENTICATED" }, 401);
       const monitorId = monitorMatch[1];
-      const monitor = await env.DB.prepare("SELECT id, organization_id, name, target_url, monitor_type, method, expected_status, interval_seconds, timeout_ms, is_enabled FROM monitors WHERE id = ?")
+      const monitor = await env.DB.prepare("SELECT id, organization_id, name, target_url, monitor_type, method, expected_status, interval_seconds, timeout_ms, is_enabled FROM monitors WHERE id = ? AND deleted_at IS NULL")
         .bind(monitorId).first<{ id: string; organization_id: string; name: string; target_url: string; monitor_type: string; method: string; expected_status: number; interval_seconds: number; timeout_ms: number; is_enabled: number }>();
       if (!monitor) return json({ error: "NOT_FOUND" }, 404);
       const membership = await env.DB.prepare("SELECT role FROM organization_members WHERE organization_id = ? AND user_id = ?")
@@ -452,7 +452,7 @@ export default {
         }
         await env.DB.batch([
           env.DB.prepare(`UPDATE monitors SET name = ?, target_url = ?, method = ?, expected_status = ?,
-            interval_seconds = ?, timeout_ms = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ?`)
+            interval_seconds = ?, timeout_ms = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ? AND deleted_at IS NULL`)
             .bind(name, target, method, expectedStatus, intervalSeconds, timeoutMs, monitorId, monitor.organization_id),
           env.DB.prepare("INSERT INTO audit_logs (id, organization_id, actor_user_id, action, resource_type, resource_id) VALUES (?, ?, ?, 'monitor.updated', 'monitor', ?)")
             .bind(id(), monitor.organization_id, user.id, monitorId)
@@ -461,12 +461,15 @@ export default {
       }
       if (request.method === "DELETE") {
         if (!canDeleteMonitors(membership.role)) return json({ error: "FORBIDDEN" }, 403);
-        await env.DB.batch([
-          env.DB.prepare("DELETE FROM monitors WHERE id = ? AND organization_id = ?").bind(monitorId, monitor.organization_id),
-          env.DB.prepare("INSERT INTO audit_logs (id, organization_id, actor_user_id, action, resource_type, resource_id) VALUES (?, ?, ?, 'monitor.deleted', 'monitor', ?)")
+        const deletedAt = new Date().toISOString();
+        const results = await env.DB.batch([
+          env.DB.prepare("UPDATE monitors SET is_enabled = 0, deleted_at = ?, deleted_by = ?, check_lease_token = NULL, check_lease_until = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ? AND deleted_at IS NULL")
+            .bind(deletedAt, user.id, monitorId, monitor.organization_id),
+          env.DB.prepare("INSERT INTO audit_logs (id, organization_id, actor_user_id, action, resource_type, resource_id) SELECT ?, ?, ?, 'monitor.deleted', 'monitor', ? WHERE changes() = 1")
             .bind(id(), monitor.organization_id, user.id, monitorId)
         ]);
-        return json({ message: "Monitor deleted." });
+        if ((results[0] as D1Result).meta?.changes !== 1) return json({ error: "MONITOR_ALREADY_DELETED" }, 409);
+        return json({ message: "Monitor deleted. Check history and incident timelines are retained." });
       }
       return json({ error: "METHOD_NOT_ALLOWED" }, 405);
     }
