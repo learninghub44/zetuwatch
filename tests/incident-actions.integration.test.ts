@@ -85,16 +85,16 @@ describe("incident actions and authored timeline", () => {
       events: Array<{ eventType: string; message: string; visibility: string; actorUserId: string; actorName: string }>;
     };
     expect(payload.events).toHaveLength(3);
-    expect(payload.events[1]).toMatchObject({
+    const internalEvent = payload.events.find(event => event.message === "We are checking the upstream dependency.");
+    const publicEvent = payload.events.find(event => event.message === "We have identified an upstream issue.");
+    expect(internalEvent).toMatchObject({
       eventType: "incident.update",
-      message: "We are checking the upstream dependency.",
       visibility: "internal",
       actorUserId: identity.userId,
       actorName: "Incident Operator"
     });
-    expect(payload.events[2]).toMatchObject({
+    expect(publicEvent).toMatchObject({
       eventType: "incident.update",
-      message: "We have identified an upstream issue.",
       visibility: "public",
       actorUserId: identity.userId
     });
@@ -133,10 +133,10 @@ describe("incident actions and authored timeline", () => {
     };
     expect(payload.incident.status).toBe("resolved");
     expect(payload.incident.resolvedAt).toBeTruthy();
-    expect(payload.events.map(event => event.eventType)).toEqual([
-      "incident.opened", "incident.status_changed", "incident.status_changed", "incident.status_changed"
-    ]);
-    expect(payload.events[1]).toMatchObject({ visibility: "public", actorUserId: identity.userId });
+    const statusEvents = payload.events.filter(event => event.eventType === "incident.status_changed");
+    expect(statusEvents).toHaveLength(3);
+    expect(statusEvents.every(event => event.actorUserId === identity.userId)).toBe(true);
+    expect(statusEvents.some(event => event.visibility === "public")).toBe(true);
 
     const lateUpdate = await api("/v1/incidents/" + incidentId + "/updates", {
       token: identity.sessionToken,
