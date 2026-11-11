@@ -326,6 +326,55 @@ describe("Worker API tenant isolation", () => {
   });
 
 
+  it("soft-deletes monitors while retaining check and incident history", async () => {
+    const identity = await createIdentity("owner");
+    const monitorId = await createMonitor(identity.organizationId);
+    const incidentId = await createIncident(monitorId);
+    await env.DB.prepare(
+      "INSERT INTO monitor_checks (id, monitor_id, checked_at, is_up, status_code, response_time_ms) VALUES (?, ?, ?, 1, 200, 24)"
+    ).bind(crypto.randomUUID(), monitorId, "2026-11-11 09:00:00").run();
+
+    const deleted = await api("/v1/monitors/" + monitorId, {
+      token: identity.sessionToken,
+      method: "DELETE"
+    });
+    expect(deleted.status).toBe(200);
+    expect(await deleted.json()).toMatchObject({ message: "Monitor deleted. Check history and incident timelines are retained." });
+
+    const list = await api("/v1/monitors?organizationId=" + identity.organizationId, {
+      token: identity.sessionToken
+    });
+    const monitorList = await list.json() as { monitors: Array<{ id: string }> };
+    expect(monitorList.monitors.some(monitor => monitor.id === monitorId)).toBe(false);
+
+    const detail = await api("/v1/monitors/" + monitorId, { token: identity.sessionToken });
+    const checks = await api("/v1/monitors/" + monitorId + "/checks", { token: identity.sessionToken });
+    expect(detail.status).toBe(404);
+    expect(checks.status).toBe(404);
+
+    const incidentDetail = await api("/v1/incidents/" + incidentId, { token: identity.sessionToken });
+    expect(incidentDetail.status).toBe(200);
+    const timeline = await incidentDetail.json() as { incident: { monitorId: string }; events: Array<{ eventType: string }> };
+    expect(timeline.incident.monitorId).toBe(monitorId);
+    expect(timeline.events.map(event => event.eventType)).toEqual(["incident.opened"]);
+
+    const retained = await env.DB.prepare(
+      "SELECT deleted_at, deleted_by, is_enabled FROM monitors WHERE id = ?"
+    ).bind(monitorId).first<{ deleted_at: string | null; deleted_by: string | null; is_enabled: number }>();
+    const checkCount = await env.DB.prepare(
+      "SELECT COUNT(*) AS count FROM monitor_checks WHERE monitor_id = ?"
+    ).bind(monitorId).first<{ count: number }>();
+    const incidentCount = await env.DB.prepare(
+      "SELECT COUNT(*) AS count FROM incidents WHERE id = ?"
+    ).bind(incidentId).first<{ count: number }>();
+
+    expect(retained?.deleted_at).toBeTruthy();
+    expect(retained?.deleted_by).toBe(identity.userId);
+    expect(retained?.is_enabled).toBe(0);
+    expect(checkCount?.count).toBe(1);
+    expect(incidentCount?.count).toBe(1);
+  });
+
   it("lists incidents only inside the selected organization", async () => {
     const identity = await createIdentity("member");
     const ownMonitorId = await createMonitor(identity.organizationId);
