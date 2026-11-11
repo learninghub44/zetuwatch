@@ -163,6 +163,46 @@ describe("Worker API tenant isolation", () => {
     expect(checksResponse.status).toBe(403);
   });
 
+  it("returns persisted check history to an in-tenant viewer without claiming probes are active", async () => {
+    const identity = await createIdentity("viewer");
+    const monitorId = await createMonitor(identity.organizationId);
+    const olderCheckId = crypto.randomUUID();
+    const newerCheckId = crypto.randomUUID();
+
+    await env.DB.batch([
+      env.DB.prepare(
+        "INSERT INTO monitor_checks (id, monitor_id, checked_at, is_up, status_code, response_time_ms, error_code) VALUES (?, ?, ?, 1, 200, 34, NULL)"
+      ).bind(olderCheckId, monitorId, "2026-11-11 09:00:00"),
+      env.DB.prepare(
+        "INSERT INTO monitor_checks (id, monitor_id, checked_at, is_up, status_code, response_time_ms, error_code) VALUES (?, ?, ?, 0, 503, 87, 'HTTP_STATUS_MISMATCH')"
+      ).bind(newerCheckId, monitorId, "2026-11-11 09:05:00")
+    ]);
+
+    const response = await api("/v1/monitors/" + monitorId + "/checks", {
+      token: identity.sessionToken
+    });
+
+    expect(response.status).toBe(200);
+    const payload = await response.json() as {
+      executionEnabled: boolean;
+      checks: Array<{
+        id: string;
+        is_up: number;
+        status_code: number;
+        response_time_ms: number;
+        error_code: string | null;
+      }>;
+    };
+    expect(payload.executionEnabled).toBe(false);
+    expect(payload.checks.map(check => check.id)).toEqual([newerCheckId, olderCheckId]);
+    expect(payload.checks[0]).toMatchObject({
+      is_up: 0,
+      status_code: 503,
+      response_time_ms: 87,
+      error_code: "HTTP_STATUS_MISMATCH"
+    });
+  });
+
   it("does not allow a tenant member to create a monitor in another organization", async () => {
     const identity = await createIdentity("member");
     const foreignOrganizationId = await createForeignOrganization();
