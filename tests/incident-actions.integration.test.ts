@@ -50,9 +50,9 @@ async function createIncident(organizationId: string, status = "investigating"):
 
 function api(
   path: string,
-  options: { token: string; method?: string; body?: Record<string, unknown> }
+  options: { token: string; method?: string; body?: Record<string, unknown>; ip?: string }
 ): Promise<Response> {
-  const headers = new Headers({ cookie: "zw_session=" + options.token, "cf-connecting-ip": crypto.randomUUID() });
+  const headers = new Headers({ cookie: "zw_session=" + options.token, "cf-connecting-ip": options.ip ?? crypto.randomUUID() });
   if (options.body) headers.set("content-type", "application/json");
   return exports.default.fetch(new Request("https://api.zetuwatch.test" + path, {
     method: options.method ?? "GET",
@@ -224,6 +224,26 @@ describe("incident actions and authored timeline", () => {
     expect(controlMessage.status).toBe(400);
     expect(oversizedMessage.status).toBe(400);
     expect(invalidVisibility.status).toBe(400);
+  });
+
+  it("rate-limits repeated timeline writes from one source IP", async () => {
+    const identity = await createIdentity("member");
+    const incidentId = await createIncident(identity.organizationId);
+    const ip = "198.51.100.44";
+    const statuses: number[] = [];
+
+    for (let index = 0; index < 31; index += 1) {
+      const response = await api("/v1/incidents/" + incidentId + "/updates", {
+        token: identity.sessionToken,
+        method: "POST",
+        ip,
+        body: { message: "Operator note " + index }
+      });
+      statuses.push(response.status);
+    }
+
+    expect(statuses.slice(0, 30).every(status => status === 201)).toBe(true);
+    expect(statuses[30]).toBe(429);
   });
 
   it("serializes concurrent transitions so only one event is appended", async () => {
