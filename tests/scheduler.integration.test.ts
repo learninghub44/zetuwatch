@@ -98,6 +98,7 @@ describe("D1 monitor scheduler claims", () => {
   });
 
   it("never claims or finalizes a soft-deleted monitor", async () => {
+    await env.DB.prepare("UPDATE monitors SET is_enabled = 0").run();
     const hiddenId = await createMonitor({ nextCheckAt: "2026-11-10T08:59:00.000Z" });
     await env.DB.prepare("UPDATE monitors SET deleted_at = ?, is_enabled = 1 WHERE id = ?")
       .bind("2026-11-10T09:00:00.000Z", hiddenId).run();
