@@ -22,7 +22,7 @@ All monitor endpoints require a verified signed-in session and an organization m
 - `GET /v1/monitors?organizationId=<id>` — list up to 100 monitors in the selected workspace.
 - `POST /v1/monitors` — create a monitor. Body: `{ organizationId, name, targetUrl, monitorType: "http"|"api", method: "GET"|"HEAD", expectedStatus, intervalSeconds, timeoutMs }`.
 - `GET /v1/monitors/<uuid>` — retrieve a monitor.
-- `GET /v1/monitors/<uuid>/checks` — retrieve up to 100 stored checks.
+- `GET /v1/monitors/<uuid>/checks` — retrieve up to 100 stored checks, newest first. Each row includes its timestamp, pass/fail result, HTTP status, response time and error category. The response includes `executionEnabled: false`; this read does not trigger a probe.
 - `PATCH /v1/monitors/<uuid>` — update name, target URL, method, expected status, interval or timeout.
 - `DELETE /v1/monitors/<uuid>` — owner/admin only; soft-deletes and disables the monitor, removes it from monitor list/detail APIs, and retains check, incident and timeline rows. There is no hard-delete endpoint yet.
 
@@ -52,6 +52,10 @@ All incident reads require a verified signed-in session and membership in the in
 - `POST /v1/incidents/<uuid>/updates` — append a workspace note using `{ message, visibility? }`. Messages are limited to 500 characters and control characters are rejected. Status and note writes are separately rate-limited to 30 requests per 15 minutes per source IP. Updates cannot be added after resolution.
 
 Timeline visibility is `internal` by default or `public` when explicitly selected. Public visibility is stored for a future status-page publisher; these updates are not currently published to an external page. The database trigger blocks in-place timeline event updates, and the new API only inserts events. Monitor deletion now soft-deletes and disables the monitor while retaining check, incident and timeline rows. Hard-purge/retention and account-deletion workflows are not yet implemented.
+
+## Monitor detail and check history
+
+The workspace monitor list provides a **View** action that opens a detail panel. It loads the tenant-authorized monitor record and persisted check history, and renders stored values using text-only DOM nodes. An empty history is explicitly shown as no checks recorded; the UI does not invent status, uptime or latency values. Refreshing history only reads the API and never sends a request to the monitored target.
 
 ## Monitor execution status
 
