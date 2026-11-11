@@ -208,6 +208,11 @@ describe("incident actions and authored timeline", () => {
       method: "POST",
       body: { message: "unsafe\u0000message" }
     });
+    const oversizedMessage = await api("/v1/incidents/" + incidentId + "/updates", {
+      token: identity.sessionToken,
+      method: "POST",
+      body: { message: "x".repeat(501) }
+    });
     const invalidVisibility = await api("/v1/incidents/" + incidentId + "/updates", {
       token: identity.sessionToken,
       method: "POST",
@@ -217,6 +222,7 @@ describe("incident actions and authored timeline", () => {
     expect(skippedState.status).toBe(409);
     expect(emptyMessage.status).toBe(400);
     expect(controlMessage.status).toBe(400);
+    expect(oversizedMessage.status).toBe(400);
     expect(invalidVisibility.status).toBe(400);
   });
 
