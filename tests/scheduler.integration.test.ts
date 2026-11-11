@@ -97,6 +97,41 @@ describe("D1 monitor scheduler claims", () => {
     expect(availableAgain.map((monitor) => monitor.id)).toEqual([monitorId]);
   });
 
+  it("never claims or finalizes a soft-deleted monitor", async () => {
+    const hiddenId = await createMonitor({ nextCheckAt: "2026-11-10T08:59:00.000Z" });
+    await env.DB.prepare("UPDATE monitors SET deleted_at = ?, is_enabled = 1 WHERE id = ?")
+      .bind("2026-11-10T09:00:00.000Z", hiddenId).run();
+
+    const claims = await claimDueMonitors(env.DB, {
+      now: "2026-11-10T09:01:00.000Z",
+      token: "scheduler-soft-delete-hidden-01"
+    });
+    expect(claims.some(monitor => monitor.id === hiddenId)).toBe(false);
+
+    const activeId = await createMonitor({ nextCheckAt: "2026-11-10T08:59:00.000Z" });
+    const [claim] = await claimDueMonitors(env.DB, {
+      now: "2026-11-10T09:02:00.000Z",
+      token: "scheduler-soft-delete-stale-02"
+    });
+    expect(claim?.id).toBe(activeId);
+    await env.DB.prepare("UPDATE monitors SET is_enabled = 0, deleted_at = ?, check_lease_token = NULL, check_lease_until = NULL WHERE id = ?")
+      .bind("2026-11-10T09:02:01.000Z", activeId).run();
+
+    const finalized = await finalizeMonitorCheck(env.DB, {
+      monitorId: activeId,
+      leaseToken: claim.leaseToken,
+      checkedAt: "2026-11-10T09:02:02.000Z",
+      nextCheckAt: "2026-11-10T09:07:02.000Z",
+      isUp: true,
+      statusCode: 200,
+      responseTimeMs: 10
+    });
+    expect(finalized).toBe(false);
+    const checkCount = await env.DB.prepare("SELECT COUNT(*) AS count FROM monitor_checks WHERE monitor_id = ?")
+      .bind(activeId).first<{ count: number }>();
+    expect(checkCount?.count).toBe(0);
+  });
+
   it("persists a check and advances the schedule only for the current lease", async () => {
     const monitorId = await createMonitor({
       nextCheckAt: "2026-11-10T08:59:00.000Z",
