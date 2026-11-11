@@ -9,7 +9,7 @@ The product is built in vertical slices. A slice is complete only when UI, API, 
 - [x] Conservative HTTP probe foundation
 - [x] Product scope and user journey specification
 - [x] CI typecheck workflow added and verified in GitHub Actions
-- [ ] Unit and integration test suite (the previous 100 tests across 12 files passed CI; seven new incident-action tests bring the defined suite to 107 tests across 13 files, pending CI verification; payment lifecycle coverage, browser E2E and provider tests remain)
+- [ ] Unit and integration test suite (the previous 100 tests across 12 files passed CI; subsequent incident-action, monitor history/soft-delete and scheduler archive-safety coverage brings the defined suite to 110 tests across 13 files, pending CI verification; payment lifecycle coverage, browser E2E and provider tests remain)
 - [x] Direct development-tool versions checked against current package releases and pinned
 - [ ] Lockfile generation and clean-install verification
 
@@ -21,18 +21,18 @@ The product is built in vertical slices. A slice is complete only when UI, API, 
 - [ ] Audit events and basic per-IP auth/monitor rate limits exist; broader abuse controls remain
 
 ## Phase 2 — first working monitoring loop
-- [ ] Basic tenant-scoped monitor create/list/read/update/delete API and responsive setup screen implemented; 11 D1-backed API tests now cover monitor/team boundaries, member/viewer permissions, invitation/owner concurrency and tenant-scoped incident list/detail reads, while the full route matrix and browser acceptance remain
+- [ ] Basic tenant-scoped monitor create/list/read/update/delete API and responsive setup screen implemented; 13 D1-backed API tests now cover monitor/team boundaries, member/viewer permissions, invitation/owner concurrency, tenant-scoped incident reads, soft deletion and persisted check-history reads, while the full route matrix and browser acceptance remain
 - [ ] Safe URL/egress policy: syntactic validation, dependency-free IPv4/IPv6 classification, mixed-answer rejection and a bounded Cloudflare DoH A/AAAA resolver are implemented as unit-testable components; the resolver is not connected to monitor execution, and validated-address pinning, redirect-hop checks and rebinding defense remain unimplemented
 - [x] Atomic due-work claim leases and D1-backed check finalization primitive (bounded batches, lease expiry/reclaim, token ownership and check-history persistence are integration-tested; no Cron execution or real probes are enabled)
 - [ ] Bounded scheduled runner / Cron Trigger integration (load, lag and retry behavior remain untested; real execution is blocked on hardened DNS-pinned egress)
 - [ ] HTTP/HTTPS checks, history and latency
-- [ ] Incident confirmation, deduplication and recovery (D1-backed finalization confirms, deduplicates, monitors, resolves and reopens incidents; tenant-scoped incident list/detail APIs now return the timeline to workspace members. Member/admin/owner incident status transitions, internal/public customer-authored timeline notes, actor attribution, audit writes and responsive controls are implemented; seven D1-backed Worker API integration tests were added. Public updates are stored but not published, browser E2E/accessibility and notifications remain. Monitor deletion still cascades timeline data until a soft-delete/retention workflow exists.)
+- [ ] Incident confirmation, deduplication and recovery (D1-backed finalization confirms, deduplicates, monitors, resolves and reopens incidents; tenant-scoped incident list/detail APIs now return the timeline to workspace members. Member/admin/owner incident status transitions, internal/public customer-authored timeline notes, actor attribution, audit writes and responsive controls are implemented; seven D1-backed Worker API integration tests were added. Public updates are stored but not published, browser E2E/accessibility and notifications remain. Monitor deletion now soft-deletes and retains check, incident and timeline rows; retention and hard-purge workflows remain.)
 - [ ] Verified email alerts and delivery history
 
 ## Phase 3 — complete customer experience
 - [ ] Public marketing website, docs and pricing
 - [ ] Multi-step sign-up and resumable onboarding
-- [ ] Workspace overview and monitor list/create/delete screen implemented; full monitor detail, check history and real measurements remain
+- [ ] Workspace overview, monitor list/create/delete, monitor detail and persisted check-history views are implemented; browser E2E, real measurements, pause/resume and analytics remain
 - [ ] Incident timeline and customer-facing updates (tenant-scoped list/detail, role-protected status transitions, authored internal/public notes and responsive controls are implemented; public publishing, browser QA/accessibility and notification delivery remain)
 - [ ] Status-page builder and public status pages
 - [ ] Team invitations, roles and organization settings (initial member/invitation screen and API implemented; tenant-isolated member listing, concurrent invitation acceptance and owner-demotion protection are integration-tested, while complete settings, email delivery and browser QA remain)
@@ -217,3 +217,13 @@ No Cloudflare resources were created and no deployment was attempted. This is fe
 - GitHub Actions [CI run #133](https://github.com/learninghub44/zetuwatch/actions/runs/42769033337) completed successfully on commit `18b205a614b8680db26068b71e651cf5cb2477c8`.
 - Verified: TypeScript typecheck; inline browser-script syntax check (4 scripts across 4 HTML files); SQLite migration validation (4 migrations, 16 required tables); Vitest (12 files, 100 tests).
 - The incident page is read-only and depends on the tenant-scoped API. Browser interaction/accessibility tests, customer-authored updates and notification delivery remain open. No scheduled probes or live incident data are active.
+
+
+## Monitor detail and persisted check history update (2026-11-11)
+
+- Added a tenant-authorized monitor detail panel to the workspace app. The monitor list now has a View action, with monitor configuration, expected status, interval and an explicit scheduled-execution-disabled state.
+- The detail panel reads the existing `GET /v1/monitors/<uuid>` and `GET /v1/monitors/<uuid>/checks` endpoints. It renders stored check timestamps, pass/fail values, HTTP status, response time and error category using text nodes only.
+- Empty history is explicit. Refreshing the panel only reads persisted history; it never triggers a customer-target request or invents uptime/latency.
+- Added a D1-backed API integration test proving a workspace viewer can read ordered persisted check history while the API continues to report `executionEnabled: false`.
+- Added API and testing documentation. The defined suite is now 110 tests across 13 files; CI verification of this slice is pending.
+- The monitoring loop remains incomplete: no hardened outbound transport, Cron execution, new real checks, browser E2E, notification fan-out or production deployment is enabled.
