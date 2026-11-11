@@ -9,7 +9,7 @@ The product is built in vertical slices. A slice is complete only when UI, API, 
 - [x] Conservative HTTP probe foundation
 - [x] Product scope and user journey specification
 - [x] CI typecheck workflow added and verified in GitHub Actions
-- [ ] Unit and integration test suite (100 tests across 12 files pass in CI, including authentication, tenant/team and incident API isolation, SSRF policy/DNS, scheduler and incident lifecycle tests; payment lifecycle coverage, browser E2E and provider tests remain)
+- [ ] Unit and integration test suite (the previous 100 tests across 12 files passed CI; six new incident-action tests bring the defined suite to 106 tests across 13 files, pending CI verification; payment lifecycle coverage, browser E2E and provider tests remain)
 - [x] Direct development-tool versions checked against current package releases and pinned
 - [ ] Lockfile generation and clean-install verification
 
@@ -76,7 +76,7 @@ Do not mark a phase complete because files or mock screens exist. Verify behavio
 - Incident detail reads now include event visibility and actor display names when the account still exists.
 - Added six D1-backed integration tests for authorship, visibility, status lifecycle, viewer denial, cross-tenant denial, validation and concurrent transitions.
 - Added responsive incident detail controls. Public visibility is only a stored classification for a future status-page publisher; no public page is published by this change.
-- CI verification of this new migration, API code, browser script and six tests is pending. The incident phase and production launch gates remain incomplete.
+- The API additionally rate-limits status and timeline writes to 30 requests per 15 minutes per source IP. The previous 100-test CI baseline is verified; CI verification of this new migration, API code, browser script and six additional tests is pending. The incident phase and production launch gates remain incomplete.
 
 ## Verified progress snapshot (2026-11-06)
 
