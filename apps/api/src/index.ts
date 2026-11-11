@@ -544,6 +544,7 @@ export default {
 
       if (request.method === "PATCH" && !isUpdatesRoute) {
         if (!canWriteMonitors(membership.role)) return json({ error: "FORBIDDEN" }, 403);
+        if (!(await rateLimit(request, env, "incident-status", 30))) return json({ error: "RATE_LIMITED" }, 429);
         const body = await request.json().catch(() => null) as Record<string, unknown> | null;
         const nextStatus = cleanText(body?.status, 24);
         const transitions: Record<string, readonly string[]> = {
@@ -586,6 +587,7 @@ export default {
 
       if (request.method === "POST" && isUpdatesRoute) {
         if (!canWriteMonitors(membership.role)) return json({ error: "FORBIDDEN" }, 403);
+        if (!(await rateLimit(request, env, "incident-update", 30))) return json({ error: "RATE_LIMITED" }, 429);
         if (incident.resolvedAt || incident.status === "resolved") {
           return json({ error: "INCIDENT_ALREADY_RESOLVED" }, 409);
         }
