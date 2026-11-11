@@ -24,7 +24,7 @@ All monitor endpoints require a verified signed-in session and an organization m
 - `GET /v1/monitors/<uuid>` — retrieve a monitor.
 - `GET /v1/monitors/<uuid>/checks` — retrieve up to 100 stored checks.
 - `PATCH /v1/monitors/<uuid>` — update name, target URL, method, expected status, interval or timeout.
-- `DELETE /v1/monitors/<uuid>` — owner/admin only; deletes the monitor and cascaded history.
+- `DELETE /v1/monitors/<uuid>` — owner/admin only; soft-deletes and disables the monitor, removes it from monitor list/detail APIs, and retains check, incident and timeline rows. There is no hard-delete endpoint yet.
 
 Viewers can read. Members/admins/owners can create and update. Only owners/admins can delete. Every query is scoped through the monitor's organization membership; never trust an organization ID supplied by a client without checking membership.
 
@@ -51,7 +51,7 @@ All incident reads require a verified signed-in session and membership in the in
 - `PATCH /v1/incidents/<uuid>` — advance or regress an active incident using `{ status, message?, visibility? }`. Supported transitions are investigating → identified, identified → investigating/monitoring, and monitoring → identified/resolved. A resolved incident is terminal. Status changes and their timeline/audit events are written in one D1 batch; a concurrent stale transition receives 409.
 - `POST /v1/incidents/<uuid>/updates` — append a workspace note using `{ message, visibility? }`. Messages are limited to 500 characters and control characters are rejected. Status and note writes are separately rate-limited to 30 requests per 15 minutes per source IP. Updates cannot be added after resolution.
 
-Timeline visibility is `internal` by default or `public` when explicitly selected. Public visibility is stored for a future status-page publisher; these updates are not currently published to an external page. The database trigger blocks in-place timeline event updates, and the new API only inserts events. Hard deletion is not yet protected: deleting a monitor still cascades its incident history. Retention-aware soft deletion and export/deletion controls are not yet implemented.
+Timeline visibility is `internal` by default or `public` when explicitly selected. Public visibility is stored for a future status-page publisher; these updates are not currently published to an external page. The database trigger blocks in-place timeline event updates, and the new API only inserts events. Monitor deletion now soft-deletes and disables the monitor while retaining check, incident and timeline rows. Hard-purge/retention and account-deletion workflows are not yet implemented.
 
 ## Monitor execution status
 
