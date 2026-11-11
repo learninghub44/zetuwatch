@@ -501,8 +501,8 @@ export default {
       return json({ incidents: result.results });
     }
 
-    const incidentMatch = url.pathname.match(/^\/v1\/incidents\/([0-9a-f-]{36})$/i);
-    if (request.method === "GET" && incidentMatch) {
+    const incidentMatch = url.pathname.match(/^\/v1\/incidents\/([0-9a-f-]{36})(?:\/(updates))?$/i);
+    if (incidentMatch) {
       const user = await currentUser(request, env);
       if (!user) return json({ error: "UNAUTHENTICATED" }, 401);
       const incidentId = incidentMatch[1];
@@ -540,17 +540,88 @@ export default {
       ).bind(incident.organizationId, user.id).first<{ role: string }>();
       if (!membership) return json({ error: "FORBIDDEN" }, 403);
 
-      const events = await env.DB.prepare(`SELECT
-          id,
-          event_type AS eventType,
-          message,
-          created_at AS createdAt
-        FROM incident_events
-        WHERE incident_id = ?
-        ORDER BY created_at ASC, id ASC`)
-        .bind(incidentId)
-        .all();
-      return json({ incident, events: events.results });
+      const isUpdatesRoute = incidentMatch[2] === "updates";
+
+      if (request.method === "PATCH" && !isUpdatesRoute) {
+        if (!canWriteMonitors(membership.role)) return json({ error: "FORBIDDEN" }, 403);
+        const body = await request.json().catch(() => null) as Record<string, unknown> | null;
+        const nextStatus = cleanText(body?.status, 24);
+        const transitions: Record<string, readonly string[]> = {
+          investigating: ["identified"],
+          identified: ["investigating", "monitoring"],
+          monitoring: ["identified", "resolved"]
+        };
+        if (!transitions[incident.status]?.includes(nextStatus)) {
+          return json({ error: "INVALID_INCIDENT_TRANSITION" }, 409);
+        }
+        const suppliedMessage = body?.message === undefined
+          ? ""
+          : typeof body.message === "string" ? body.message.replace(/\r\n?/g, "\n").trim() : "";
+        if (body?.message !== undefined &&
+            (!suppliedMessage || suppliedMessage.length > 500 ||
+             /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/.test(suppliedMessage))) {
+          return json({ error: "INVALID_INCIDENT_MESSAGE" }, 400);
+        }
+        const visibility = body?.visibility === undefined ? "internal" : cleanText(body.visibility, 16);
+        if (visibility !== "internal" && visibility !== "public") {
+          return json({ error: "INVALID_INCIDENT_VISIBILITY" }, 400);
+        }
+        const message = suppliedMessage || ("Status changed from " + incident.status + " to " + nextStatus + ".");
+        const changedAt = new Date().toISOString();
+        const results = await env.DB.batch([
+          env.DB.prepare("UPDATE incidents SET status = ?, resolved_at = CASE WHEN ? = 'resolved' THEN ? ELSE NULL END WHERE id = ? AND status = ? AND resolved_at IS NULL")
+            .bind(nextStatus, nextStatus, changedAt, incidentId, incident.status),
+          env.DB.prepare("INSERT INTO incident_events (id, incident_id, event_type, message, created_at, actor_user_id, visibility) SELECT ?, ?, 'incident.status_changed', ?, ?, ?, ? WHERE changes() = 1")
+            .bind(id(), incidentId, message, changedAt, user.id, visibility),
+          env.DB.prepare("INSERT INTO audit_logs (id, organization_id, actor_user_id, action, resource_type, resource_id, metadata_json) SELECT ?, ?, ?, 'incident.status_changed', 'incident', ?, ? WHERE changes() = 1")
+            .bind(id(), incident.organizationId, user.id, incidentId, JSON.stringify({
+              from: incident.status, to: nextStatus, visibility
+            }))
+        ]);
+        if ((results[0] as D1Result).meta?.changes !== 1) {
+          return json({ error: "INCIDENT_CHANGED" }, 409);
+        }
+        return json({ message: "Incident status updated.", status: nextStatus });
+      }
+
+      if (request.method === "POST" && isUpdatesRoute) {
+        if (!canWriteMonitors(membership.role)) return json({ error: "FORBIDDEN" }, 403);
+        if (incident.resolvedAt || incident.status === "resolved") {
+          return json({ error: "INCIDENT_ALREADY_RESOLVED" }, 409);
+        }
+        const body = await request.json().catch(() => null) as Record<string, unknown> | null;
+        const message = typeof body?.message === "string"
+          ? body.message.replace(/\r\n?/g, "\n").trim()
+          : "";
+        if (!message || message.length > 500 ||
+            /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/.test(message)) {
+          return json({ error: "INVALID_INCIDENT_MESSAGE" }, 400);
+        }
+        const visibility = body?.visibility === undefined ? "internal" : cleanText(body.visibility, 16);
+        if (visibility !== "internal" && visibility !== "public") {
+          return json({ error: "INVALID_INCIDENT_VISIBILITY" }, 400);
+        }
+        const createdAt = new Date().toISOString();
+        const eventId = id();
+        const results = await env.DB.batch([
+          env.DB.prepare("INSERT INTO incident_events (id, incident_id, event_type, message, created_at, actor_user_id, visibility) SELECT ?, ?, 'incident.update', ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM incidents WHERE id = ? AND resolved_at IS NULL)")
+            .bind(eventId, incidentId, message, createdAt, user.id, visibility, incidentId),
+          env.DB.prepare("INSERT INTO audit_logs (id, organization_id, actor_user_id, action, resource_type, resource_id, metadata_json) SELECT ?, ?, ?, 'incident.update_added', 'incident', ?, ? WHERE changes() = 1")
+            .bind(id(), incident.organizationId, user.id, incidentId, JSON.stringify({ visibility }))
+        ]);
+        if ((results[0] as D1Result).meta?.changes !== 1) {
+          return json({ error: "INCIDENT_ALREADY_RESOLVED" }, 409);
+        }
+        return json({ message: "Incident update added.", eventId, visibility }, 201);
+      }
+
+      if (request.method === "GET" && !isUpdatesRoute) {
+        const events = await env.DB.prepare("SELECT e.id, e.event_type AS eventType, e.message, e.created_at AS createdAt, e.visibility, e.actor_user_id AS actorUserId, u.display_name AS actorName FROM incident_events e LEFT JOIN users u ON u.id = e.actor_user_id WHERE e.incident_id = ? ORDER BY e.created_at ASC, e.id ASC")
+          .bind(incidentId)
+          .all();
+        return json({ incident, events: events.results });
+      }
+      return json({ error: "METHOD_NOT_ALLOWED" }, 405);
     }
 
     return json({ error: "NOT_FOUND" }, 404);
