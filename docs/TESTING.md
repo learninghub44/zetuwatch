@@ -33,11 +33,12 @@ The integration suite loads the repository's numbered SQL migrations into an iso
 
 The Resend endpoint and test-only API key are inert fixtures. The Worker test runtime intercepts the outbound `fetch`; these tests do not contact Resend.
 
-## API integration coverage (12 D1-backed tests)
+## API integration coverage (13 D1-backed tests)
 
 - Missing sessions are rejected.
 - Organization-scoped monitor listing rejects users outside the requested organization.
 - Monitor detail and check-history reads reject cross-tenant IDs.
+- Workspace viewers can read persisted in-tenant check history; the response is newest-first and explicitly reports that scheduled execution is disabled.
 - Owner deletion soft-deletes and disables a monitor, hides it from monitor routes, and retains check, incident and timeline records.
 - Monitor creation cannot target an organization without membership.
 - Members can create/read their own monitors but cannot delete them.
@@ -48,7 +49,7 @@ The Resend endpoint and test-only API key are inert fixtures. The Worker test ru
 - Incident lists require workspace membership and return only incidents belonging to that tenant.
 - Incident detail and timeline reads reject a foreign-tenant incident ID.
 
-The last previously verified CI suite passed 100 tests across 12 files. Subsequent changes add seven incident-action tests, one monitor soft-delete API test and one scheduler archive-safety test (109 tests across 13 files are now defined); CI verification of the two new migrations, API, scheduler, browser script and added tests is pending. These tests verify Worker routes and scheduler/incident persistence against D1's SQLite-compatible runtime. They do not replace production D1 verification, browser end-to-end tests, provider delivery tests or a security review of outbound network execution. No scheduled probes are enabled by this test setup.
+The last previously verified CI suite passed 100 tests across 12 files. Subsequent changes add seven incident-action tests, two monitor history/soft-delete API tests and one scheduler archive-safety test (110 tests across 13 files are now defined); CI verification of the two new migrations, API, scheduler, browser script and added tests is pending. These tests verify Worker routes and scheduler/incident persistence against D1's SQLite-compatible runtime. They do not replace production D1 verification, browser end-to-end tests, provider delivery tests or a security review of outbound network execution. No scheduled probes are enabled by this test setup.
 
 
 ## Scheduler integration coverage (7 D1-backed tests)
