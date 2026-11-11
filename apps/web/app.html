@@ -88,7 +88,7 @@ async function openMonitor(monitorId){
       const result=document.createElement("td");const pill=document.createElement("span");const isUp=check.is_up===1||check.is_up===true;
       pill.className="pill "+(isUp?"check-up":"check-down");pill.textContent=isUp?"Passed":"Failed";result.appendChild(pill);
       const status=document.createElement("td");status.textContent=check.status_code===null||check.status_code===undefined?"Not recorded":String(check.status_code);
-      const latency=document.createElement("td");latency.textContent=Number.isFinite(Number(check.response_time_ms))?String(check.response_time_ms)+" ms":"Not recorded";
+      const latency=document.createElement("td");latency.textContent=check.response_time_ms===null||check.response_time_ms===undefined||!Number.isFinite(Number(check.response_time_ms))?"Not recorded":String(check.response_time_ms)+" ms";
       const error=document.createElement("td");error.textContent=check.error_code||"None recorded";
       row.append(checked,result,status,latency,error);$("check-rows").appendChild(row);
     }
