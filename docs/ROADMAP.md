@@ -17,7 +17,7 @@ The product is built in vertical slices. A slice is complete only when UI, API, 
 - [ ] Authentication foundation: registration, email verification, password login/reset and opaque sessions are implemented; a D1-backed test now covers registration → verification → login → password reset → session revocation with email delivery stubbed; browser E2E, live provider delivery and security edge-case tests remain
 - [ ] Invitation acceptance and full team/member management (member listing, role policy, invitations, acceptance, role changes, removal API and initial responsive team screen implemented; team member-list isolation, single-use concurrent invitation acceptance and concurrent owner demotion are covered by D1 integration tests; browser acceptance and real email delivery remain)
 - [ ] Organization creation and basic membership checks exist; team-management API now enforces owner/admin/member/viewer policy and last-owner protection; monitor/team tenant boundaries, invitation consumption and concurrent owner protection pass D1-backed API tests, while broader route coverage remains
-- [ ] Tenant-safe schema constraints and migration tests (four migrations pass the CI SQLite smoke-test and API/scheduler/incident suites run against isolated local D1; production-account D1 behavior remains unverified)
+- [ ] Tenant-safe schema constraints and migration tests (five migrations are present; the new incident-action migration still needs CI SQLite smoke-test verification and API/scheduler/incident suites run against isolated local D1; production-account D1 behavior remains unverified)
 - [ ] Audit events and basic per-IP auth/monitor rate limits exist; broader abuse controls remain
 
 ## Phase 2 — first working monitoring loop
@@ -26,14 +26,14 @@ The product is built in vertical slices. A slice is complete only when UI, API, 
 - [x] Atomic due-work claim leases and D1-backed check finalization primitive (bounded batches, lease expiry/reclaim, token ownership and check-history persistence are integration-tested; no Cron execution or real probes are enabled)
 - [ ] Bounded scheduled runner / Cron Trigger integration (load, lag and retry behavior remain untested; real execution is blocked on hardened DNS-pinned egress)
 - [ ] HTTP/HTTPS checks, history and latency
-- [ ] Incident confirmation, deduplication and recovery (D1-backed finalization confirms, deduplicates, monitors, resolves and reopens incidents; tenant-scoped incident list/detail APIs now return the timeline to workspace members. Full incident workflow UI (acknowledgement and status updates), customer-authored updates and notification delivery remain. Event updates are blocked, but monitor deletion still cascades timeline data until a soft-delete/retention workflow exists.)
+- [ ] Incident confirmation, deduplication and recovery (D1-backed finalization confirms, deduplicates, monitors, resolves and reopens incidents; tenant-scoped incident list/detail APIs now return the timeline to workspace members. Member/admin/owner incident status transitions, internal/public customer-authored timeline notes, actor attribution, audit writes and responsive controls are implemented; six D1-backed Worker API integration tests were added. Public updates are stored but not published, browser E2E/accessibility and notifications remain. Monitor deletion still cascades timeline data until a soft-delete/retention workflow exists.)
 - [ ] Verified email alerts and delivery history
 
 ## Phase 3 — complete customer experience
 - [ ] Public marketing website, docs and pricing
 - [ ] Multi-step sign-up and resumable onboarding
 - [ ] Workspace overview and monitor list/create/delete screen implemented; full monitor detail, check history and real measurements remain
-- [ ] Incident timeline and customer-facing updates (tenant-scoped list/detail API and responsive read-only incident/timeline panel are implemented; browser QA/accessibility, user-authored updates and notifications remain)
+- [ ] Incident timeline and customer-facing updates (tenant-scoped list/detail, role-protected status transitions, authored internal/public notes and responsive controls are implemented; public publishing, browser QA/accessibility and notification delivery remain)
 - [ ] Status-page builder and public status pages
 - [ ] Team invitations, roles and organization settings (initial member/invitation screen and API implemented; tenant-isolated member listing, concurrent invitation acceptance and owner-demotion protection are integration-tested, while complete settings, email delivery and browser QA remain)
 - [ ] Analytics, exports and maintenance windows
@@ -66,6 +66,17 @@ The product is built in vertical slices. A slice is complete only when UI, API, 
 - [ ] Production deployment and smoke tests completed
 
 Do not mark a phase complete because files or mock screens exist. Verify behavior.
+
+
+## Incident action implementation update (2026-11-11)
+
+- Added migration `0005_incident_updates.sql` with optional timeline actor attribution, internal/public visibility and a visibility/time index.
+- Added owner/admin/member-only incident status transitions with a guarded state machine, conflict handling for concurrent transitions, resolved timestamps, append-only timeline entries and audit events.
+- Added owner/admin/member-only customer-authored timeline notes with a 500-character limit, control-character rejection and explicit internal/public visibility.
+- Incident detail reads now include event visibility and actor display names when the account still exists.
+- Added six D1-backed integration tests for authorship, visibility, status lifecycle, viewer denial, cross-tenant denial, validation and concurrent transitions.
+- Added responsive incident detail controls. Public visibility is only a stored classification for a future status-page publisher; no public page is published by this change.
+- CI verification of this new migration, API code, browser script and six tests is pending. The incident phase and production launch gates remain incomplete.
 
 ## Verified progress snapshot (2026-11-06)
 
