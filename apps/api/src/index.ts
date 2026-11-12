@@ -416,7 +416,7 @@ export default {
       return json({ monitor: { id: monitorId, organizationId, name, monitorType, targetUrl: target, method, expectedStatus, intervalSeconds, timeoutMs, state: "awaiting_first_check" }, executionEnabled: false }, 201);
     }
 
-    const monitorMatch = url.pathname.match(/^\/v1\/monitors\/([0-9a-f-]{36})(\/checks)?$/i);
+        const monitorMatch = url.pathname.match(/^\/v1\/monitors\/([0-9a-f-]{36})(\/checks|\/pause|\/resume)?$/i);
     if (monitorMatch) {
       const user = await currentUser(request, env);
       if (!user) return json({ error: "UNAUTHENTICATED" }, 401);
@@ -428,12 +428,42 @@ export default {
         .bind(monitor.organization_id, user.id).first<{ role: string }>();
       if (!membership) return json({ error: "FORBIDDEN" }, 403);
 
+      if (monitorMatch[2] === "/pause" || monitorMatch[2] === "/resume") {
+        if (request.method !== "POST") return json({ error: "METHOD_NOT_ALLOWED" }, 405);
+        if (!canWriteMonitors(membership.role)) return json({ error: "FORBIDDEN" }, 403);
+        if (!(await rateLimit(request, env, "monitor-control", 30))) return json({ error: "RATE_LIMITED" }, 429);
+
+        const enable = monitorMatch[2] === "/resume" ? 1 : 0;
+        const updateSql = enable === 1
+          ? "UPDATE monitors SET is_enabled = 1, next_check_at = CURRENT_TIMESTAMP, check_lease_token = NULL, check_lease_until = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ? AND deleted_at IS NULL AND is_enabled = 0"
+          : "UPDATE monitors SET is_enabled = 0, check_lease_token = NULL, check_lease_until = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ? AND deleted_at IS NULL AND is_enabled = 1";
+        const auditAction = enable === 1 ? "monitor.resumed" : "monitor.paused";
+        const results = await env.DB.batch([
+          env.DB.prepare(updateSql).bind(monitorId, monitor.organization_id),
+          env.DB.prepare("INSERT INTO audit_logs (id, organization_id, actor_user_id, action, resource_type, resource_id) SELECT ?, ?, ?, ?, 'monitor', ? WHERE changes() = 1")
+            .bind(id(), monitor.organization_id, user.id, auditAction, monitorId),
+          env.DB.prepare("SELECT is_enabled FROM monitors WHERE id = ? AND organization_id = ? AND deleted_at IS NULL")
+            .bind(monitorId, monitor.organization_id)
+        ]);
+        const current = results[2]?.results?.[0] as { is_enabled: number } | undefined;
+        if (!current) return json({ error: "NOT_FOUND" }, 404);
+        const changed = (results[0]?.meta?.changes ?? 0) === 1;
+        const isEnabled = Number(current.is_enabled) === 1;
+        return json({
+          message: isEnabled ? "Monitor resumed." : "Monitor paused.",
+          changed,
+          monitor: { id: monitorId, isEnabled },
+          executionEnabled: false,
+          note: "Monitor scheduling is not active yet; this action does not run a probe."
+        });
+      }
+
       if (request.method === "GET" && monitorMatch[2] === "/checks") {
         const checks = await env.DB.prepare(`SELECT id, checked_at, is_up, status_code, response_time_ms, error_code
           FROM monitor_checks WHERE monitor_id = ? ORDER BY checked_at DESC LIMIT 100`).bind(monitorId).all();
         return json({ checks: checks.results, executionEnabled: false });
       }
-      if (request.method === "GET") return json({ monitor, state: "awaiting_first_check", executionEnabled: false });
+      if (request.method === "GET") return json({ monitor, state: Number(monitor.is_enabled) === 1 ? "awaiting_first_check" : "paused", executionEnabled: false });
       if (request.method === "PATCH") {
         if (!canWriteMonitors(membership.role)) return json({ error: "FORBIDDEN" }, 403);
         const body = await request.json().catch(() => null) as Record<string, unknown> | null;

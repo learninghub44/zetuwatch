@@ -33,7 +33,7 @@ The integration suite loads the repository's numbered SQL migrations into an iso
 
 The Resend endpoint and test-only API key are inert fixtures. The Worker test runtime intercepts the outbound `fetch`; these tests do not contact Resend.
 
-## API integration coverage (13 D1-backed tests)
+## API integration coverage (18 D1-backed tests)
 
 - Missing sessions are rejected.
 - Organization-scoped monitor listing rejects users outside the requested organization.
@@ -43,13 +43,23 @@ The Resend endpoint and test-only API key are inert fixtures. The Worker test ru
 - Monitor creation cannot target an organization without membership.
 - Members can create/read their own monitors but cannot delete them.
 - Viewers can read but cannot create or update monitors.
+- Owners/admins/members can pause and resume monitors; pause clears active leases, resume makes a monitor due, repeated actions are idempotent, and viewers, foreign tenants and archived monitors are rejected.
 - Team membership cannot be read across tenant boundaries.
 - A team invitation is consumed at most once when two acceptance requests race; only one membership and one acceptance audit event are created.
 - Concurrent owner demotions cannot remove the final workspace owner.
 - Incident lists require workspace membership and return only incidents belonging to that tenant.
 - Incident detail and timeline reads reject a foreign-tenant incident ID.
 
-The last previously verified CI suite passed 100 tests across 12 files. Subsequent changes add seven incident-action tests, two monitor history/soft-delete API tests and one scheduler archive-safety test (110 tests across 13 files are now defined); CI verification of the two new migrations, API, scheduler, browser script and added tests is pending. These tests verify Worker routes and scheduler/incident persistence against D1's SQLite-compatible runtime. They do not replace production D1 verification, browser end-to-end tests, provider delivery tests or a security review of outbound network execution. No scheduled probes are enabled by this test setup.
+The last previously verified CI suite passed 110 tests across 13 files in [GitHub Actions run #174](https://github.com/learninghub44/zetuwatch/actions/runs/42978590224) on commit `c3f19ade101af3abf1c16b47e598f1a7f1708d96`. Five monitor pause/resume API tests now bring the defined suite to 115 tests across 13 files; CI verification of this slice is pending. These tests verify Worker routes and scheduler/incident persistence against D1's SQLite-compatible runtime. They do not replace production D1 verification, browser end-to-end tests, provider delivery tests or a security review of outbound network execution. No scheduled probes are enabled by this test setup.
+
+
+## Monitor control integration coverage (5 D1-backed tests)
+
+- Owners can pause a monitor, clear its outstanding lease and create one audit event; repeated pause requests do not duplicate the audit event.
+- Members can resume a monitor, clear stale lease fields and set its next due time without executing a probe.
+- Viewers cannot pause monitors.
+- Members cannot pause another tenant's monitor.
+- Archived monitors cannot be resumed.
 
 
 ## Scheduler integration coverage (7 D1-backed tests)

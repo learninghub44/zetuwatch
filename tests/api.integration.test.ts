@@ -465,5 +465,108 @@ describe("Worker API tenant isolation", () => {
     expect(foreignResponse.status).toBe(403);
   });
 
+  it("allows owners to pause monitors, clears leases and audits only the first state change", async () => {
+    const identity = await createIdentity("owner");
+    const monitorId = await createMonitor(identity.organizationId);
+    await env.DB.prepare(
+      "UPDATE monitors SET check_lease_token = ?, check_lease_until = ? WHERE id = ?"
+    ).bind("lease-token-for-pause-12345", new Date(Date.now() + 60_000).toISOString(), monitorId).run();
+
+    const first = await api(`/v1/monitors/${monitorId}/pause`, {
+      token: identity.sessionToken,
+      method: "POST"
+    });
+    expect(first.status).toBe(200);
+    expect(await first.json()).toMatchObject({
+      changed: true,
+      monitor: { id: monitorId, isEnabled: false },
+      executionEnabled: false
+    });
+
+    const second = await api(`/v1/monitors/${monitorId}/pause`, {
+      token: identity.sessionToken,
+      method: "POST"
+    });
+    expect(second.status).toBe(200);
+    expect(await second.json()).toMatchObject({ changed: false, monitor: { isEnabled: false } });
+
+    const stored = await env.DB.prepare(
+      "SELECT is_enabled, check_lease_token, check_lease_until FROM monitors WHERE id = ?"
+    ).bind(monitorId).first<{ is_enabled: number; check_lease_token: string | null; check_lease_until: string | null }>();
+    const audit = await env.DB.prepare(
+      "SELECT COUNT(*) AS count FROM audit_logs WHERE organization_id = ? AND action = 'monitor.paused' AND resource_id = ?"
+    ).bind(identity.organizationId, monitorId).first<{ count: number }>();
+    expect(stored).toMatchObject({ is_enabled: 0, check_lease_token: null, check_lease_until: null });
+    expect(audit?.count).toBe(1);
+  });
+
+  it("allows members to resume monitors and makes them due without running a probe", async () => {
+    const identity = await createIdentity("member");
+    const monitorId = await createMonitor(identity.organizationId);
+    await env.DB.prepare(
+      "UPDATE monitors SET is_enabled = 0, check_lease_token = ?, check_lease_until = ? WHERE id = ?"
+    ).bind("expired-paused-lease-12345", new Date(Date.now() + 60_000).toISOString(), monitorId).run();
+
+    const response = await api(`/v1/monitors/${monitorId}/resume`, {
+      token: identity.sessionToken,
+      method: "POST"
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      changed: true,
+      monitor: { id: monitorId, isEnabled: true },
+      executionEnabled: false
+    });
+
+    const stored = await env.DB.prepare(
+      "SELECT is_enabled, check_lease_token, check_lease_until, CASE WHEN next_check_at <= CURRENT_TIMESTAMP THEN 1 ELSE 0 END AS is_due FROM monitors WHERE id = ?"
+    ).bind(monitorId).first<{ is_enabled: number; check_lease_token: string | null; check_lease_until: string | null; is_due: number }>();
+    expect(stored).toMatchObject({
+      is_enabled: 1,
+      check_lease_token: null,
+      check_lease_until: null,
+      is_due: 1
+    });
+  });
+
+  it("keeps monitor pause and resume unavailable to viewers", async () => {
+    const identity = await createIdentity("viewer");
+    const monitorId = await createMonitor(identity.organizationId);
+    const response = await api(`/v1/monitors/${monitorId}/pause`, {
+      token: identity.sessionToken,
+      method: "POST"
+    });
+    expect(response.status).toBe(403);
+    const stored = await env.DB.prepare("SELECT is_enabled FROM monitors WHERE id = ?")
+      .bind(monitorId).first<{ is_enabled: number }>();
+    expect(stored?.is_enabled).toBe(1);
+  });
+
+  it("does not allow a workspace member to pause another tenant's monitor", async () => {
+    const identity = await createIdentity("member");
+    const foreignOrganizationId = await createForeignOrganization();
+    const foreignMonitorId = await createMonitor(foreignOrganizationId);
+    const response = await api(`/v1/monitors/${foreignMonitorId}/pause`, {
+      token: identity.sessionToken,
+      method: "POST"
+    });
+    expect(response.status).toBe(403);
+    const stored = await env.DB.prepare("SELECT is_enabled FROM monitors WHERE id = ?")
+      .bind(foreignMonitorId).first<{ is_enabled: number }>();
+    expect(stored?.is_enabled).toBe(1);
+  });
+
+  it("does not expose archived monitors through pause or resume actions", async () => {
+    const identity = await createIdentity("owner");
+    const monitorId = await createMonitor(identity.organizationId);
+    await env.DB.prepare("UPDATE monitors SET deleted_at = CURRENT_TIMESTAMP, is_enabled = 0 WHERE id = ?")
+      .bind(monitorId).run();
+    const response = await api(`/v1/monitors/${monitorId}/resume`, {
+      token: identity.sessionToken,
+      method: "POST"
+    });
+    expect(response.status).toBe(404);
+  });
+
 
 });

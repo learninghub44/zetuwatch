@@ -9,7 +9,7 @@ The product is built in vertical slices. A slice is complete only when UI, API, 
 - [x] Conservative HTTP probe foundation
 - [x] Product scope and user journey specification
 - [x] CI typecheck workflow added and verified in GitHub Actions
-- [ ] Unit and integration test suite (the previous 100 tests across 12 files passed CI; subsequent incident-action, monitor history/soft-delete and scheduler archive-safety coverage brings the defined suite to 110 tests across 13 files, pending CI verification; payment lifecycle coverage, browser E2E and provider tests remain)
+- [ ] Unit and integration test suite (110 tests across 13 files passed CI in run #174 on commit `c3f19ade101af3abf1c16b47e598f1a7f1708d96`; five new monitor pause/resume tests bring the defined suite to 115 tests across 13 files pending CI verification; payment lifecycle coverage, browser E2E and provider tests remain)
 - [x] Direct development-tool versions checked against current package releases and pinned
 - [ ] Lockfile generation and clean-install verification
 
@@ -17,11 +17,11 @@ The product is built in vertical slices. A slice is complete only when UI, API, 
 - [ ] Authentication foundation: registration, email verification, password login/reset and opaque sessions are implemented; a D1-backed test now covers registration → verification → login → password reset → session revocation with email delivery stubbed; browser E2E, live provider delivery and security edge-case tests remain
 - [ ] Invitation acceptance and full team/member management (member listing, role policy, invitations, acceptance, role changes, removal API and initial responsive team screen implemented; team member-list isolation, single-use concurrent invitation acceptance and concurrent owner demotion are covered by D1 integration tests; browser acceptance and real email delivery remain)
 - [ ] Organization creation and basic membership checks exist; team-management API now enforces owner/admin/member/viewer policy and last-owner protection; monitor/team tenant boundaries, invitation consumption and concurrent owner protection pass D1-backed API tests, while broader route coverage remains
-- [ ] Tenant-safe schema constraints and migration tests (five migrations are present; the new incident-action migration still needs CI SQLite smoke-test verification and API/scheduler/incident suites run against isolated local D1; production-account D1 behavior remains unverified)
+- [ ] Tenant-safe schema constraints and migration tests (six migrations are present; the new incident-action migration still needs CI SQLite smoke-test verification and API/scheduler/incident suites run against isolated local D1; production-account D1 behavior remains unverified)
 - [ ] Audit events and basic per-IP auth/monitor rate limits exist; broader abuse controls remain
 
 ## Phase 2 — first working monitoring loop
-- [ ] Basic tenant-scoped monitor create/list/read/update/delete API and responsive setup screen implemented; 13 D1-backed API tests now cover monitor/team boundaries, member/viewer permissions, invitation/owner concurrency, tenant-scoped incident reads, soft deletion and persisted check-history reads, while the full route matrix and browser acceptance remain
+- [ ] Basic tenant-scoped monitor create/list/read/update/delete API and responsive setup screen implemented; 18 D1-backed API tests now cover monitor/team boundaries, member/viewer permissions, invitation/owner concurrency, tenant-scoped incident reads, soft deletion, persisted check-history reads and idempotent pause/resume controls, while the full route matrix and browser acceptance remain
 - [ ] Safe URL/egress policy: syntactic validation, dependency-free IPv4/IPv6 classification, mixed-answer rejection and a bounded Cloudflare DoH A/AAAA resolver are implemented as unit-testable components; the resolver is not connected to monitor execution, and validated-address pinning, redirect-hop checks and rebinding defense remain unimplemented
 - [x] Atomic due-work claim leases and D1-backed check finalization primitive (bounded batches, lease expiry/reclaim, token ownership and check-history persistence are integration-tested; no Cron execution or real probes are enabled)
 - [ ] Bounded scheduled runner / Cron Trigger integration (load, lag and retry behavior remain untested; real execution is blocked on hardened DNS-pinned egress)
@@ -32,7 +32,7 @@ The product is built in vertical slices. A slice is complete only when UI, API, 
 ## Phase 3 — complete customer experience
 - [ ] Public marketing website, docs and pricing
 - [ ] Multi-step sign-up and resumable onboarding
-- [ ] Workspace overview, monitor list/create/delete, monitor detail and persisted check-history views are implemented; browser E2E, real measurements, pause/resume and analytics remain
+- [ ] Workspace overview, monitor list/create/delete, monitor detail and persisted check-history views are implemented; pause/resume API and role-aware controls are implemented; browser E2E, real measurements and analytics remain
 - [ ] Incident timeline and customer-facing updates (tenant-scoped list/detail, role-protected status transitions, authored internal/public notes and responsive controls are implemented; public publishing, browser QA/accessibility and notification delivery remain)
 - [ ] Status-page builder and public status pages
 - [ ] Team invitations, roles and organization settings (initial member/invitation screen and API implemented; tenant-isolated member listing, concurrent invitation acceptance and owner-demotion protection are integration-tested, while complete settings, email delivery and browser QA remain)
@@ -227,3 +227,14 @@ No Cloudflare resources were created and no deployment was attempted. This is fe
 - Added a D1-backed API integration test proving a workspace viewer can read ordered persisted check history while the API continues to report `executionEnabled: false`.
 - Added API and testing documentation. The defined suite is now 110 tests across 13 files; CI verification of this slice is pending.
 - The monitoring loop remains incomplete: no hardened outbound transport, Cron execution, new real checks, browser E2E, notification fan-out or production deployment is enabled.
+
+
+## Monitor pause/resume implementation update (2026-11-12)
+
+- Added tenant-authorized `POST /v1/monitors/<uuid>/pause` and `POST /v1/monitors/<uuid>/resume` actions. Owners, admins and members can manage monitor state; viewers remain read-only.
+- Actions are idempotent and rate-limited. Pausing disables future claims and clears the current lease so a stale worker cannot finalize a result. Resuming clears stale lease fields and sets `next_check_at` to the current database time.
+- Every actual state transition writes an audit event in the same D1 batch. Repeating an action does not create duplicate audit records.
+- The monitor list now shows paused state and role-aware Pause/Resume, Edit and Delete actions. The detail view shows configured state and offers Pause/Resume to writable roles.
+- No probe is run by either action. The API continues to report `executionEnabled: false`; secure outbound transport and the scheduled runner remain launch blockers.
+- Five new D1-backed Worker API tests cover owner pause/idempotency/audit, member resume/due-work state, viewer denial, cross-tenant denial and archived-monitor rejection.
+- The previous 110-test suite passed GitHub Actions run #174. The updated 115-test suite is pending CI verification.

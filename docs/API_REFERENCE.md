@@ -24,6 +24,7 @@ All monitor endpoints require a verified signed-in session and an organization m
 - `GET /v1/monitors/<uuid>` — retrieve a monitor.
 - `GET /v1/monitors/<uuid>/checks` — retrieve up to 100 stored checks, newest first. Each row includes its timestamp, pass/fail result, HTTP status, response time and error category. The response includes `executionEnabled: false`; this read does not trigger a probe.
 - `PATCH /v1/monitors/<uuid>` — update name, target URL, method, expected status, interval or timeout.
+- `POST /v1/monitors/<uuid>/pause` and `POST /v1/monitors/<uuid>/resume` — pause or resume future scheduling. Owners/admins/members may manage monitor state; viewers are read-only. Actions are idempotent, clear any active lease, and resume makes the monitor due. Both return `executionEnabled: false`; neither sends a probe while the secure runner is disabled.
 - `DELETE /v1/monitors/<uuid>` — owner/admin only; soft-deletes and disables the monitor, removes it from monitor list/detail APIs, and retains check, incident and timeline rows. There is no hard-delete endpoint yet.
 
 Viewers can read. Members/admins/owners can create and update. Only owners/admins can delete. Every query is scoped through the monitor's organization membership; never trust an organization ID supplied by a client without checking membership.
@@ -59,7 +60,7 @@ The workspace monitor list provides a **View** action that opens a detail panel.
 
 ## Monitor execution status
 
-The current API deliberately returns `executionEnabled: false`. Creating a monitor stores its configuration but does not run a network request or schedule a check. The current URL validator is preliminary and does not provide DNS resolution/pinning or DNS-rebinding protection. Do not enable scheduled probes until the egress security architecture is implemented and reviewed.
+The current API deliberately returns `executionEnabled: false`. Creating a monitor stores its configuration but does not run a network request or schedule a check. Pausing and resuming only changes its persisted enabled state and due time; it does not activate execution. The current URL validator is preliminary and does not provide DNS resolution/pinning or DNS-rebinding protection. Do not enable scheduled probes until the egress security architecture is implemented and reviewed.
 
 ## Error responses
 

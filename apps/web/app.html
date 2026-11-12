@@ -20,6 +20,7 @@
       <p id="monitor-detail-target" style="margin:0;color:var(--muted);font-size:12px;overflow-wrap:anywhere"></p>
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn" id="monitor-toggle" type="button">Pause monitor</button>
       <button class="btn" id="monitor-refresh" type="button">Refresh history</button>
       <button class="btn primary" id="monitor-edit" type="button">Edit monitor</button>
     </div>
@@ -43,12 +44,73 @@
 <div class="wizard-actions"><button class="btn" type="button" id="wizard-back">Back</button><div class="wizard-actions-right"><button class="btn" type="button" id="cancel">Cancel</button><button class="btn primary" type="button" id="wizard-next">Continue</button><button class="btn primary hidden" type="submit" id="save">Save monitor</button></div></div>
 </form></div>
 <script>
-const API=(document.querySelector('meta[name="api-base"]')?.content||"/api").replace(/\/$/,"");let user=null,orgs=[],orgId=null,monitors=[],incidents=[],editingMonitorId=null,selectedIncidentId=null,selectedMonitorId=null;
+const API=(document.querySelector('meta[name="api-base"]')?.content||"/api").replace(/\/$/,"");let user=null,orgs=[],orgId=null,monitors=[],incidents=[],editingMonitorId=null,selectedIncidentId=null,selectedMonitorId=null,selectedMonitorEnabled=true;
 const $=id=>document.getElementById(id);
 function showNotice(text,error=false){$("notice").textContent=text;$("notice").classList.remove("hidden","error");if(error)$("notice").classList.add("error")}
 async function request(path,options={}){const r=await fetch(API+path,{credentials:"include",...options,headers:{"content-type":"application/json",...(options.headers||{})}});const d=await r.json().catch(()=>({}));if(r.status===401){location.href="./auth.html";throw new Error("Please sign in again.")}if(!r.ok)throw new Error(d.message||d.error||"Request failed");return d}
 async function load(){try{const me=await request("/auth/me");user=me.user;orgs=me.organizations||[];if(!orgs.length)throw new Error("No workspace is connected to this account.");orgId=orgs[0].id;$("workspace-name").textContent=orgs[0].name;$("user-name").textContent=user.name||"Account";$("user-email").textContent=user.email;$("avatar").textContent=(user.name||user.email||"?").slice(0,1).toUpperCase();$("greeting").textContent="Good to see you, "+(user.name||"there");await loadMonitors();await loadIncidents();await loadTeam()}catch(e){showNotice(e.message,true)}}
-async function loadMonitors(){const data=await request("/v1/monitors?organizationId="+encodeURIComponent(orgId));monitors=data.monitors||[];$("stat-total").textContent=monitors.length;updateOnboarding();$("monitor-count").textContent=monitors.length+" configured";$("monitor-empty").classList.toggle("hidden",monitors.length>0);$("monitor-table").classList.toggle("hidden",monitors.length===0);$("monitor-rows").innerHTML="";for(const m of monitors){const tr=document.createElement("tr");const name=document.createElement("td");name.className="target";name.textContent=m.name;const target=document.createElement("small");target.textContent=m.target_url;name.appendChild(target);const type=document.createElement("td");type.textContent=m.monitor_type.toUpperCase();const interval=document.createElement("td");interval.textContent=Math.round(m.interval_seconds/60)+" min";const state=document.createElement("td");const pill=document.createElement("span");pill.className="pill";pill.textContent="Awaiting first check";state.appendChild(pill);const action=document.createElement("td");const view=document.createElement("button");view.className="btn";view.textContent="View";view.setAttribute("aria-label","View details for "+m.name);view.addEventListener("click",()=>openMonitor(m.id));const edit=document.createElement("button");edit.className="btn";edit.style.marginLeft="6px";edit.textContent="Edit";edit.addEventListener("click",()=>editMonitor(m));const del=document.createElement("button");del.className="btn";del.style.marginLeft="6px";del.textContent="Delete";del.addEventListener("click",()=>removeMonitor(m.id,m.name));action.append(view,edit,del);tr.append(name,type,interval,state,action);$("monitor-rows").appendChild(tr)}}
+async function loadMonitors(){
+  const data=await request("/v1/monitors?organizationId="+encodeURIComponent(orgId));
+  monitors=data.monitors||[];
+  const role=orgs.find(org=>org.id===orgId)?.role||"viewer";
+  const canWrite=role!=="viewer";
+  const canDelete=role==="owner"||role==="admin";
+  $("stat-total").textContent=monitors.length;
+  updateOnboarding();
+  $("monitor-count").textContent=monitors.length+" configured";
+  $("monitor-empty").classList.toggle("hidden",monitors.length>0);
+  $("monitor-table").classList.toggle("hidden",monitors.length===0);
+  $("monitor-rows").innerHTML="";
+  for(const m of monitors){
+    const tr=document.createElement("tr");
+    const name=document.createElement("td");
+    name.className="target";
+    name.textContent=m.name;
+    const target=document.createElement("small");
+    target.textContent=m.target_url;
+    name.appendChild(target);
+    const type=document.createElement("td");
+    type.textContent=m.monitor_type.toUpperCase();
+    const interval=document.createElement("td");
+    interval.textContent=Math.round(m.interval_seconds/60)+" min";
+    const state=document.createElement("td");
+    const pill=document.createElement("span");
+    pill.className="pill";
+    pill.textContent=Number(m.is_enabled)===1?"Awaiting first check":"Paused";
+    state.appendChild(pill);
+    const action=document.createElement("td");
+    const view=document.createElement("button");
+    view.className="btn";
+    view.textContent="View";
+    view.setAttribute("aria-label","View details for "+m.name);
+    view.addEventListener("click",()=>openMonitor(m.id));
+    action.appendChild(view);
+    if(canWrite){
+      const toggle=document.createElement("button");
+      toggle.className="btn";
+      toggle.style.marginLeft="6px";
+      toggle.textContent=Number(m.is_enabled)===1?"Pause":"Resume";
+      toggle.setAttribute("aria-label",(Number(m.is_enabled)===1?"Pause ":"Resume ")+m.name);
+      toggle.addEventListener("click",()=>toggleMonitorEnabled(m.id,Number(m.is_enabled)===1?"pause":"resume"));
+      const edit=document.createElement("button");
+      edit.className="btn";
+      edit.style.marginLeft="6px";
+      edit.textContent="Edit";
+      edit.addEventListener("click",()=>editMonitor(m));
+      action.append(toggle,edit);
+    }
+    if(canDelete){
+      const del=document.createElement("button");
+      del.className="btn";
+      del.style.marginLeft="6px";
+      del.textContent="Delete";
+      del.addEventListener("click",()=>removeMonitor(m.id,m.name));
+      action.appendChild(del);
+    }
+    tr.append(name,type,interval,state,action);
+    $("monitor-rows").appendChild(tr);
+  }
+}
 function formatCheckDate(value){
   const raw=String(value||"");
   const normalized=raw.includes("T")?raw:raw.replace(" ","T")+"Z";
@@ -64,6 +126,16 @@ async function openMonitor(monitorId){
     ]);
     if(selectedMonitorId!==monitorId)return;
     const monitor=detail.monitor||{};
+    selectedMonitorEnabled=Number(monitor.is_enabled)===1;
+    const role=orgs.find(org=>org.id===orgId)?.role||"viewer";
+    const canWrite=role!=="viewer";
+    $("monitor-toggle").classList.toggle("hidden",!canWrite);
+    $("monitor-edit").classList.toggle("hidden",!canWrite);
+    $("monitor-toggle").textContent=selectedMonitorEnabled?"Pause monitor":"Resume monitor";
+    $("monitor-toggle").setAttribute("aria-label",(selectedMonitorEnabled?"Pause ":"Resume ")+(monitor.name||"monitor"));
+    $("monitor-detail-notice").textContent=selectedMonitorEnabled
+      ?"Scheduled probes are disabled. This view only reads records already stored by the monitoring service."
+      :"This monitor is paused. Existing history is retained; resuming it will make it eligible for a future scheduled check.";
     const checks=Array.isArray(history.checks)?history.checks:[];
     $("monitor-detail-title").textContent=monitor.name||"Monitor details";
     $("monitor-detail-target").textContent=monitor.target_url||"";
@@ -77,6 +149,7 @@ async function openMonitor(monitorId){
     addMeta("Monitor type",String(monitor.monitor_type||"http").toUpperCase());
     addMeta("Request",String(monitor.method||"GET")+" · expects "+String(monitor.expected_status||200));
     addMeta("Interval",Math.round(Number(monitor.interval_seconds||300)/60)+" minutes");
+    addMeta("Configured state",selectedMonitorEnabled?"Enabled":"Paused");
     addMeta("Execution","Scheduled checks not active");
     $("check-count").textContent=checks.length+" stored "+(checks.length===1?"check":"checks");
     $("check-rows").innerHTML="";
@@ -105,6 +178,17 @@ function showMonitorList(){
   $("monitor-detail").classList.add("hidden");
   $("monitor-empty").classList.toggle("hidden",monitors.length>0);
   $("monitor-table").classList.toggle("hidden",monitors.length===0);
+}
+
+async function toggleMonitorEnabled(monitorId,action){
+  try{
+    const result=await request("/v1/monitors/"+encodeURIComponent(monitorId)+"/"+action,{method:"POST"});
+    showNotice((result.message||"Monitor state updated.")+" Scheduled probes remain disabled until secure execution is enabled.");
+    await loadMonitors();
+    if(selectedMonitorId===monitorId)await openMonitor(monitorId);
+  }catch(error){
+    showNotice(error.message,true);
+  }
 }
 async function loadTeam(){
   const role=orgs[0]?.role||"viewer";
@@ -221,6 +305,7 @@ function showIncidentList(){
 }
 $("monitor-back").addEventListener("click",showMonitorList);
 $("monitor-refresh").addEventListener("click",()=>{if(selectedMonitorId)openMonitor(selectedMonitorId)});
+$("monitor-toggle").addEventListener("click",()=>{if(selectedMonitorId)toggleMonitorEnabled(selectedMonitorId,selectedMonitorEnabled?"pause":"resume")});
 $("monitor-edit").addEventListener("click",()=>{const monitor=monitors.find(item=>item.id===selectedMonitorId);if(monitor)editMonitor(monitor)});
 $("incident-back").addEventListener("click",showIncidentList);
 function incidentActionMessage(text,error=false){const node=$("incident-action-message");node.textContent=text;node.classList.remove("hidden","error");if(error)node.classList.add("error")}
