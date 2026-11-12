@@ -50,7 +50,7 @@ The Resend endpoint and test-only API key are inert fixtures. The Worker test ru
 - Incident lists require workspace membership and return only incidents belonging to that tenant.
 - Incident detail and timeline reads reject a foreign-tenant incident ID.
 
-The last previously verified CI suite passed 110 tests across 13 files in [GitHub Actions run #174](https://github.com/learninghub44/zetuwatch/actions/runs/42978590224) on commit `c3f19ade101af3abf1c16b47e598f1a7f1708d96`. Five monitor pause/resume API tests now bring the defined suite to 115 tests across 13 files; CI verification of this slice is pending. These tests verify Worker routes and scheduler/incident persistence against D1's SQLite-compatible runtime. They do not replace production D1 verification, browser end-to-end tests, provider delivery tests or a security review of outbound network execution. No scheduled probes are enabled by this test setup.
+The latest verified CI suite passed 115 tests across 13 files in [GitHub Actions run #175](https://github.com/learninghub44/zetuwatch/actions/runs/43171922270) on commit `a6cac79dcd3ccc2865629d93829d6e5cb0a782e8`. These tests verify Worker routes and scheduler/incident persistence against D1's SQLite-compatible runtime. They do not replace production D1 verification, browser end-to-end tests, provider delivery tests or a security review of outbound network execution. No scheduled probes are enabled by this test setup.
 
 
 ## Monitor control integration coverage (5 D1-backed tests)

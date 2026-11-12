@@ -9,7 +9,7 @@ The product is built in vertical slices. A slice is complete only when UI, API, 
 - [x] Conservative HTTP probe foundation
 - [x] Product scope and user journey specification
 - [x] CI typecheck workflow added and verified in GitHub Actions
-- [ ] Unit and integration test suite (110 tests across 13 files passed CI in run #174 on commit `c3f19ade101af3abf1c16b47e598f1a7f1708d96`; five new monitor pause/resume tests bring the defined suite to 115 tests across 13 files pending CI verification; payment lifecycle coverage, browser E2E and provider tests remain)
+- [ ] Unit and integration test suite (115 tests across 13 files passed CI in run #175 on commit `a6cac79dcd3ccc2865629d93829d6e5cb0a782e8`; payment lifecycle coverage, browser E2E and provider tests remain)
 - [x] Direct development-tool versions checked against current package releases and pinned
 - [ ] Lockfile generation and clean-install verification
 
@@ -17,7 +17,7 @@ The product is built in vertical slices. A slice is complete only when UI, API, 
 - [ ] Authentication foundation: registration, email verification, password login/reset and opaque sessions are implemented; a D1-backed test now covers registration → verification → login → password reset → session revocation with email delivery stubbed; browser E2E, live provider delivery and security edge-case tests remain
 - [ ] Invitation acceptance and full team/member management (member listing, role policy, invitations, acceptance, role changes, removal API and initial responsive team screen implemented; team member-list isolation, single-use concurrent invitation acceptance and concurrent owner demotion are covered by D1 integration tests; browser acceptance and real email delivery remain)
 - [ ] Organization creation and basic membership checks exist; team-management API now enforces owner/admin/member/viewer policy and last-owner protection; monitor/team tenant boundaries, invitation consumption and concurrent owner protection pass D1-backed API tests, while broader route coverage remains
-- [ ] Tenant-safe schema constraints and migration tests (six migrations are present; the new incident-action migration still needs CI SQLite smoke-test verification and API/scheduler/incident suites run against isolated local D1; production-account D1 behavior remains unverified)
+- [ ] Tenant-safe schema constraints and migration tests (six numbered migrations passed CI SQLite validation and the API/scheduler/incident suites load them in isolated local D1 in run #175; production-account D1 behavior remains unverified)
 - [ ] Audit events and basic per-IP auth/monitor rate limits exist; broader abuse controls remain
 
 ## Phase 2 — first working monitoring loop
@@ -32,7 +32,7 @@ The product is built in vertical slices. A slice is complete only when UI, API, 
 ## Phase 3 — complete customer experience
 - [ ] Public marketing website, docs and pricing
 - [ ] Multi-step sign-up and resumable onboarding
-- [ ] Workspace overview, monitor list/create/delete, monitor detail and persisted check-history views are implemented; pause/resume API and role-aware controls are implemented; browser E2E, real measurements and analytics remain
+- [ ] Workspace overview, monitor list/create/delete, monitor detail, persisted check-history views and role-aware pause/resume controls are implemented; browser E2E, real measurements and analytics remain
 - [ ] Incident timeline and customer-facing updates (tenant-scoped list/detail, role-protected status transitions, authored internal/public notes and responsive controls are implemented; public publishing, browser QA/accessibility and notification delivery remain)
 - [ ] Status-page builder and public status pages
 - [ ] Team invitations, roles and organization settings (initial member/invitation screen and API implemented; tenant-isolated member listing, concurrent invitation acceptance and owner-demotion protection are integration-tested, while complete settings, email delivery and browser QA remain)
@@ -225,7 +225,7 @@ No Cloudflare resources were created and no deployment was attempted. This is fe
 - The detail panel reads the existing `GET /v1/monitors/<uuid>` and `GET /v1/monitors/<uuid>/checks` endpoints. It renders stored check timestamps, pass/fail values, HTTP status, response time and error category using text nodes only.
 - Empty history is explicit. Refreshing the panel only reads persisted history; it never triggers a customer-target request or invents uptime/latency.
 - Added a D1-backed API integration test proving a workspace viewer can read ordered persisted check history while the API continues to report `executionEnabled: false`.
-- Added API and testing documentation. The defined suite is now 110 tests across 13 files; CI verification of this slice is pending.
+- Added API and testing documentation. This monitor-detail/history slice was included in the 110-test suite that passed CI run #174 on commit `c3f19ade101af3abf1c16b47e598f1a7f1708d96`.
 - The monitoring loop remains incomplete: no hardened outbound transport, Cron execution, new real checks, browser E2E, notification fan-out or production deployment is enabled.
 
 
@@ -237,4 +237,4 @@ No Cloudflare resources were created and no deployment was attempted. This is fe
 - The monitor list now shows paused state and role-aware Pause/Resume, Edit and Delete actions. The detail view shows configured state and offers Pause/Resume to writable roles.
 - No probe is run by either action. The API continues to report `executionEnabled: false`; secure outbound transport and the scheduled runner remain launch blockers.
 - Five new D1-backed Worker API tests cover owner pause/idempotency/audit, member resume/due-work state, viewer denial, cross-tenant denial and archived-monitor rejection.
-- The previous 110-test suite passed GitHub Actions run #174. The updated 115-test suite is pending CI verification.
+- The updated 115-test suite passed GitHub Actions run #175 on commit `a6cac79dcd3ccc2865629d93829d6e5cb0a782e8`.
