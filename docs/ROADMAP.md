@@ -238,3 +238,12 @@ No Cloudflare resources were created and no deployment was attempted. This is fe
 - No probe is run by either action. The API continues to report `executionEnabled: false`; secure outbound transport and the scheduled runner remain launch blockers.
 - Five new D1-backed Worker API tests cover owner pause/idempotency/audit, member resume/due-work state, viewer denial, cross-tenant denial and archived-monitor rejection.
 - The updated 115-test suite passed GitHub Actions run #175 on commit `a6cac79dcd3ccc2865629d93829d6e5cb0a782e8`.
+
+
+## Read-only workspace API keys (2026-11-13)
+
+- Added owner/admin-only API key creation, metadata listing and immediate revocation using the existing `api_keys` table. Secrets are generated from 256 bits of cryptographic randomness, stored only as SHA-256 hashes, shown once, and expire after 30, 90 or 365 days. A workspace is limited to 10 active keys.
+- Added bearer authentication for read-only monitor and incident endpoints. Keys are scoped to one workspace, require the creator to remain a verified owner/admin, update last-used metadata, and cannot mutate monitors/incidents or access authentication/team endpoints. Internal incident timeline events are omitted from key-authenticated reads.
+- Added an API-key management panel to the workspace app with role-aware access, create/revoke actions, one-time secret display and copy support.
+- Added D1-backed integration tests for creation, one-time secret handling, hashing, usage tracking, revocation, workspace isolation, read-only enforcement, internal timeline filtering, expiry and role restrictions.
+- Verification for this commit is pending. Browser E2E, external-client acceptance, API key rotation and any write scopes remain open; the feature is not marked launch-complete.

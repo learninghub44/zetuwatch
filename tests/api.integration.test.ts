@@ -115,12 +115,30 @@ async function createIncident(monitorId: string): Promise<string> {
   return incidentId;
 }
 
+async function createApiKeyFixture(
+  identity: Identity,
+  options: { expiresAt?: string; revokedAt?: string } = {}
+): Promise<{ id: string; secret: string }> {
+  const secret = "zw_live_" + Array.from(
+    crypto.getRandomValues(new Uint8Array(32)),
+    byte => byte.toString(16).padStart(2, "0")
+  ).join("");
+  const keyId = crypto.randomUUID();
+  await env.DB.prepare("INSERT INTO api_keys (id, organization_id, created_by, name, key_prefix, key_hash, expires_at, revoked_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+    .bind(
+      keyId, identity.organizationId, identity.userId, "Integration read key",
+      secret.slice(0, 16), await sha256(secret), options.expiresAt ?? null, options.revokedAt ?? null
+    ).run();
+  return { id: keyId, secret };
+}
+
 function api(
   path: string,
-  options: { token?: string; method?: string; body?: Record<string, unknown> } = {}
+  options: { token?: string; apiKey?: string; method?: string; body?: Record<string, unknown> } = {}
 ): Promise<Response> {
   const headers = new Headers({ "cf-connecting-ip": crypto.randomUUID() });
   if (options.token) headers.set("cookie", `zw_session=${options.token}`);
+  if (options.apiKey) headers.set("authorization", `Bearer ${options.apiKey}`);
   if (options.body) headers.set("content-type", "application/json");
 
   return exports.default.fetch(new Request(`https://api.zetuwatch.test${path}`, {
@@ -568,5 +586,151 @@ describe("Worker API tenant isolation", () => {
     expect(response.status).toBe(404);
   });
 
+
+
+  it("creates a read-only API key once, lists metadata without secrets, records use and revokes it", async () => {
+    const identity = await createIdentity("owner");
+    const monitorId = await createMonitor(identity.organizationId);
+    const createResponse = await api("/v1/organizations/" + identity.organizationId + "/api-keys", {
+      token: identity.sessionToken,
+      method: "POST",
+      body: { name: "CI read integration", expiresInDays: 30 }
+    });
+    expect(createResponse.status).toBe(201);
+    const created = await createResponse.json() as {
+      apiKey: { id: string; name: string; keyPrefix: string; expiresAt: string };
+      secret: string;
+    };
+    expect(created.secret).toMatch(/^zw_live_[A-Za-z0-9_-]{40,64}$/);
+    expect(created.apiKey).toMatchObject({ name: "CI read integration" });
+    expect(created.apiKey.keyPrefix).toBe(created.secret.slice(0, 16));
+
+    const stored = await env.DB.prepare("SELECT key_hash, last_used_at FROM api_keys WHERE id = ?")
+      .bind(created.apiKey.id).first<{ key_hash: string; last_used_at: string | null }>();
+    expect(stored?.key_hash).toBe(await sha256(created.secret));
+    expect(stored?.key_hash).not.toContain(created.secret);
+
+    const listed = await api("/v1/organizations/" + identity.organizationId + "/api-keys", {
+      token: identity.sessionToken
+    });
+    expect(listed.status).toBe(200);
+    const listPayload = await listed.json() as { apiKeys: Array<Record<string, unknown>> };
+    expect(listPayload.apiKeys).toHaveLength(1);
+    expect(listPayload.apiKeys[0]).toMatchObject({ id: created.apiKey.id, key_prefix: created.apiKey.keyPrefix });
+    expect(JSON.stringify(listPayload)).not.toContain(created.secret);
+    expect(listPayload.apiKeys[0]).not.toHaveProperty("key_hash");
+
+    const read = await api("/v1/monitors?organizationId=" + identity.organizationId, {
+      apiKey: created.secret
+    });
+    expect(read.status).toBe(200);
+    expect((await read.json() as { monitors: Array<{ id: string }> }).monitors[0]?.id).toBe(monitorId);
+    const used = await env.DB.prepare("SELECT last_used_at FROM api_keys WHERE id = ?")
+      .bind(created.apiKey.id).first<{ last_used_at: string | null }>();
+    expect(used?.last_used_at).toBeTruthy();
+
+    const revoked = await api("/v1/organizations/" + identity.organizationId + "/api-keys/" + created.apiKey.id, {
+      token: identity.sessionToken,
+      method: "DELETE"
+    });
+    expect(revoked.status).toBe(200);
+    expect(await revoked.json()).toMatchObject({ changed: true });
+
+    const rejected = await api("/v1/monitors?organizationId=" + identity.organizationId, {
+      apiKey: created.secret
+    });
+    expect(rejected.status).toBe(401);
+    const audit = await env.DB.prepare("SELECT action FROM audit_logs WHERE organization_id = ? AND resource_id = ? ORDER BY action")
+      .bind(identity.organizationId, created.apiKey.id).all<{ action: string }>();
+    expect(audit.results.map(row => row.action)).toEqual(["api_key.created", "api_key.revoked"]);
+  });
+
+  it("restricts read-only API keys to their workspace and rejects every monitor mutation", async () => {
+    const identity = await createIdentity("owner");
+    const ownMonitorId = await createMonitor(identity.organizationId);
+    const foreignOrganizationId = await createForeignOrganization();
+    const foreignMonitorId = await createMonitor(foreignOrganizationId);
+    const key = await createApiKeyFixture(identity);
+
+    expect((await api("/v1/monitors?organizationId=" + identity.organizationId, { apiKey: key.secret })).status).toBe(200);
+    expect((await api("/v1/monitors?organizationId=" + foreignOrganizationId, { apiKey: key.secret })).status).toBe(403);
+    expect((await api("/v1/monitors/" + ownMonitorId, { apiKey: key.secret })).status).toBe(200);
+    expect((await api("/v1/monitors/" + ownMonitorId + "/checks", { apiKey: key.secret })).status).toBe(200);
+    expect((await api("/v1/monitors/" + foreignMonitorId, { apiKey: key.secret })).status).toBe(403);
+
+    const create = await api("/v1/monitors", {
+      apiKey: key.secret,
+      method: "POST",
+      body: {
+        organizationId: identity.organizationId,
+        name: "Should be rejected",
+        targetUrl: "https://status.example.com/health"
+      }
+    });
+    const pause = await api("/v1/monitors/" + ownMonitorId + "/pause", {
+      apiKey: key.secret,
+      method: "POST"
+    });
+    const update = await api("/v1/monitors/" + ownMonitorId, {
+      apiKey: key.secret,
+      method: "PATCH",
+      body: { name: "Changed by API key" }
+    });
+    const remove = await api("/v1/monitors/" + ownMonitorId, {
+      apiKey: key.secret,
+      method: "DELETE"
+    });
+    expect([create.status, pause.status, update.status, remove.status]).toEqual([403, 403, 403, 403]);
+    const stored = await env.DB.prepare("SELECT is_enabled, name FROM monitors WHERE id = ?")
+      .bind(ownMonitorId).first<{ is_enabled: number; name: string }>();
+    expect(stored).toMatchObject({ is_enabled: 1, name: "Private fixture" });
+  });
+
+  it("keeps API keys out of authentication and team-management endpoints", async () => {
+    const identity = await createIdentity("owner");
+    const key = await createApiKeyFixture(identity);
+    const me = await api("/auth/me", { apiKey: key.secret });
+    const members = await api("/v1/organizations/" + identity.organizationId + "/members", {
+      apiKey: key.secret
+    });
+    const keyManagement = await api("/v1/organizations/" + identity.organizationId + "/api-keys", {
+      apiKey: key.secret
+    });
+    expect([me.status, members.status, keyManagement.status]).toEqual([403, 403, 403]);
+  });
+
+  it("exposes only public incident timeline events to read-only API keys", async () => {
+    const identity = await createIdentity("owner");
+    const monitorId = await createMonitor(identity.organizationId);
+    const incidentId = await createIncident(monitorId);
+    await env.DB.prepare("INSERT INTO incident_events (id, incident_id, event_type, message, visibility, actor_user_id) VALUES (?, ?, 'incident.update', ?, 'public', ?)")
+      .bind(crypto.randomUUID(), incidentId, "Public customer update", identity.userId).run();
+    const key = await createApiKeyFixture(identity);
+
+    const response = await api("/v1/incidents/" + incidentId, { apiKey: key.secret });
+    expect(response.status).toBe(200);
+    const payload = await response.json() as { events: Array<{ message: string; visibility: string }> };
+    expect(payload.events).toEqual([
+      expect.objectContaining({ message: "Public customer update", visibility: "public" })
+    ]);
+  });
+
+  it("rejects expired and revoked API keys and prevents members/viewers from creating keys", async () => {
+    const owner = await createIdentity("owner");
+    const expired = await createApiKeyFixture(owner, { expiresAt: "2020-01-01T00:00:00.000Z" });
+    const revoked = await createApiKeyFixture(owner, { revokedAt: "2026-11-13T09:00:00.000Z" });
+    expect((await api("/v1/monitors?organizationId=" + owner.organizationId, { apiKey: expired.secret })).status).toBe(401);
+    expect((await api("/v1/monitors?organizationId=" + owner.organizationId, { apiKey: revoked.secret })).status).toBe(401);
+
+    for (const role of ["member", "viewer"] as const) {
+      const identity = await createIdentity(role);
+      const response = await api("/v1/organizations/" + identity.organizationId + "/api-keys", {
+        token: identity.sessionToken,
+        method: "POST",
+        body: { name: "Not permitted", expiresInDays: 90 }
+      });
+      expect(response.status).toBe(403);
+    }
+  });
 
 });

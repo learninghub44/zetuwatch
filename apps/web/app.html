@@ -5,8 +5,8 @@
 @media(max-width:850px){.shell{grid-template-columns:205px 1fr}.content{padding:25px}.top{padding:0 25px}}
 @media(max-width:650px){.monitor-meta-grid{grid-template-columns:1fr 1fr}.setup-grid{grid-template-columns:1fr}.shell{display:block}.side{display:none}.mobile-head{display:flex;align-items:center;justify-content:space-between;background:#fff;border-bottom:1px solid var(--line);padding:14px 17px}.top{height:52px;padding:0 17px}.content{padding:22px 16px}.heading{align-items:flex-start;flex-direction:column}.stats{grid-template-columns:1fr 1fr}.stat:last-child{grid-column:span 2}table{min-width:620px}.panel{overflow-x:auto}.row{grid-template-columns:1fr}.incident-status-grid{grid-template-columns:1fr}.heading h1{font-size:24px}}
 </style></head><body>
-<div class="mobile-head"><a class="brand" href="./index.html" style="padding:0"><span class="mark">⌁</span>ZetuWatch</a><a class="btn" href="#incidents">Incidents</a><button class="btn" id="mobile-logout">Sign out</button></div>
-<div class="shell"><aside class="side"><a class="brand" href="./index.html"><span class="mark">⌁</span>ZetuWatch</a><button class="workspace" id="workspace-switch"><small>WORKSPACE</small><strong id="workspace-name">Loading workspace…</strong></button><div class="nav-label">Workspace</div><nav class="nav"><a class="active" href="./app.html"><span class="ico">◫</span>Overview</a><a href="#monitors" id="nav-monitors"><span class="ico">⌁</span>Monitors</a><a href="#incidents" id="nav-incidents"><span class="ico">◷</span>Incidents</a><a class="disabled" aria-disabled="true"><span class="ico">▤</span>Status pages · coming soon</a><a class="disabled" aria-disabled="true"><span class="ico">⌁</span>Analytics · coming soon</a><a class="disabled" aria-disabled="true"><span class="ico">◎</span>Alerts · coming soon</a><div class="nav-label" style="margin-top:20px">Manage</div><a href="#team" id="nav-team"><span class="ico">♧</span>Team</a><a class="disabled" aria-disabled="true"><span class="ico">⚙</span>Settings · coming soon</a><a class="disabled" aria-disabled="true"><span class="ico">▣</span>Billing · coming soon</a></nav><div class="side-bottom"><div class="profile"><div class="avatar" id="avatar">?</div><div><strong id="user-name">Loading</strong><small id="user-email"></small></div><button id="logout" title="Sign out" aria-label="Sign out">↗</button></div></div></aside>
+<div class="mobile-head"><a class="brand" href="./index.html" style="padding:0"><span class="mark">⌁</span>ZetuWatch</a><a class="btn" href="#incidents">Incidents</a><a class="btn" href="#api-keys">API keys</a><button class="btn" id="mobile-logout">Sign out</button></div>
+<div class="shell"><aside class="side"><a class="brand" href="./index.html"><span class="mark">⌁</span>ZetuWatch</a><button class="workspace" id="workspace-switch"><small>WORKSPACE</small><strong id="workspace-name">Loading workspace…</strong></button><div class="nav-label">Workspace</div><nav class="nav"><a class="active" href="./app.html"><span class="ico">◫</span>Overview</a><a href="#monitors" id="nav-monitors"><span class="ico">⌁</span>Monitors</a><a href="#incidents" id="nav-incidents"><span class="ico">◷</span>Incidents</a><a class="disabled" aria-disabled="true"><span class="ico">▤</span>Status pages · coming soon</a><a class="disabled" aria-disabled="true"><span class="ico">⌁</span>Analytics · coming soon</a><a class="disabled" aria-disabled="true"><span class="ico">◎</span>Alerts · coming soon</a><div class="nav-label" style="margin-top:20px">Manage</div><a href="#team" id="nav-team"><span class="ico">♧</span>Team</a><a href="#api-keys" id="nav-api-keys"><span class="ico">⌘</span>API keys</a><a class="disabled" aria-disabled="true"><span class="ico">▣</span>Billing · coming soon</a></nav><div class="side-bottom"><div class="profile"><div class="avatar" id="avatar">?</div><div><strong id="user-name">Loading</strong><small id="user-email"></small></div><button id="logout" title="Sign out" aria-label="Sign out">↗</button></div></div></aside>
 <main class="main"><header class="top"><span class="crumb">Workspace / <strong>Overview</strong></span><div class="top-actions"><button class="btn" id="top-help">Help</button><button class="btn primary" id="top-add">Add monitor +</button></div></header><section class="content">
 <div id="notice" class="notice hidden" role="status" aria-live="polite"></div>
 <div class="heading"><div><h1 id="greeting">Workspace overview</h1><p>A clear view of the services you have configured.</p></div><button class="btn primary" id="add-monitor">Add monitor +</button></div>
@@ -32,7 +32,19 @@
   <div style="overflow-x:auto"><table id="check-table" class="hidden"><thead><tr><th>Checked at</th><th>Result</th><th>HTTP status</th><th>Latency</th><th>Error category</th></tr></thead><tbody id="check-rows"></tbody></table></div>
 </section>
 <section class="panel" id="incidents" style="margin-top:22px"><div class="panel-head"><div><h2>Incidents</h2><span>Confirmed service interruptions and their timelines</span></div><span id="incident-count">Loading…</span></div><div id="incident-empty" class="empty hidden"><div class="empty-mark">◷</div><h3>No confirmed incidents</h3><p>There are no incident records in this workspace. Live checks are not enabled yet, so this list will only change when the secure monitoring runner is active.</p></div><div id="incident-table-wrap" style="overflow-x:auto"><table id="incident-table" class="hidden"><thead><tr><th>Monitor</th><th>Started</th><th>Status</th><th>Resolved</th><th></th></tr></thead><tbody id="incident-rows"></tbody></table></div><div id="incident-detail" class="hidden" style="padding:18px 19px"><button class="btn" id="incident-back" type="button">← All incidents</button><div id="incident-summary" style="padding:18px 0 12px"></div><h3 style="font-size:13px;margin:8px 0 6px">Timeline</h3><div id="incident-events"></div><div id="incident-actions" class="hidden" style="border-top:1px solid var(--line);margin-top:12px;padding-top:16px"><div id="incident-action-message" class="notice hidden" role="status" aria-live="polite"></div><form id="incident-status-form" class="incident-status-grid"><div class="field" style="margin:0"><label for="incident-next-status">Update status</label><select id="incident-next-status"></select></div><div class="field" style="margin:0"><label for="incident-status-visibility">Visibility</label><select id="incident-status-visibility"><option value="internal">Internal note</option><option value="public">Public update · not published yet</option></select></div><div class="field" style="margin:0"><label for="incident-status-message">Update message · optional</label><input id="incident-status-message" maxlength="500" placeholder="Share what changed"></div><button class="btn primary" type="submit">Save status</button></form><form id="incident-update-form" style="margin-top:14px"><div class="field"><label for="incident-update-message">Add a timeline update</label><textarea id="incident-update-message" maxlength="500" rows="3" required placeholder="Describe the investigation or customer impact"></textarea></div><div class="row" style="align-items:end"><div class="field" style="margin:0"><label for="incident-update-visibility">Visibility</label><select id="incident-update-visibility"><option value="internal">Internal note</option><option value="public">Public update · not published yet</option></select></div><button class="btn" type="submit">Post update</button></div></form></div></div></section>
-<section class="panel" id="team" style="margin-top:22px"><div class="panel-head"><div><h2>Workspace team</h2><span>Manage access to this workspace</span></div><span id="team-count">Loading…</span></div><div style="padding:18px 19px"><div id="team-message" class="notice hidden" role="status" aria-live="polite"></div><form id="invite-form" class="row" style="align-items:end;margin-bottom:18px;grid-template-columns:minmax(0,1fr) 180px auto"><div class="field" style="margin:0"><label for="invite-email">Invite by email</label><input id="invite-email" type="email" required maxlength="254" placeholder="teammate@example.com"></div><div class="field" style="margin:0"><label for="invite-role">Workspace role</label><select id="invite-role"><option value="member">Member</option><option value="viewer">Viewer</option><option value="admin">Admin</option></select></div><button class="btn primary" id="invite-submit" type="submit">Send invitation</button></form><div style="overflow-x:auto"><table><thead><tr><th>Member</th><th>Email</th><th>Role</th><th>Joined</th><th></th></tr></thead><tbody id="team-rows"><tr><td colspan="5">Loading members…</td></tr></tbody></table></div><div id="pending-invitations" style="margin-top:22px"><h3 style="font-size:13px;margin:0 0 10px">Pending invitations</h3><div id="invitation-rows" style="font-size:12px;color:var(--muted)">Loading invitations…</div></div></div></section><div class="notice" style="margin-top:18px">Monitoring setup is in progress. Monitors can be configured and saved, but scheduled probes, uptime measurements and incident alerts are not active yet. Do not rely on this workspace for production monitoring.</div>
+<section class="panel" id="team" style="margin-top:22px"><div class="panel-head"><div><h2>Workspace team</h2><span>Manage access to this workspace</span></div><span id="team-count">Loading…</span></div><div style="padding:18px 19px"><div id="team-message" class="notice hidden" role="status" aria-live="polite"></div><form id="invite-form" class="row" style="align-items:end;margin-bottom:18px;grid-template-columns:minmax(0,1fr) 180px auto"><div class="field" style="margin:0"><label for="invite-email">Invite by email</label><input id="invite-email" type="email" required maxlength="254" placeholder="teammate@example.com"></div><div class="field" style="margin:0"><label for="invite-role">Workspace role</label><select id="invite-role"><option value="member">Member</option><option value="viewer">Viewer</option><option value="admin">Admin</option></select></div><button class="btn primary" id="invite-submit" type="submit">Send invitation</button></form><div style="overflow-x:auto"><table><thead><tr><th>Member</th><th>Email</th><th>Role</th><th>Joined</th><th></th></tr></thead><tbody id="team-rows"><tr><td colspan="5">Loading members…</td></tr></tbody></table></div><div id="pending-invitations" style="margin-top:22px"><h3 style="font-size:13px;margin:0 0 10px">Pending invitations</h3><div id="invitation-rows" style="font-size:12px;color:var(--muted)">Loading invitations…</div></div></div></section><section class="panel" id="api-keys" style="margin-top:22px">
+<div class="panel-head"><div><h2>API keys</h2><span>Read-only access for workspace integrations</span></div><span id="api-key-count">Loading…</span></div>
+<div style="padding:18px 19px">
+<div id="api-key-message" class="notice hidden" role="status" aria-live="polite"></div>
+<form id="api-key-form" class="row" style="align-items:end;margin-bottom:18px;grid-template-columns:minmax(0,1fr) 160px auto">
+<div class="field" style="margin:0"><label for="api-key-name">Key name</label><input id="api-key-name" maxlength="60" required placeholder="CI read integration"></div>
+<div class="field" style="margin:0"><label for="api-key-expiry">Expires after</label><select id="api-key-expiry"><option value="30">30 days</option><option value="90" selected>90 days</option><option value="365">365 days</option></select></div>
+<button class="btn primary" id="api-key-submit" type="submit">Create read-only key</button>
+</form>
+<div id="api-key-created" class="notice hidden" role="status"><strong>Copy this key now. It will not be shown again.</strong><code id="api-key-secret" style="display:block;overflow-wrap:anywhere;padding:10px;margin:9px 0;background:#fff;border:1px solid var(--line);border-radius:8px"></code><button class="btn" id="api-key-copy" type="button">Copy key</button></div>
+<div style="overflow-x:auto"><table><thead><tr><th>Name</th><th>Prefix</th><th>Created</th><th>Last used</th><th>Expires</th><th>Status</th><th></th></tr></thead><tbody id="api-key-rows"><tr><td colspan="7">Loading API keys…</td></tr></tbody></table></div>
+<p style="font-size:11px;color:var(--muted);line-height:1.6;margin:14px 0 0">Keys are scoped to this workspace and can read monitors, stored checks and incident summaries. They cannot change data or access team details. Store a key in a server-side secret manager; never put it in browser code or commit it to source control.</p>
+</div></section><div class="notice" style="margin-top:18px">Monitoring setup is in progress. Monitors can be configured and saved, but scheduled probes, uptime measurements and incident alerts are not active yet. Do not rely on this workspace for production monitoring.</div>
 </section></main></div>
 <div id="modal-backdrop" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="modal-title"><form class="modal" id="monitor-form">
 <h2 id="modal-title">Add a monitor</h2><p>Set up an endpoint in three short steps. No network probe is sent during setup.</p>
@@ -48,7 +60,7 @@ const API=(document.querySelector('meta[name="api-base"]')?.content||"/api").rep
 const $=id=>document.getElementById(id);
 function showNotice(text,error=false){$("notice").textContent=text;$("notice").classList.remove("hidden","error");if(error)$("notice").classList.add("error")}
 async function request(path,options={}){const r=await fetch(API+path,{credentials:"include",...options,headers:{"content-type":"application/json",...(options.headers||{})}});const d=await r.json().catch(()=>({}));if(r.status===401){location.href="./auth.html";throw new Error("Please sign in again.")}if(!r.ok)throw new Error(d.message||d.error||"Request failed");return d}
-async function load(){try{const me=await request("/auth/me");user=me.user;orgs=me.organizations||[];if(!orgs.length)throw new Error("No workspace is connected to this account.");orgId=orgs[0].id;$("workspace-name").textContent=orgs[0].name;$("user-name").textContent=user.name||"Account";$("user-email").textContent=user.email;$("avatar").textContent=(user.name||user.email||"?").slice(0,1).toUpperCase();$("greeting").textContent="Good to see you, "+(user.name||"there");await loadMonitors();await loadIncidents();await loadTeam()}catch(e){showNotice(e.message,true)}}
+async function load(){try{const me=await request("/auth/me");user=me.user;orgs=me.organizations||[];if(!orgs.length)throw new Error("No workspace is connected to this account.");orgId=orgs[0].id;$("workspace-name").textContent=orgs[0].name;$("user-name").textContent=user.name||"Account";$("user-email").textContent=user.email;$("avatar").textContent=(user.name||user.email||"?").slice(0,1).toUpperCase();$("greeting").textContent="Good to see you, "+(user.name||"there");await loadMonitors();await loadIncidents();await loadTeam();await loadApiKeys()}catch(e){showNotice(e.message,true)}}
 async function loadMonitors(){
   const data=await request("/v1/monitors?organizationId="+encodeURIComponent(orgId));
   monitors=data.monitors||[];
@@ -223,6 +235,58 @@ async function loadTeam(){
     try{const pending=await request("/v1/organizations/"+encodeURIComponent(orgId)+"/invitations");const rows=pending.invitations||[];$("invitation-rows").innerHTML="";if(!rows.length){$("invitation-rows").textContent="No pending invitations."}else for(const item of rows){const line=document.createElement("div");line.style.padding="9px 0";line.style.borderBottom="1px solid var(--line)";line.textContent=item.email+" · "+item.role+" · expires "+new Date(item.expires_at.replace(" ","T")+"Z").toLocaleDateString();$("invitation-rows").appendChild(line)}}catch(e){$("invitation-rows").textContent="Pending invitations could not be loaded."}
   }
 }
+
+function apiKeyMessage(text,error=false){const node=$("api-key-message");node.textContent=text;node.classList.remove("hidden","error");if(error)node.classList.add("error")}
+async function loadApiKeys(){
+  const role=orgs[0]?.role||"viewer";
+  const canManage=role==="owner"||role==="admin";
+  $("api-key-form").classList.toggle("hidden",!canManage);
+  $("api-key-message").classList.add("hidden");
+  if(!canManage){
+    $("api-key-count").textContent="Restricted";
+    $("api-key-rows").innerHTML="";
+    apiKeyMessage("Only workspace owners and admins can view or manage API keys.");
+    return;
+  }
+  try{
+    const result=await request("/v1/organizations/"+encodeURIComponent(orgId)+"/api-keys");
+    const keys=result.apiKeys||[];
+    $("api-key-count").textContent=keys.length+" keys";
+    $("api-key-rows").innerHTML="";
+    if(!keys.length){
+      const row=document.createElement("tr");const cell=document.createElement("td");
+      cell.colSpan=7;cell.textContent="No API keys created yet.";row.appendChild(cell);$("api-key-rows").appendChild(row);return;
+    }
+    for(const key of keys){
+      const row=document.createElement("tr");
+      const name=document.createElement("td");name.textContent=key.name||"Unnamed key";
+      const prefix=document.createElement("td");prefix.textContent=key.key_prefix||"—";
+      const created=document.createElement("td");created.textContent=formatIncidentDate(key.created_at);
+      const used=document.createElement("td");used.textContent=formatIncidentDate(key.last_used_at);
+      const expires=document.createElement("td");expires.textContent=formatIncidentDate(key.expires_at);
+      const status=document.createElement("td");
+      const isExpired=Boolean(key.expires_at&&new Date(key.expires_at).getTime()<=Date.now());
+      const active=!key.revoked_at&&!isExpired;
+      status.textContent=key.revoked_at?"Revoked":isExpired?"Expired":"Active";
+      const action=document.createElement("td");
+      if(active){
+        const button=document.createElement("button");button.className="btn";button.textContent="Revoke";
+        button.setAttribute("aria-label","Revoke API key "+(key.name||""));
+        button.addEventListener("click",()=>revokeApiKey(key.id,key.name));action.appendChild(button);
+      }else{action.textContent="—"}
+      row.append(name,prefix,created,used,expires,status,action);$("api-key-rows").appendChild(row);
+    }
+  }catch(error){apiKeyMessage(error.message||"API keys could not be loaded.",true)}
+}
+async function revokeApiKey(keyId,name){
+  if(!confirm("Revoke API key "+(name||"this key")+"? Integrations using it will immediately lose access."))return;
+  try{
+    await request("/v1/organizations/"+encodeURIComponent(orgId)+"/api-keys/"+encodeURIComponent(keyId),{method:"DELETE"});
+    apiKeyMessage("API key revoked. Requests using it will now be rejected.");
+    await loadApiKeys();
+  }catch(error){apiKeyMessage(error.message,true)}
+}
+
 function formatIncidentDate(value){
   if(!value)return "—";
   const raw=String(value);
@@ -313,6 +377,31 @@ $("incident-status-form").addEventListener("submit",async event=>{event.preventD
 $("incident-update-form").addEventListener("submit",async event=>{event.preventDefault();if(!selectedIncidentId)return;const incidentId=selectedIncidentId;const button=$("incident-update-form").querySelector("button[type=submit]");button.disabled=true;try{await request("/v1/incidents/"+encodeURIComponent(incidentId)+"/updates",{method:"POST",body:JSON.stringify({message:$("incident-update-message").value,visibility:$("incident-update-visibility").value})});await loadIncidents();await openIncident(incidentId);incidentActionMessage("Timeline update added.")}catch(e){incidentActionMessage(e.message,true)}finally{button.disabled=false}});
 function teamMessage(text,error=false){$("team-message").textContent=text;$("team-message").classList.remove("hidden","error");if(error)$("team-message").classList.add("error")}
 $("invite-form").addEventListener("submit",async event=>{event.preventDefault();const button=$("invite-submit");button.disabled=true;button.textContent="Sending…";try{const result=await request("/v1/organizations/"+encodeURIComponent(orgId)+"/invitations",{method:"POST",body:JSON.stringify({email:$("invite-email").value.trim(),role:$("invite-role").value})});teamMessage(result.message||"Invitation sent.");$("invite-email").value="";await loadTeam()}catch(e){teamMessage(e.message,true)}finally{button.disabled=false;button.textContent="Send invitation"}});
+
+$("api-key-form").addEventListener("submit",async event=>{
+  event.preventDefault();
+  const button=$("api-key-submit");button.disabled=true;button.textContent="Creating…";
+  try{
+    const result=await request("/v1/organizations/"+encodeURIComponent(orgId)+"/api-keys",{
+      method:"POST",
+      body:JSON.stringify({name:$("api-key-name").value.trim(),expiresInDays:Number($("api-key-expiry").value)})
+    });
+    $("api-key-secret").textContent=result.secret;
+    $("api-key-created").classList.remove("hidden");
+    $("api-key-name").value="";
+    await loadApiKeys();
+    apiKeyMessage("API key created. Copy the secret now; it cannot be retrieved later.");
+  }catch(error){apiKeyMessage(error.message,true)}
+  finally{button.disabled=false;button.textContent="Create read-only key"}
+});
+$("api-key-copy").addEventListener("click",async()=>{
+  const secret=$("api-key-secret").textContent||"";
+  try{
+    if(!navigator.clipboard?.writeText)throw new Error("Clipboard access is unavailable. Select and copy the key manually.");
+    await navigator.clipboard.writeText(secret);apiKeyMessage("API key copied.");
+  }catch(error){apiKeyMessage(error.message||"Could not copy the API key.",true)}
+});
+
 function updateOnboarding(){const hasMonitor=monitors.length>0;$("setup-progress").textContent=(hasMonitor?2:1)+" of 5 complete";$("setup-monitor").classList.toggle("pending",!hasMonitor);$("setup-monitor-copy").textContent=hasMonitor?monitors.length+" monitor(s) configured.":"Choose a website or API to configure.";$("setup-add").textContent=hasMonitor?"Add another":"Set up";if(hasMonitor){$("setup-monitor").querySelector(".btn").textContent="Add another"}else{$("setup-monitor").querySelector(".btn").textContent="Set up"}}let wizardStep=0;
 function renderWizard(){
   document.querySelectorAll("[data-wizard]").forEach(panel=>panel.classList.toggle("hidden",Number(panel.dataset.wizard)!==wizardStep));

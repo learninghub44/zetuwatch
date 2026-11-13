@@ -10,7 +10,7 @@ interface Env {
   EMAIL_FROM?: string;
 }
 
-type UserRow = { id: string; email: string; display_name: string | null; email_verified_at: string | null };
+type UserRow = { id: string; email: string; display_name: string | null; email_verified_at: string | null; authMethod?: "api_key"; apiKeyOrganizationId?: string; apiKeyScopes?: string[] };
 const encoder = new TextEncoder();
 const json = (data: unknown, status = 200, headers: HeadersInit = {}): Response =>
   Response.json(data, { status, headers: { "cache-control": "no-store", ...headers } });
@@ -59,14 +59,26 @@ async function rateLimit(request: Request, env: Env, route: string, limit: numbe
 }
 async function currentUser(request: Request, env: Env): Promise<UserRow | null> {
   const raw = readCookie(request, "zw_session");
-  if (!raw) return null;
-  const tokenHash = await sha256(raw);
-  const row = await env.DB.prepare(`SELECT u.id, u.email, u.display_name, u.email_verified_at
-    FROM auth_sessions s JOIN users u ON u.id = s.user_id
-    WHERE s.token_hash = ? AND s.expires_at > ? AND u.email_verified_at IS NOT NULL`)
-    .bind(tokenHash, new Date().toISOString()).first<UserRow>();
-  if (row) await env.DB.prepare("UPDATE auth_sessions SET last_seen_at = CURRENT_TIMESTAMP WHERE token_hash = ?").bind(tokenHash).run();
-  return row;
+  if (raw) {
+    const tokenHash = await sha256(raw);
+    const row = await env.DB.prepare("SELECT u.id, u.email, u.display_name, u.email_verified_at FROM auth_sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ? AND s.expires_at > ? AND u.email_verified_at IS NOT NULL")
+      .bind(tokenHash, new Date().toISOString()).first<UserRow>();
+    if (row) await env.DB.prepare("UPDATE auth_sessions SET last_seen_at = CURRENT_TIMESTAMP WHERE token_hash = ?").bind(tokenHash).run();
+    return row;
+  }
+  const match = /^Bearer (zw_live_[A-Za-z0-9_-]{40,64})$/.exec(request.headers.get("authorization") || "");
+  const secret = match?.[1];
+  if (!secret || !(await rateLimit(request, env, "api-key-auth", 300))) return null;
+  const tokenHash = await sha256(secret);
+  const row = await env.DB.prepare("SELECT u.id, u.email, u.display_name, u.email_verified_at, k.organization_id AS api_key_organization_id FROM api_keys k JOIN users u ON u.id = k.created_by JOIN organization_members m ON m.organization_id = k.organization_id AND m.user_id = u.id WHERE k.key_hash = ? AND k.revoked_at IS NULL AND (k.expires_at IS NULL OR k.expires_at > ?) AND u.email_verified_at IS NOT NULL AND m.role IN ('owner', 'admin')")
+    .bind(tokenHash, new Date().toISOString()).first<UserRow & { api_key_organization_id: string }>();
+  if (!row) return null;
+  await env.DB.prepare("UPDATE api_keys SET last_used_at = CURRENT_TIMESTAMP WHERE key_hash = ? AND revoked_at IS NULL").bind(tokenHash).run();
+  return { id: row.id, email: row.email, display_name: row.display_name, email_verified_at: row.email_verified_at, authMethod: "api_key", apiKeyOrganizationId: row.api_key_organization_id, apiKeyScopes: ["read"] };
+}
+function apiKeyAllows(user: UserRow, organizationId: string, permission: "read" | "write" = "read"): boolean {
+  if (user.authMethod !== "api_key") return true;
+  return permission === "read" && user.apiKeyOrganizationId === organizationId && (user.apiKeyScopes || []).includes("read");
 }
 function originAllowed(request: Request, env: Env): boolean {
   const origin = request.headers.get("origin");
@@ -234,6 +246,7 @@ export default {
     if (request.method === "GET" && url.pathname === "/auth/me") {
       const user = await currentUser(request, env);
       if (!user) return json({ error: "UNAUTHENTICATED" }, 401);
+      if (user.authMethod === "api_key") return json({ error: "FORBIDDEN" }, 403);
       const organizations = await env.DB.prepare(`SELECT o.id, o.name, o.slug, m.role
         FROM organization_members m JOIN organizations o ON o.id = m.organization_id
         WHERE m.user_id = ? ORDER BY o.created_at`).bind(user.id).all();
@@ -241,11 +254,76 @@ export default {
     }
 
 
+
+    const apiKeyMatch = url.pathname.match(/^\/v1\/organizations\/([0-9a-f-]{36})\/api-keys(?:\/([0-9a-f-]{36}))?$/i);
+    if (apiKeyMatch) {
+      const user = await currentUser(request, env);
+      if (!user) return json({ error: "UNAUTHENTICATED" }, 401);
+      if (user.authMethod === "api_key") return json({ error: "FORBIDDEN" }, 403);
+      const organizationId = apiKeyMatch[1];
+      const keyId = apiKeyMatch[2];
+      const actor = await env.DB.prepare("SELECT role FROM organization_members WHERE organization_id = ? AND user_id = ?")
+        .bind(organizationId, user.id).first<{ role: string }>();
+      if (!actor || !["owner", "admin"].includes(actor.role)) return json({ error: "FORBIDDEN" }, 403);
+
+      if (request.method === "GET" && !keyId) {
+        const rows = await env.DB.prepare("SELECT id, name, key_prefix, last_used_at, expires_at, revoked_at, created_at FROM api_keys WHERE organization_id = ? ORDER BY created_at DESC LIMIT 25")
+          .bind(organizationId).all();
+        return json({ apiKeys: rows.results });
+      }
+
+      if (request.method === "POST" && !keyId) {
+        if (!(await rateLimit(request, env, "api-key-create", 10))) return json({ error: "RATE_LIMITED" }, 429);
+        const body = await request.json().catch(() => null) as Record<string, unknown> | null;
+        const name = cleanText(body?.name, 60);
+        const expiresInDays = Number(body?.expiresInDays ?? 90);
+        const hasControl = [...name].some(character => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127);
+        if (!name || hasControl || ![30, 90, 365].includes(expiresInDays)) {
+          return json({ error: "INVALID_API_KEY_INPUT", message: "Provide a name and an expiry of 30, 90 or 365 days." }, 400);
+        }
+        const active = await env.DB.prepare("SELECT COUNT(*) AS count FROM api_keys WHERE organization_id = ? AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?)")
+          .bind(organizationId, new Date().toISOString()).first<{ count: number }>();
+        if ((active?.count ?? 0) >= 10) return json({ error: "API_KEY_LIMIT_REACHED" }, 409);
+        const keyId = id();
+        const secret = "zw_live_" + randomToken();
+        const keyPrefix = secret.slice(0, 16);
+        const expiresAt = new Date(Date.now() + expiresInDays * 86400_000).toISOString();
+        const keyHash = await sha256(secret);
+        const createdAt = new Date().toISOString();
+        await env.DB.batch([
+          env.DB.prepare("INSERT INTO api_keys (id, organization_id, created_by, name, key_prefix, key_hash, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+            .bind(keyId, organizationId, user.id, name, keyPrefix, keyHash, expiresAt),
+          env.DB.prepare("INSERT INTO audit_logs (id, organization_id, actor_user_id, action, resource_type, resource_id, metadata_json) VALUES (?, ?, ?, 'api_key.created', 'api_key', ?, ?)")
+            .bind(id(), organizationId, user.id, keyId, JSON.stringify({ name, keyPrefix, expiresAt }))
+        ]);
+        return json({ apiKey: { id: keyId, name, keyPrefix, expiresAt, createdAt }, secret }, 201);
+      }
+
+      if (request.method === "DELETE" && keyId) {
+        if (!(await rateLimit(request, env, "api-key-revoke", 30))) return json({ error: "RATE_LIMITED" }, 429);
+        const results = await env.DB.batch([
+          env.DB.prepare("UPDATE api_keys SET revoked_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ? AND revoked_at IS NULL")
+            .bind(keyId, organizationId),
+          env.DB.prepare("INSERT INTO audit_logs (id, organization_id, actor_user_id, action, resource_type, resource_id) SELECT ?, ?, ?, 'api_key.revoked', 'api_key', ? WHERE changes() = 1")
+            .bind(id(), organizationId, user.id, keyId),
+          env.DB.prepare("SELECT id, revoked_at FROM api_keys WHERE id = ? AND organization_id = ?")
+            .bind(keyId, organizationId)
+        ]);
+        const current = results[2]?.results?.[0] as { id: string; revoked_at: string | null } | undefined;
+        if (!current) return json({ error: "NOT_FOUND" }, 404);
+        const changed = (results[0] as D1Result).meta?.changes === 1;
+        return json({ message: "API key revoked.", changed, revokedAt: current.revoked_at });
+      }
+
+      return json({ error: "METHOD_NOT_ALLOWED" }, 405);
+    }
+
     // Team management: all routes are scoped through a verified organization membership.
     const teamMatch = url.pathname.match(/^\/v1\/organizations\/([0-9a-f-]{36})\/(members|invitations)(?:\/([0-9a-f-]{36}))?$/i);
     if (teamMatch) {
       const user = await currentUser(request, env);
       if (!user) return json({ error: "UNAUTHENTICATED" }, 401);
+      if (user.authMethod === "api_key") return json({ error: "FORBIDDEN" }, 403);
       const organizationId = teamMatch[1];
       const resource = teamMatch[2];
       const targetId = teamMatch[3];
@@ -344,6 +422,7 @@ export default {
     if (request.method === "POST" && url.pathname === "/v1/invitations/accept") {
       const user = await currentUser(request, env);
       if (!user) return json({ error: "UNAUTHENTICATED" }, 401);
+      if (user.authMethod === "api_key") return json({ error: "FORBIDDEN" }, 403);
       if (!(await rateLimit(request, env, "invitation-accept", 10))) return json({ error: "RATE_LIMITED" }, 429);
       const body = await request.json().catch(() => null) as Record<string, unknown> | null;
       const token = cleanText(body?.token, 128);
@@ -369,6 +448,7 @@ export default {
       if (!user) return json({ error: "UNAUTHENTICATED" }, 401);
       const organizationId = cleanText(url.searchParams.get("organizationId"), 64);
       if (!organizationId) return json({ error: "ORGANIZATION_REQUIRED" }, 400);
+      if (!apiKeyAllows(user, organizationId, "read")) return json({ error: "FORBIDDEN" }, 403);
       const membership = await env.DB.prepare("SELECT role FROM organization_members WHERE organization_id = ? AND user_id = ?")
         .bind(organizationId, user.id).first<{ role: string }>();
       if (!membership) return json({ error: "FORBIDDEN" }, 403);
@@ -381,6 +461,7 @@ export default {
     if (request.method === "POST" && url.pathname === "/v1/monitors") {
       const user = await currentUser(request, env);
       if (!user) return json({ error: "UNAUTHENTICATED" }, 401);
+      if (user.authMethod === "api_key") return json({ error: "FORBIDDEN" }, 403);
       if (!(await rateLimit(request, env, "monitor-create", 30))) return json({ error: "RATE_LIMITED" }, 429);
       const body = await request.json().catch(() => null) as Record<string, unknown> | null;
       const organizationId = cleanText(body?.organizationId, 64);
@@ -424,9 +505,11 @@ export default {
       const monitor = await env.DB.prepare("SELECT id, organization_id, name, target_url, monitor_type, method, expected_status, interval_seconds, timeout_ms, is_enabled FROM monitors WHERE id = ? AND deleted_at IS NULL")
         .bind(monitorId).first<{ id: string; organization_id: string; name: string; target_url: string; monitor_type: string; method: string; expected_status: number; interval_seconds: number; timeout_ms: number; is_enabled: number }>();
       if (!monitor) return json({ error: "NOT_FOUND" }, 404);
+      if (!apiKeyAllows(user, monitor.organization_id, "read")) return json({ error: "FORBIDDEN" }, 403);
       const membership = await env.DB.prepare("SELECT role FROM organization_members WHERE organization_id = ? AND user_id = ?")
         .bind(monitor.organization_id, user.id).first<{ role: string }>();
       if (!membership) return json({ error: "FORBIDDEN" }, 403);
+      if (user.authMethod === "api_key" && request.method !== "GET") return json({ error: "FORBIDDEN" }, 403);
 
       if (monitorMatch[2] === "/pause" || monitorMatch[2] === "/resume") {
         if (request.method !== "POST") return json({ error: "METHOD_NOT_ALLOWED" }, 405);
@@ -509,6 +592,7 @@ export default {
       if (!user) return json({ error: "UNAUTHENTICATED" }, 401);
       const organizationId = cleanText(url.searchParams.get("organizationId"), 64);
       if (!organizationId) return json({ error: "ORGANIZATION_REQUIRED" }, 400);
+      if (!apiKeyAllows(user, organizationId, "read")) return json({ error: "FORBIDDEN" }, 403);
       const membership = await env.DB.prepare(
         "SELECT role FROM organization_members WHERE organization_id = ? AND user_id = ?"
       ).bind(organizationId, user.id).first<{ role: string }>();
@@ -567,11 +651,13 @@ export default {
           createdAt: string;
         }>();
       if (!incident) return json({ error: "NOT_FOUND" }, 404);
+      if (!apiKeyAllows(user, incident.organizationId, "read")) return json({ error: "FORBIDDEN" }, 403);
 
       const membership = await env.DB.prepare(
         "SELECT role FROM organization_members WHERE organization_id = ? AND user_id = ?"
       ).bind(incident.organizationId, user.id).first<{ role: string }>();
       if (!membership) return json({ error: "FORBIDDEN" }, 403);
+      if (user.authMethod === "api_key" && request.method !== "GET") return json({ error: "FORBIDDEN" }, 403);
 
       const isUpdatesRoute = incidentMatch[2] === "updates";
 
@@ -651,8 +737,8 @@ export default {
       }
 
       if (request.method === "GET" && !isUpdatesRoute) {
-        const events = await env.DB.prepare("SELECT e.id, e.event_type AS eventType, e.message, e.created_at AS createdAt, e.visibility, e.actor_user_id AS actorUserId, u.display_name AS actorName FROM incident_events e LEFT JOIN users u ON u.id = e.actor_user_id WHERE e.incident_id = ? ORDER BY e.created_at ASC, e.id ASC")
-          .bind(incidentId)
+        const events = await env.DB.prepare("SELECT e.id, e.event_type AS eventType, e.message, e.created_at AS createdAt, e.visibility, e.actor_user_id AS actorUserId, u.display_name AS actorName FROM incident_events e LEFT JOIN users u ON u.id = e.actor_user_id WHERE e.incident_id = ? AND (? = 0 OR e.visibility = ?) ORDER BY e.created_at ASC, e.id ASC")
+          .bind(incidentId, user.authMethod === "api_key" ? 1 : 0, "public")
           .all();
         return json({ incident, events: events.results });
       }
@@ -668,7 +754,7 @@ export default {
       headers.set("access-control-allow-origin", origin);
       headers.set("access-control-allow-credentials", "true");
       headers.set("access-control-allow-methods", "GET, POST, PATCH, PUT, DELETE, OPTIONS");
-      headers.set("access-control-allow-headers", "Content-Type");
+      headers.set("access-control-allow-headers", "Content-Type, Authorization");
       headers.append("vary", "Origin");
     }
     return new Response(response.body, { status: response.status, statusText: response.statusText, headers });

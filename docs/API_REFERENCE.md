@@ -15,6 +15,17 @@ See [AUTH_SETUP.md](AUTH_SETUP.md) for account security and provider setup.
 - `POST /auth/password-reset/request` — `{ email }`. Always returns a generic 202 response.
 - `POST /auth/password-reset/confirm` — `{ token, password }`. Consumes the one-use reset token and revokes all existing sessions.
 
+## Workspace API keys
+
+API keys are created, listed and revoked by workspace owners/admins using a verified session. They are scoped to one workspace, expire after 30, 90 or 365 days, and are read-only. A workspace can have at most 10 active keys.
+
+- `GET /v1/organizations/<organization-id>/api-keys` — list safe key metadata. The secret and hash are never returned.
+- `POST /v1/organizations/<organization-id>/api-keys` — create a key with `{ name, expiresInDays: 30|90|365 }`. The response includes `secret` exactly once. Store it in a server-side secret manager; it cannot be retrieved later.
+- `DELETE /v1/organizations/<organization-id>/api-keys/<key-id>` — revoke a key immediately. Repeated revocation is idempotent.
+- Use `Authorization: Bearer zw_live_...` on supported read endpoints: monitor list/detail/check history and incident list/detail. Keys cannot create, update, pause, resume or delete monitors, change incidents, access authentication or team endpoints, or view internal incident timeline notes.
+
+The key is stored as a SHA-256 hash of a cryptographically random 256-bit secret. Authentication requires the creator to remain a verified owner/admin of the key's workspace; demotion/removal therefore disables the key. `last_used_at` is updated on successful authentication. Do not put API keys in browser code, URLs, logs or source control.
+
 ## Workspace monitor configuration
 
 All monitor endpoints require a verified signed-in session and an organization membership.

@@ -99,3 +99,8 @@ These tests exercise the actual Worker entrypoint against isolated D1. Public vi
 ## Browser script syntax validation
 
 CI runs `npm run check:inline-js`, which parses (but does not execute) inline JavaScript in each HTML file under `apps/web`. The current verified run parsed four scripts across four HTML files. This catches syntax errors in the static HTML application but is not a substitute for browser E2E, responsive-layout, keyboard-navigation or accessibility testing.
+
+
+## Read-only API key integration coverage
+
+The API integration suite now exercises API key creation and revocation through the Worker, verifies that only a hash is persisted and that list responses never expose the secret, confirms that `last_used_at` updates, and checks that revoked/expired keys are rejected. Bearer keys are restricted to their issuing workspace and read-only monitor/incident endpoints; tests reject cross-tenant reads and monitor mutations, deny authentication/team routes, and ensure internal incident timeline notes are not exposed. Owners/admins can manage keys; members/viewers cannot. These tests use isolated D1 and do not contact an external provider.
