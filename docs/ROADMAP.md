@@ -246,4 +246,7 @@ No Cloudflare resources were created and no deployment was attempted. This is fe
 - Added bearer authentication for read-only monitor and incident endpoints. Keys are scoped to one workspace, require the creator to remain a verified owner/admin, update last-used metadata, and cannot mutate monitors/incidents or access authentication/team endpoints. Internal incident timeline events are omitted from key-authenticated reads.
 - Added an API-key management panel to the workspace app with role-aware access, create/revoke actions, one-time secret display and copy support.
 - Added D1-backed integration tests for creation, one-time secret handling, hashing, usage tracking, revocation, workspace isolation, read-only enforcement, internal timeline filtering, expiry and role restrictions.
-- Verification for this commit is pending. Browser E2E, external-client acceptance, API key rotation and any write scopes remain open; the feature is not marked launch-complete.
+- Added a follow-up hardening change so an explicit bearer credential takes precedence over an ambient session cookie; an invalid bearer never falls back to a valid cookie. This keeps the read-only boundary intact when both credentials are present.
+- GitHub Actions [CI run #178](https://github.com/learninghub44/zetuwatch/actions/runs/43377446617) completed successfully on commit `6edf934be79bd20e5efcc5ec5ee8c6702d7253e3`.
+- Verified: TypeScript typecheck; inline browser JavaScript syntax check; SQLite validation (6 migrations, 16 required tables); Vitest (13 files, 121 tests), including 24 Worker API integration tests.
+- Browser E2E, external-client acceptance, API key rotation and any write scopes remain open; the feature is not marked launch-complete.
