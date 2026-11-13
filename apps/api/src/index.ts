@@ -58,23 +58,28 @@ async function rateLimit(request: Request, env: Env, route: string, limit: numbe
   return (row?.attempts ?? limit + 1) <= limit;
 }
 async function currentUser(request: Request, env: Env): Promise<UserRow | null> {
-  const raw = readCookie(request, "zw_session");
-  if (raw) {
-    const tokenHash = await sha256(raw);
-    const row = await env.DB.prepare("SELECT u.id, u.email, u.display_name, u.email_verified_at FROM auth_sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ? AND s.expires_at > ? AND u.email_verified_at IS NOT NULL")
-      .bind(tokenHash, new Date().toISOString()).first<UserRow>();
-    if (row) await env.DB.prepare("UPDATE auth_sessions SET last_seen_at = CURRENT_TIMESTAMP WHERE token_hash = ?").bind(tokenHash).run();
-    return row;
+  // An explicit bearer credential takes precedence over ambient browser cookies.
+  // This prevents a read-only API key from inheriting a more privileged session.
+  const authorization = request.headers.get("authorization");
+  if (authorization !== null) {
+    const match = /^Bearer (zw_live_[A-Za-z0-9_-]{40,64})$/.exec(authorization);
+    const secret = match?.[1];
+    if (!secret || !(await rateLimit(request, env, "api-key-auth", 300))) return null;
+    const tokenHash = await sha256(secret);
+    const row = await env.DB.prepare("SELECT u.id, u.email, u.display_name, u.email_verified_at, k.organization_id AS api_key_organization_id FROM api_keys k JOIN users u ON u.id = k.created_by JOIN organization_members m ON m.organization_id = k.organization_id AND m.user_id = u.id WHERE k.key_hash = ? AND k.revoked_at IS NULL AND (k.expires_at IS NULL OR k.expires_at > ?) AND u.email_verified_at IS NOT NULL AND m.role IN ('owner', 'admin')")
+      .bind(tokenHash, new Date().toISOString()).first<UserRow & { api_key_organization_id: string }>();
+    if (!row) return null;
+    await env.DB.prepare("UPDATE api_keys SET last_used_at = CURRENT_TIMESTAMP WHERE key_hash = ? AND revoked_at IS NULL").bind(tokenHash).run();
+    return { id: row.id, email: row.email, display_name: row.display_name, email_verified_at: row.email_verified_at, authMethod: "api_key", apiKeyOrganizationId: row.api_key_organization_id, apiKeyScopes: ["read"] };
   }
-  const match = /^Bearer (zw_live_[A-Za-z0-9_-]{40,64})$/.exec(request.headers.get("authorization") || "");
-  const secret = match?.[1];
-  if (!secret || !(await rateLimit(request, env, "api-key-auth", 300))) return null;
-  const tokenHash = await sha256(secret);
-  const row = await env.DB.prepare("SELECT u.id, u.email, u.display_name, u.email_verified_at, k.organization_id AS api_key_organization_id FROM api_keys k JOIN users u ON u.id = k.created_by JOIN organization_members m ON m.organization_id = k.organization_id AND m.user_id = u.id WHERE k.key_hash = ? AND k.revoked_at IS NULL AND (k.expires_at IS NULL OR k.expires_at > ?) AND u.email_verified_at IS NOT NULL AND m.role IN ('owner', 'admin')")
-    .bind(tokenHash, new Date().toISOString()).first<UserRow & { api_key_organization_id: string }>();
-  if (!row) return null;
-  await env.DB.prepare("UPDATE api_keys SET last_used_at = CURRENT_TIMESTAMP WHERE key_hash = ? AND revoked_at IS NULL").bind(tokenHash).run();
-  return { id: row.id, email: row.email, display_name: row.display_name, email_verified_at: row.email_verified_at, authMethod: "api_key", apiKeyOrganizationId: row.api_key_organization_id, apiKeyScopes: ["read"] };
+
+  const raw = readCookie(request, "zw_session");
+  if (!raw) return null;
+  const tokenHash = await sha256(raw);
+  const row = await env.DB.prepare("SELECT u.id, u.email, u.display_name, u.email_verified_at FROM auth_sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ? AND s.expires_at > ? AND u.email_verified_at IS NOT NULL")
+    .bind(tokenHash, new Date().toISOString()).first<UserRow>();
+  if (row) await env.DB.prepare("UPDATE auth_sessions SET last_seen_at = CURRENT_TIMESTAMP WHERE token_hash = ?").bind(tokenHash).run();
+  return row;
 }
 function apiKeyAllows(user: UserRow, organizationId: string, permission: "read" | "write" = "read"): boolean {
   if (user.authMethod !== "api_key") return true;

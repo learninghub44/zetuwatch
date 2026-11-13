@@ -733,4 +733,32 @@ describe("Worker API tenant isolation", () => {
     }
   });
 
+
+  it("prefers a supplied read-only bearer key over an ambient session cookie", async () => {
+    const identity = await createIdentity("owner");
+    const key = await createApiKeyFixture(identity);
+    const body = {
+      organizationId: identity.organizationId,
+      name: "Must remain read-only",
+      targetUrl: "https://status.example.com/health"
+    };
+    const writeWithBothCredentials = await api("/v1/monitors", {
+      token: identity.sessionToken,
+      apiKey: key.secret,
+      method: "POST",
+      body
+    });
+    expect(writeWithBothCredentials.status).toBe(403);
+
+    const invalidBearerWithValidCookie = await api("/v1/monitors?organizationId=" + identity.organizationId, {
+      token: identity.sessionToken,
+      apiKey: "zw_live_" + "x".repeat(43)
+    });
+    expect(invalidBearerWithValidCookie.status).toBe(401);
+
+    const count = await env.DB.prepare("SELECT COUNT(*) AS count FROM monitors WHERE organization_id = ?")
+      .bind(identity.organizationId).first<{ count: number }>();
+    expect(count?.count).toBe(0);
+  });
+
 });
