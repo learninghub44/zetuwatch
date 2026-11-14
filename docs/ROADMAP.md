@@ -250,3 +250,14 @@ No Cloudflare resources were created and no deployment was attempted. This is fe
 - GitHub Actions [CI run #178](https://github.com/learninghub44/zetuwatch/actions/runs/43377446617) completed successfully on commit `6edf934be79bd20e5efcc5ec5ee8c6702d7253e3`.
 - Verified: TypeScript typecheck; inline browser JavaScript syntax check; SQLite validation (6 migrations, 16 required tables); Vitest (13 files, 121 tests), including 24 Worker API integration tests.
 - Browser E2E, external-client acceptance, API key rotation and any write scopes remain open; the feature is not marked launch-complete.
+
+
+## Status-page builder implementation update (2026-11-14)
+
+- Added migration `0007_status_pages.sql` for tenant-owned pages, ordered monitor components, globally unique slugs, archive/publish state and database triggers enforcing same-workspace monitor membership.
+- Added workspace APIs to list/create/update/publish/unpublish/archive pages. Only owners/admins can mutate; all workspace members can list/read; API keys are denied. Component lists are limited to 50 live monitors and every requested monitor is checked against the owning organization.
+- Added an unauthenticated public read endpoint that returns published pages only. Its response is an allowlist and includes only explicitly public incident updates; raw target URLs, monitor IDs, workspace IDs and internal timeline notes are not returned.
+- Added a responsive status-page builder to the workspace app and a separate public `status.html?slug=...` renderer. All database-backed strings are inserted as text nodes.
+- The public page deliberately reports health as unknown and `monitoringEnabled: false` because the secure scheduled runner is not enabled. Publishing a page does not claim that any component is operational.
+- Added D1-backed tests for tenant isolation, role enforcement, public-data minimization, publication/archive lifecycle, cross-tenant database-trigger rejection, final-component protection and automatic unpublishing when the last monitor is soft-deleted.
+- CI verification for the new migration, Worker routes, browser scripts and tests is pending. Status pages are not launch-complete until CI and browser acceptance pass; custom domains, subscriptions and public-page cache behavior remain future work.
