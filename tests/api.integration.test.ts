@@ -983,6 +983,9 @@ describe("Status pages", () => {
       .bind(pageId).first<{ is_published: number; archived_at: string | null }>();
     expect(page).toMatchObject({ is_published: 0, archived_at: null });
     expect((await api("/public/status-pages/monitor-lifecycle")).status).toBe(404);
+    const audit = await env.DB.prepare("SELECT action FROM audit_logs WHERE organization_id = ? AND resource_id = ?")
+      .bind(owner.organizationId, monitorId).first<{ action: string }>();
+    expect(audit?.action).toBe("monitor.deleted");
   });
 
   it("does not allow read-only API keys to access status page administration", async () => {
