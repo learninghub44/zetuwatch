@@ -938,6 +938,53 @@ describe("Status pages", () => {
     expect(stored?.archived_at).toBeTruthy();
   });
 
+  it("prevents an already published page from losing its final component through editing", async () => {
+    const owner = await createIdentity("owner");
+    const monitorId = await createMonitor(owner.organizationId);
+    const created = await api("/v1/organizations/" + owner.organizationId + "/status-pages", {
+      token: owner.sessionToken,
+      method: "POST",
+      body: { name: "Keep a component", slug: "keep-a-component", monitorIds: [monitorId] }
+    });
+    expect(created.status).toBe(201);
+    const pageId = (await created.json() as { statusPage: { id: string } }).statusPage.id;
+    expect((await api("/v1/status-pages/" + pageId + "/publish", {
+      token: owner.sessionToken, method: "POST", body: { published: true }
+    })).status).toBe(200);
+
+    const update = await api("/v1/status-pages/" + pageId, {
+      token: owner.sessionToken,
+      method: "PATCH",
+      body: { monitorIds: [] }
+    });
+    expect(update.status).toBe(409);
+    const association = await env.DB.prepare("SELECT monitor_id FROM status_page_monitors WHERE page_id = ?")
+      .bind(pageId).first<{ monitor_id: string }>();
+    expect(association?.monitor_id).toBe(monitorId);
+  });
+
+  it("automatically unpublishes a page when its final monitor is soft-deleted", async () => {
+    const owner = await createIdentity("owner");
+    const monitorId = await createMonitor(owner.organizationId);
+    const created = await api("/v1/organizations/" + owner.organizationId + "/status-pages", {
+      token: owner.sessionToken,
+      method: "POST",
+      body: { name: "Monitor lifecycle", slug: "monitor-lifecycle", monitorIds: [monitorId] }
+    });
+    expect(created.status).toBe(201);
+    const pageId = (await created.json() as { statusPage: { id: string } }).statusPage.id;
+    expect((await api("/v1/status-pages/" + pageId + "/publish", {
+      token: owner.sessionToken, method: "POST", body: { published: true }
+    })).status).toBe(200);
+
+    const deleted = await api("/v1/monitors/" + monitorId, { token: owner.sessionToken, method: "DELETE" });
+    expect(deleted.status).toBe(200);
+    const page = await env.DB.prepare("SELECT is_published, archived_at FROM status_pages WHERE id = ?")
+      .bind(pageId).first<{ is_published: number; archived_at: string | null }>();
+    expect(page).toMatchObject({ is_published: 0, archived_at: null });
+    expect((await api("/public/status-pages/monitor-lifecycle")).status).toBe(404);
+  });
+
   it("does not allow read-only API keys to access status page administration", async () => {
     const owner = await createIdentity("owner");
     const key = await createApiKeyFixture(owner);
