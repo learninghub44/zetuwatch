@@ -297,7 +297,7 @@ function renderStatusMonitorOptions(selectedIds=[]){
   const container=$("status-page-monitors");if(!container)return;
   const selected=new Set(selectedIds);
   container.textContent="";
-  if(!monitors.length){container.textContent="No monitors configured yet. Add a monitor first; publishing requires at least one active component.";return}
+  if(!monitors.length){container.textContent="No monitors configured yet. Add a monitor first; publishing requires at least one configured component.";return}
   for(const monitor of monitors){
     const label=document.createElement("label");label.className="status-monitor-option";
     const checkbox=document.createElement("input");checkbox.type="checkbox";checkbox.value=monitor.id;checkbox.checked=selected.has(monitor.id);
@@ -359,7 +359,6 @@ async function editStatusPage(pageId){
   }catch(error){statusPageMessage(error.message||"Status page could not be loaded.",true)}
 }
 async function publishStatusPage(pageId,published){
-  const verb=published?"publish":"unpublish";
   if(!confirm((published?"Publish":"Unpublish")+" this status page? "+(published?"Anyone with its public link will be able to view it.":"The public link will stop working.")))return;
   try{
     const result=await request("/v1/status-pages/"+encodeURIComponent(pageId)+"/publish",{method:"POST",body:JSON.stringify({published})});
