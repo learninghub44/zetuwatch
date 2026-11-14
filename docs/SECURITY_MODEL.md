@@ -75,3 +75,16 @@ The URL policy, fail-closed HTTP probe, pure IP classifier and bounded DNS resol
 - A key remains valid only while its creator remains a verified owner/admin of that organization. Revocation is immediate and idempotent. Successful authentication updates `last_used_at`.
 - The initial key scope is read-only: monitor list/detail/check history and incident list/detail. Keys cannot mutate monitors/incidents, access authentication/team-management routes, or read internal incident timeline notes.
 - Keys are accepted only in an `Authorization: Bearer` header, never in query parameters. When the header is present it takes precedence over session cookies, and an invalid bearer never falls back to a cookie. Treat them as server-side secrets; do not embed them in browser bundles, URLs, logs or source control. The workspace UI displays the secret once and does not persist it in browser storage.
+
+
+## Public status-page boundary
+
+- A public page is served only when `is_published = 1` and `archived_at IS NULL`. Draft, unpublished and archived slugs return 404.
+- The public response is an allowlist: page name/slug/description, component name/type/state, and timeline events explicitly marked `public`. It omits monitor IDs, target URLs, organization IDs, internal notes and actor account details.
+- Health is always `unknown` while scheduled execution is disabled. A configured or enabled monitor is not evidence of a successful check. Public pages must not infer uptime from configuration or old fixture data.
+- The API checks organization membership for every page read/write and reserves create/update/publish/archive for owners/admins. Read-only API keys are explicitly denied.
+- D1 triggers reject cross-organization monitor associations, including direct SQL writes. Soft-deleting the final live component automatically unpublishes its page; archive also unpublishes without deleting the record.
+- Public updates are authored by workspace users through the incident API and must have `visibility = 'public'`. The public page query filters at the database layer; it does not fetch internal events and hide them in the browser.
+- The public renderer uses `textContent`/DOM nodes for all database-backed strings. It does not interpolate page content into HTML or execute scripts from stored values.
+
+This is a public information surface, not a live service-health assertion. Do not remove the explicit unknown-state notice until the secure outbound runner and real measurements are enabled and independently verified.
