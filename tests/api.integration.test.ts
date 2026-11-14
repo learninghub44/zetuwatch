@@ -762,3 +762,189 @@ describe("Worker API tenant isolation", () => {
   });
 
 });
+
+
+describe("Status pages", () => {
+  it("creates a tenant-scoped draft with selected components and an audit event", async () => {
+    const owner = await createIdentity("owner");
+    const monitorId = await createMonitor(owner.organizationId);
+    const response = await api("/v1/organizations/" + owner.organizationId + "/status-pages", {
+      token: owner.sessionToken,
+      method: "POST",
+      body: { name: "Customer status", slug: "customer-status", description: "Public service updates", monitorIds: [monitorId] }
+    });
+
+    expect(response.status).toBe(201);
+    const payload = await response.json() as { statusPage: { id: string; slug: string; isPublished: boolean; componentCount: number }; publicPath: string };
+    expect(payload.statusPage).toMatchObject({ slug: "customer-status", isPublished: false, componentCount: 1 });
+    expect(payload.publicPath).toBe("/status.html?slug=customer-status");
+
+    const stored = await env.DB.prepare("SELECT organization_id, is_published, archived_at FROM status_pages WHERE id = ?")
+      .bind(payload.statusPage.id).first<{ organization_id: string; is_published: number; archived_at: string | null }>();
+    expect(stored).toMatchObject({ organization_id: owner.organizationId, is_published: 0, archived_at: null });
+
+    const components = await env.DB.prepare("SELECT monitor_id, position FROM status_page_monitors WHERE page_id = ?")
+      .bind(payload.statusPage.id).all<{ monitor_id: string; position: number }>();
+    expect(components.results).toEqual([{ monitor_id: monitorId, position: 0 }]);
+
+    const audit = await env.DB.prepare("SELECT action FROM audit_logs WHERE organization_id = ? AND resource_id = ?")
+      .bind(owner.organizationId, payload.statusPage.id).first<{ action: string }>();
+    expect(audit?.action).toBe("status_page.created");
+    expect((await api("/public/status-pages/customer-status")).status).toBe(404);
+  });
+
+  it("publishes a public view with unknown health and only customer-visible incident updates", async () => {
+    const owner = await createIdentity("owner");
+    const monitorId = await createMonitor(owner.organizationId);
+    const created = await api("/v1/organizations/" + owner.organizationId + "/status-pages", {
+      token: owner.sessionToken,
+      method: "POST",
+      body: { name: "Public status", slug: "public-status", monitorIds: [monitorId] }
+    });
+    expect(created.status).toBe(201);
+    const page = (await created.json() as { statusPage: { id: string } }).statusPage;
+
+    const incidentId = await createIncident(monitorId);
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO incident_events (id, incident_id, event_type, message, visibility) VALUES (?, ?, 'incident.update', ?, 'internal')")
+        .bind(crypto.randomUUID(), incidentId, "Private investigation detail"),
+      env.DB.prepare("INSERT INTO incident_events (id, incident_id, event_type, message, visibility) VALUES (?, ?, 'incident.update', ?, 'public')")
+        .bind(crypto.randomUUID(), incidentId, "We are investigating an issue affecting this service.")
+    ]);
+
+    const publish = await api("/v1/status-pages/" + page.id + "/publish", {
+      token: owner.sessionToken,
+      method: "POST",
+      body: { published: true }
+    });
+    expect(publish.status).toBe(200);
+    expect(await publish.json()).toMatchObject({ changed: true });
+
+    const response = await api("/public/status-pages/public-status");
+    expect(response.status).toBe(200);
+    const payload = await response.json() as {
+      overallStatus: string;
+      monitoringEnabled: boolean;
+      page: { name: string; slug: string };
+      components: Array<{ name: string; status: string; state: string }>;
+      updates: Array<{ message: string }>;
+    };
+    expect(payload).toMatchObject({
+      overallStatus: "unknown",
+      monitoringEnabled: false,
+      page: { name: "Public status", slug: "public-status" },
+      components: [{ name: "Private fixture", status: "unknown", state: "awaiting_first_check" }]
+    });
+    expect(payload.updates.map(update => update.message)).toContain("We are investigating an issue affecting this service.");
+    expect(payload.updates.map(update => update.message)).not.toContain("Private investigation detail");
+    const serialized = JSON.stringify(payload);
+    expect(serialized).not.toContain("status.example.com");
+    expect(serialized).not.toContain(monitorId);
+    expect(serialized).not.toContain("organizationId");
+  });
+
+  it("rejects cross-tenant components and invalid slugs without creating a page", async () => {
+    const owner = await createIdentity("owner");
+    const foreignOrganizationId = await createForeignOrganization();
+    const foreignMonitorId = await createMonitor(foreignOrganizationId);
+
+    const crossTenant = await api("/v1/organizations/" + owner.organizationId + "/status-pages", {
+      token: owner.sessionToken,
+      method: "POST",
+      body: { name: "Cross tenant", slug: "cross-tenant", monitorIds: [foreignMonitorId] }
+    });
+    const invalidSlug = await api("/v1/organizations/" + owner.organizationId + "/status-pages", {
+      token: owner.sessionToken,
+      method: "POST",
+      body: { name: "Invalid slug", slug: "not/a/slug", monitorIds: [] }
+    });
+    expect([crossTenant.status, invalidSlug.status]).toEqual([400, 400]);
+
+    const count = await env.DB.prepare("SELECT COUNT(*) AS count FROM status_pages WHERE organization_id = ?")
+      .bind(owner.organizationId).first<{ count: number }>();
+    expect(count?.count).toBe(0);
+
+    const pageId = crypto.randomUUID();
+    const pageId2 = crypto.randomUUID();
+    await env.DB.prepare("INSERT INTO status_pages (id, organization_id, name, slug) VALUES (?, ?, ?, ?)")
+      .bind(pageId, owner.organizationId, "Direct fixture", "direct-fixture").run();
+    await expect(env.DB.prepare("INSERT INTO status_page_monitors (page_id, monitor_id, position) VALUES (?, ?, 0)")
+      .bind(pageId, foreignMonitorId).run()).rejects.toThrow(/STATUS_PAGE_MONITOR_TENANT_MISMATCH/);
+    await env.DB.prepare("DELETE FROM status_pages WHERE id = ?").bind(pageId).run();
+    await env.DB.prepare("INSERT INTO status_pages (id, organization_id, name, slug) VALUES (?, ?, ?, ?)")
+      .bind(pageId2, owner.organizationId, "Empty fixture", "empty-fixture").run();
+  });
+
+  it("allows workspace members to list pages but reserves mutations for owners and admins", async () => {
+    const owner = await createIdentity("owner");
+    const monitorId = await createMonitor(owner.organizationId);
+    const created = await api("/v1/organizations/" + owner.organizationId + "/status-pages", {
+      token: owner.sessionToken,
+      method: "POST",
+      body: { name: "Team page", slug: "team-page", monitorIds: [monitorId] }
+    });
+    const pageId = (await created.json() as { statusPage: { id: string } }).statusPage.id;
+
+    const viewer = await createIdentity("viewer");
+    await env.DB.prepare("INSERT INTO organization_members (organization_id, user_id, role) VALUES (?, ?, 'viewer')")
+      .bind(owner.organizationId, viewer.userId).run();
+
+    const list = await api("/v1/organizations/" + owner.organizationId + "/status-pages", { token: viewer.sessionToken });
+    const create = await api("/v1/organizations/" + owner.organizationId + "/status-pages", {
+      token: viewer.sessionToken,
+      method: "POST",
+      body: { name: "Viewer page", slug: "viewer-page", monitorIds: [monitorId] }
+    });
+    const publish = await api("/v1/status-pages/" + pageId + "/publish", {
+      token: viewer.sessionToken,
+      method: "POST",
+      body: { published: true }
+    });
+    expect(list.status).toBe(200);
+    expect((await list.json() as { statusPages: unknown[] }).statusPages).toHaveLength(1);
+    expect([create.status, publish.status]).toEqual([403, 403]);
+  });
+
+  it("requires a live component to publish and archives pages without exposing them publicly", async () => {
+    const owner = await createIdentity("owner");
+    const empty = await api("/v1/organizations/" + owner.organizationId + "/status-pages", {
+      token: owner.sessionToken,
+      method: "POST",
+      body: { name: "Empty page", slug: "empty-page", monitorIds: [] }
+    });
+    expect(empty.status).toBe(201);
+    const emptyId = (await empty.json() as { statusPage: { id: string } }).statusPage.id;
+    const publishEmpty = await api("/v1/status-pages/" + emptyId + "/publish", {
+      token: owner.sessionToken,
+      method: "POST",
+      body: { published: true }
+    });
+    expect(publishEmpty.status).toBe(409);
+
+    const monitorId = await createMonitor(owner.organizationId);
+    const created = await api("/v1/organizations/" + owner.organizationId + "/status-pages", {
+      token: owner.sessionToken,
+      method: "POST",
+      body: { name: "Archive me", slug: "archive-me", monitorIds: [monitorId] }
+    });
+    const pageId = (await created.json() as { statusPage: { id: string } }).statusPage.id;
+    expect((await api("/v1/status-pages/" + pageId + "/publish", {
+      token: owner.sessionToken, method: "POST", body: { published: true }
+    })).status).toBe(200);
+    const archived = await api("/v1/status-pages/" + pageId, { token: owner.sessionToken, method: "DELETE" });
+    expect(archived.status).toBe(200);
+    expect((await api("/public/status-pages/archive-me")).status).toBe(404);
+
+    const stored = await env.DB.prepare("SELECT is_published, archived_at FROM status_pages WHERE id = ?")
+      .bind(pageId).first<{ is_published: number; archived_at: string | null }>();
+    expect(stored?.is_published).toBe(0);
+    expect(stored?.archived_at).toBeTruthy();
+  });
+
+  it("does not allow read-only API keys to access status page administration", async () => {
+    const owner = await createIdentity("owner");
+    const key = await createApiKeyFixture(owner);
+    const response = await api("/v1/organizations/" + owner.organizationId + "/status-pages", { apiKey: key.secret });
+    expect(response.status).toBe(403);
+  });
+});
