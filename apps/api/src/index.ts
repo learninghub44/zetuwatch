@@ -827,7 +827,8 @@ export default {
           env.DB.prepare("INSERT INTO audit_logs (id, organization_id, actor_user_id, action, resource_type, resource_id) SELECT ?, ?, ?, 'monitor.deleted', 'monitor', ? WHERE changes() = 1")
             .bind(id(), monitor.organization_id, user.id, monitorId)
         ]);
-        if ((results[0] as D1Result).meta?.changes !== 1) return json({ error: "MONITOR_ALREADY_DELETED" }, 409);
+        // SQLite/D1 may include trigger side-effects in batch metadata. The status-page trigger can also unpublish a page, so a successful monitor update may report more than one changed row.
+        if (((results[0] as D1Result).meta?.changes ?? 0) < 1) return json({ error: "MONITOR_ALREADY_DELETED" }, 409);
         return json({ message: "Monitor deleted. Check history and incident timelines are retained." });
       }
       return json({ error: "METHOD_NOT_ALLOWED" }, 405);
