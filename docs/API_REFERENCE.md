@@ -26,6 +26,22 @@ API keys are created, listed and revoked by workspace owners/admins using a veri
 
 An explicit `Authorization` header takes precedence over a session cookie; an invalid bearer credential never falls back to a valid cookie. The key is stored as a SHA-256 hash of a cryptographically random 256-bit secret. Authentication requires the creator to remain a verified owner/admin of the key's workspace; demotion/removal therefore disables the key. `last_used_at` is updated on successful authentication. Do not put API keys in browser code, URLs, logs or source control.
 
+## Status pages
+
+Status pages are workspace-owned public summaries. All administration endpoints require a verified browser session; read-only API keys cannot access status-page administration.
+
+- `GET /v1/organizations/<organization-id>/status-pages` — list non-archived pages for a workspace. Any workspace member may read.
+- `POST /v1/organizations/<organization-id>/status-pages` — owner/admin only. Body: `{ name, slug, description?, monitorIds: string[] }`. Names are 2–80 characters, descriptions up to 240 characters, slugs are globally unique lowercase URL-safe values (3–48 characters), and at most 50 live monitors may be attached.
+- `GET /v1/status-pages/<page-id>` — retrieve page configuration and live component names/types for a workspace member.
+- `PATCH /v1/status-pages/<page-id>` — owner/admin only. Updates name, slug, description and optionally the ordered `monitorIds` list. A published page cannot be edited to remove its final component.
+- `POST /v1/status-pages/<page-id>/publish` — owner/admin only, body `{ published: boolean }`. Publishing requires at least one non-deleted monitor. Unpublishing immediately makes the public URL return 404.
+- `DELETE /v1/status-pages/<page-id>` — owner/admin only; archives and unpublishes the page without deleting its audit record or component history.
+- `GET /public/status-pages/<slug>` — unauthenticated read of a published page only. Returns page name/description, component names/types and customer-visible incident updates. It never returns monitor IDs, raw target URLs, workspace identifiers or internal incident notes.
+
+The static public renderer is `status.html?slug=<slug>`. It uses text-only DOM rendering and does not require a session. Because scheduled monitoring is still disabled, the public API always reports `monitoringEnabled: false` and `overallStatus: "unknown"`; components are not labelled operational and no uptime or latency is fabricated. Only timeline events explicitly marked `public` are returned. Internal notes are never included.
+
+SQLite triggers enforce same-workspace component membership even if a future code path bypasses the API. If a monitor is soft-deleted and was the last live component on a published page, the page is automatically unpublished. Slugs remain reserved after archive to avoid a previously shared URL silently pointing to a different page.
+
 ## Workspace monitor configuration
 
 All monitor endpoints require a verified signed-in session and an organization membership.
