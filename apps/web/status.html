@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#f7f8f5">
+  <meta name="api-base" content="/api">
+  <title>Service status — ZetuWatch</title>
+  <style>
+    :root{font-family:Inter,"DM Sans",system-ui,sans-serif;color:#17211d;background:#f7f8f6;font-synthesis:none}
+    *{box-sizing:border-box}
+    body{margin:0;min-height:100vh}
+    a{color:inherit}
+    .top{height:64px;background:#fff;border-bottom:1px solid #e4e9e5;display:flex;align-items:center;justify-content:space-between;padding:0 max(20px,calc((100vw - 920px)/2))}
+    .brand{display:flex;align-items:center;gap:10px;text-decoration:none;font-size:16px;font-weight:750}
+    .mark{width:30px;height:30px;border-radius:9px;background:#16794b;color:#fff;display:grid;place-items:center}
+    .powered{font-size:11px;color:#6d7972;text-decoration:none}
+    main{width:min(920px,calc(100% - 32px));margin:44px auto 70px}
+    .hero,.panel{background:#fff;border:1px solid #e4e9e5;border-radius:14px}
+    .hero{padding:28px;margin-bottom:16px}
+    h1{font-size:clamp(24px,4vw,34px);letter-spacing:-1px;margin:0 0 8px;overflow-wrap:anywhere}
+    .description{font-size:13px;line-height:1.65;color:#6d7972;margin:0;white-space:pre-wrap}
+    .state{display:inline-flex;align-items:center;gap:8px;padding:8px 11px;border-radius:999px;background:#f4f5f3;color:#56635b;font-size:11px;font-weight:700;margin-top:20px}
+    .dot{width:7px;height:7px;border-radius:50%;background:#9aa49d}
+    .notice{margin-top:15px;padding:12px 14px;border-radius:9px;background:#fff8e9;color:#785c2d;font-size:12px;line-height:1.6}
+    .panel{padding:20px 22px;margin-top:16px}
+    .panel h2{font-size:14px;margin:0 0 14px}
+    .component{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:13px 0;border-top:1px solid #edf0ed}
+    .component:first-of-type{border-top:0}
+    .component strong{display:block;font-size:12px;overflow-wrap:anywhere}
+    .component small{display:block;color:#6d7972;font-size:10px;margin-top:4px}
+    .unknown{flex:none;font-size:10px;font-weight:700;color:#6d7972;background:#f4f5f3;padding:5px 8px;border-radius:999px}
+    .empty{color:#6d7972;font-size:12px;line-height:1.6}
+    .update{padding:14px 0;border-top:1px solid #edf0ed}
+    .update:first-of-type{border-top:0}
+    .update p{font-size:12px;line-height:1.6;margin:0 0 6px;white-space:pre-wrap;overflow-wrap:anywhere}
+    .update small{font-size:10px;color:#6d7972}
+    .error{padding:22px;border:1px solid #f1d5cf;background:#fff5f2;color:#923c2f;border-radius:12px;font-size:13px}
+    @media(max-width:600px){.top{height:58px;padding:0 16px}main{margin:24px auto 48px}.hero{padding:21px}.panel{padding:18px}.powered{font-size:10px}}
+  </style>
+</head>
+<body>
+  <header class="top">
+    <a class="brand" href="./index.html"><span class="mark">⌁</span>ZetuWatch</a>
+    <a class="powered" href="https://github.com/learninghub44/zetuwatch" target="_blank" rel="noopener">Status page by ZetuWatch</a>
+  </header>
+  <main>
+    <div id="page-error" class="error" role="alert" hidden></div>
+    <section id="page-content" hidden>
+      <div class="hero">
+        <h1 id="page-name"></h1>
+        <p id="page-description" class="description"></p>
+        <div class="state"><span class="dot"></span><span id="overall-state">Status unknown</span></div>
+        <div class="notice" id="monitoring-notice">Live monitoring is not active yet. Component health and uptime will remain unknown until secure scheduled checks are enabled. This page does not claim that services are operational.</div>
+      </div>
+      <section class="panel" aria-labelledby="components-title">
+        <h2 id="components-title">Service components</h2>
+        <div id="components"></div>
+      </section>
+      <section class="panel" aria-labelledby="updates-title">
+        <h2 id="updates-title">Customer updates</h2>
+        <div id="updates"></div>
+      </section>
+    </section>
+  </main>
+  <script>
+    const API=(document.querySelector('meta[name="api-base"]')?.content||"/api").replace(/\/$/,"");
+    const $=id=>document.getElementById(id);
+    function formatDate(value){
+      if(!value)return "Time not available";
+      const raw=String(value),date=new Date(raw.includes("T")?raw:raw.replace(" ","T")+"Z");
+      return Number.isNaN(date.getTime())?raw:date.toLocaleString();
+    }
+    function showError(message){$("page-error").textContent=message;$("page-error").hidden=false;$("page-content").hidden=true}
+    function renderComponent(component){
+      const row=document.createElement("div");row.className="component";
+      const details=document.createElement("div");
+      const name=document.createElement("strong");name.textContent=component.name||"Service component";
+      const type=document.createElement("small");type.textContent=String(component.monitorType||"service").toUpperCase()+" · "+(component.state==="paused"?"Paused":"Awaiting secure checks");
+      details.append(name,type);
+      const state=document.createElement("span");state.className="unknown";state.textContent=component.status==="unknown"?"Unknown":"Unknown";
+      row.append(details,state);return row;
+    }
+    function renderUpdate(update){
+      const item=document.createElement("article");item.className="update";
+      const message=document.createElement("p");message.textContent=update.message||"A customer update was posted.";
+      const meta=document.createElement("small");meta.textContent=(update.monitorName||"Service update")+" · "+formatDate(update.createdAt);
+      item.append(message,meta);return item;
+    }
+    async function load(){
+      const slug=new URLSearchParams(location.search).get("slug")||"";
+      if(!/^[a-z0-9](?:[a-z0-9-]{1,46}[a-z0-9])$/i.test(slug)){showError("This status page address is invalid.");return}
+      try{
+        const response=await fetch(API+"/public/status-pages/"+encodeURIComponent(slug),{method:"GET",cache:"no-store",credentials:"omit",headers:{accept:"application/json"}});
+        const data=await response.json().catch(()=>({}));
+        if(!response.ok)throw new Error(response.status===404?"This status page is not available.":"The status page could not be loaded.");
+        $("page-name").textContent=data.page?.name||"Service status";
+        $("page-description").textContent=data.page?.description||"Current service components and customer-visible updates.";
+        $("overall-state").textContent=data.overallStatus==="unknown"?"Live status unavailable":"Service status";
+        document.title=($("page-name").textContent||"Service status")+" — ZetuWatch";
+        $("components").textContent="";
+        for(const component of data.components||[])$("components").appendChild(renderComponent(component));
+        if(!(data.components||[]).length){const empty=document.createElement("p");empty.className="empty";empty.textContent="No components have been added to this page."; $("components").appendChild(empty)}
+        $("updates").textContent="";
+        for(const update of data.updates||[])$("updates").appendChild(renderUpdate(update));
+        if(!(data.updates||[]).length){const empty=document.createElement("p");empty.className="empty";empty.textContent="There are no customer-visible updates."; $("updates").appendChild(empty)}
+        $("page-content").hidden=false;
+      }catch(error){showError(error.message||"The status page could not be loaded.")}
+    }
+    load();
+  </script>
+</body>
+</html>

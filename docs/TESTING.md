@@ -104,3 +104,13 @@ CI runs `npm run check:inline-js`, which parses (but does not execute) inline Ja
 ## Read-only API key integration coverage
 
 The API integration suite now exercises API key creation and revocation through the Worker, verifies that only a hash is persisted and that list responses never expose the secret, confirms that `last_used_at` updates, and checks that revoked/expired keys are rejected. Bearer keys are restricted to their issuing workspace and read-only monitor/incident endpoints; tests reject cross-tenant reads and monitor mutations, deny authentication/team routes, and ensure internal incident timeline notes are not exposed. Owners/admins can manage keys; members/viewers cannot. An explicit bearer header takes precedence over an ambient session cookie, and an invalid bearer never falls back to a valid cookie. These tests use isolated D1 and do not contact an external provider.
+
+
+## Status-page integration coverage
+
+The status-page API tests run against the actual Worker entrypoint and isolated D1. They cover draft creation and audit logging, publication, public-only incident updates, omission of raw target URLs/monitor IDs/workspace identifiers, unknown health while probes are disabled, invalid and cross-tenant monitor associations, the database tenant trigger, viewer read/write boundaries, the requirement for at least one component, archive/unpublish behavior, prevention of removing the final component from a published page, automatic unpublishing when its final monitor is soft-deleted, and API-key denial.
+
+The static `apps/web/status.html` renderer is included in the existing inline-script syntax check. This check parses JavaScript but does not execute browser flows; responsive, keyboard, screen-reader and public-page browser acceptance remain outstanding. No external Cloudflare resources or live monitor targets are contacted by these tests.
+
+
+The status-page implementation passed GitHub Actions run [#182](https://github.com/learninghub44/zetuwatch/actions/runs/43568666409): TypeScript, inline browser JavaScript syntax (five HTML files), SQLite migration validation (seven migrations) and the full Vitest suite (13 files, 129 tests). This does not replace browser E2E or accessibility testing.

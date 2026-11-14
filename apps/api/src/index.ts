@@ -108,6 +108,54 @@ export default {
       return json({ service: "zetuwatch-api", status: "ok", environment: env.APP_ENV });
     }
 
+    // Public status pages expose only explicitly published configuration and
+    // customer-visible incident updates. Live health remains unknown until
+    // the secure scheduled monitoring runner is enabled.
+    const publicStatusMatch = url.pathname.match(/^\/public\/status-pages\/([a-z0-9-]{3,48})$/i);
+    if (request.method === "GET" && publicStatusMatch) {
+      const slug = publicStatusMatch[1].toLowerCase();
+      const page = await env.DB.prepare(`SELECT id, name, slug, description, published_at AS publishedAt
+        FROM status_pages
+        WHERE slug = ? AND is_published = 1 AND archived_at IS NULL`)
+        .bind(slug)
+        .first<{ id: string; name: string; slug: string; description: string; publishedAt: string | null }>();
+      if (!page) return json({ error: "NOT_FOUND" }, 404);
+
+      const components = await env.DB.prepare(`SELECT m.name, m.monitor_type AS monitorType, m.is_enabled AS isEnabled
+        FROM status_page_monitors spm
+        JOIN monitors m ON m.id = spm.monitor_id
+        WHERE spm.page_id = ? AND m.deleted_at IS NULL
+        ORDER BY spm.position ASC, m.name ASC`)
+        .bind(page.id)
+        .all<{ name: string; monitorType: string; isEnabled: number }>();
+
+      const updates = await env.DB.prepare(`SELECT
+          m.name AS monitorName,
+          e.message,
+          e.created_at AS createdAt
+        FROM status_page_monitors spm
+        JOIN monitors m ON m.id = spm.monitor_id
+        JOIN incidents i ON i.monitor_id = m.id
+        JOIN incident_events e ON e.incident_id = i.id AND e.visibility = 'public'
+        WHERE spm.page_id = ? AND m.deleted_at IS NULL
+        ORDER BY e.created_at DESC, e.id DESC
+        LIMIT 50`)
+        .bind(page.id)
+        .all();
+      return json({
+        page: { name: page.name, slug: page.slug, description: page.description, publishedAt: page.publishedAt },
+        overallStatus: "unknown",
+        monitoringEnabled: false,
+        components: components.results.map(component => ({
+          name: component.name,
+          monitorType: component.monitorType,
+          state: Number(component.isEnabled) === 1 ? "awaiting_first_check" : "paused",
+          status: "unknown"
+        })),
+        updates: updates.results
+      });
+    }
+
     if (["POST", "PATCH", "PUT", "DELETE"].includes(request.method) && !originAllowed(request, env)) {
       return json({ error: "ORIGIN_NOT_ALLOWED" }, 403);
     }
@@ -320,6 +368,199 @@ export default {
         return json({ message: "API key revoked.", changed, revokedAt: current.revoked_at });
       }
 
+      return json({ error: "METHOD_NOT_ALLOWED" }, 405);
+    }
+
+
+    const statusPagesCollectionMatch = url.pathname.match(/^\/v1\/organizations\/([0-9a-f-]{36})\/status-pages$/i);
+    if (statusPagesCollectionMatch) {
+      const user = await currentUser(request, env);
+      if (!user) return json({ error: "UNAUTHENTICATED" }, 401);
+      if (user.authMethod === "api_key") return json({ error: "FORBIDDEN" }, 403);
+      const organizationId = statusPagesCollectionMatch[1];
+      const membership = await env.DB.prepare("SELECT role FROM organization_members WHERE organization_id = ? AND user_id = ?")
+        .bind(organizationId, user.id).first<{ role: string }>();
+      if (!membership) return json({ error: "FORBIDDEN" }, 403);
+
+      if (request.method === "GET") {
+        const pages = await env.DB.prepare(`SELECT
+            p.id, p.name, p.slug, p.description, p.is_published AS isPublished,
+            p.published_at AS publishedAt, p.created_at AS createdAt,
+            (SELECT COUNT(*) FROM status_page_monitors spm JOIN monitors cm ON cm.id = spm.monitor_id WHERE spm.page_id = p.id AND cm.deleted_at IS NULL) AS componentCount
+          FROM status_pages p
+          WHERE p.organization_id = ? AND p.archived_at IS NULL
+          ORDER BY p.created_at DESC
+          LIMIT 50`)
+          .bind(organizationId).all();
+        return json({ statusPages: pages.results });
+      }
+
+      if (request.method === "POST") {
+        if (!["owner", "admin"].includes(membership.role)) return json({ error: "FORBIDDEN" }, 403);
+        if (!(await rateLimit(request, env, "status-page-create", 10))) return json({ error: "RATE_LIMITED" }, 429);
+        const body = await request.json().catch(() => null) as Record<string, unknown> | null;
+        const name = cleanText(body?.name, 80);
+        const description = typeof body?.description === "string" ? body.description.trim() : "";
+        const rawSlug = cleanText(body?.slug, 48).toLowerCase();
+        const slug = rawSlug || (slugify(name).slice(0, 40) + "-" + crypto.randomUUID().slice(0, 6));
+        const monitorIdsValue = body?.monitorIds === undefined ? [] : body.monitorIds;
+        const monitorIds = Array.isArray(monitorIdsValue) ? monitorIdsValue : null;
+        const slugPattern = /^[a-z0-9](?:[a-z0-9-]{1,46}[a-z0-9])$/;
+        const reservedSlugs = new Set(["admin", "api", "app", "auth", "health", "status", "status-pages"]);
+        if (name.length < 2 || /[\u0000-\u001f\u007f]/.test(name) || description.length > 240 ||
+            /[\u0000-\u001f\u007f]/.test(description) ||
+            !slugPattern.test(slug) || reservedSlugs.has(slug) ||
+            !monitorIds || monitorIds.length > 50 ||
+            monitorIds.some(value => typeof value !== "string" || !/^[0-9a-f-]{36}$/i.test(value)) ||
+            new Set(monitorIds).size !== monitorIds.length) {
+          return json({ error: "INVALID_STATUS_PAGE_INPUT" }, 400);
+        }
+        if (monitorIds.length) {
+          const placeholders = monitorIds.map(() => "?").join(",");
+          const valid = await env.DB.prepare(`SELECT COUNT(*) AS count FROM monitors
+            WHERE organization_id = ? AND deleted_at IS NULL AND id IN (${placeholders})`)
+            .bind(organizationId, ...monitorIds).first<{ count: number }>();
+          if ((valid?.count ?? 0) !== monitorIds.length) {
+            return json({ error: "INVALID_STATUS_PAGE_MONITORS" }, 400);
+          }
+        }
+        const pageId = id();
+        const statements = [
+          env.DB.prepare("INSERT INTO status_pages (id, organization_id, name, slug, description, created_by) VALUES (?, ?, ?, ?, ?, ?)")
+            .bind(pageId, organizationId, name, slug, description, user.id),
+          ...monitorIds.map((monitorId, position) =>
+            env.DB.prepare("INSERT INTO status_page_monitors (page_id, monitor_id, position) VALUES (?, ?, ?)")
+              .bind(pageId, monitorId, position)
+          ),
+          env.DB.prepare("INSERT INTO audit_logs (id, organization_id, actor_user_id, action, resource_type, resource_id, metadata_json) VALUES (?, ?, ?, 'status_page.created', 'status_page', ?, ?)")
+            .bind(id(), organizationId, user.id, pageId, JSON.stringify({ slug, componentCount: monitorIds.length }))
+        ];
+        try {
+          await env.DB.batch(statements);
+        } catch {
+          return json({ error: "STATUS_PAGE_SLUG_TAKEN" }, 409);
+        }
+        return json({
+          statusPage: { id: pageId, name, slug, description, isPublished: false, componentCount: monitorIds.length },
+          publicPath: "/status.html?slug=" + encodeURIComponent(slug)
+        }, 201);
+      }
+      return json({ error: "METHOD_NOT_ALLOWED" }, 405);
+    }
+
+    const statusPageMatch = url.pathname.match(/^\/v1\/status-pages\/([0-9a-f-]{36})(?:\/(publish))?$/i);
+    if (statusPageMatch) {
+      const user = await currentUser(request, env);
+      if (!user) return json({ error: "UNAUTHENTICATED" }, 401);
+      if (user.authMethod === "api_key") return json({ error: "FORBIDDEN" }, 403);
+      const pageId = statusPageMatch[1];
+      const action = statusPageMatch[2];
+      const page = await env.DB.prepare(`SELECT id, organization_id AS organizationId, name, slug, description,
+          is_published AS isPublished, published_at AS publishedAt, archived_at AS archivedAt
+        FROM status_pages WHERE id = ? AND archived_at IS NULL`)
+        .bind(pageId)
+        .first<{
+          id: string; organizationId: string; name: string; slug: string; description: string;
+          isPublished: number; publishedAt: string | null; archivedAt: string | null;
+        }>();
+      if (!page) return json({ error: "NOT_FOUND" }, 404);
+      const membership = await env.DB.prepare("SELECT role FROM organization_members WHERE organization_id = ? AND user_id = ?")
+        .bind(page.organizationId, user.id).first<{ role: string }>();
+      if (!membership) return json({ error: "FORBIDDEN" }, 403);
+
+      if (request.method === "GET" && !action) {
+        const components = await env.DB.prepare(`SELECT m.id, m.name, m.monitor_type AS monitorType
+          FROM status_page_monitors spm
+          JOIN monitors m ON m.id = spm.monitor_id
+          WHERE spm.page_id = ? AND m.deleted_at IS NULL
+          ORDER BY spm.position ASC, m.name ASC`)
+          .bind(pageId).all();
+        return json({ statusPage: page, components: components.results });
+      }
+
+      if (request.method === "PATCH" && !action) {
+        if (!["owner", "admin"].includes(membership.role)) return json({ error: "FORBIDDEN" }, 403);
+        if (!(await rateLimit(request, env, "status-page-update", 30))) return json({ error: "RATE_LIMITED" }, 429);
+        const body = await request.json().catch(() => null) as Record<string, unknown> | null;
+        const name = body?.name === undefined ? page.name : cleanText(body.name, 80);
+        const description = body?.description === undefined ? page.description : (typeof body.description === "string" ? body.description.trim() : "");
+        const slug = body?.slug === undefined ? page.slug : cleanText(body.slug, 48).toLowerCase();
+        const slugPattern = /^[a-z0-9](?:[a-z0-9-]{1,46}[a-z0-9])$/;
+        const reservedSlugs = new Set(["admin", "api", "app", "auth", "health", "status", "status-pages"]);
+        const hasMonitorIds = body?.monitorIds !== undefined;
+        const monitorIds = hasMonitorIds && Array.isArray(body.monitorIds) ? body.monitorIds : [];
+        if (name.length < 2 || /[\u0000-\u001f\u007f]/.test(name) || description.length > 240 ||
+            /[\u0000-\u001f\u007f]/.test(description) ||
+            !slugPattern.test(slug) || reservedSlugs.has(slug) ||
+            (hasMonitorIds && (!Array.isArray(body?.monitorIds) || monitorIds.length > 50 ||
+              monitorIds.some(value => typeof value !== "string" || !/^[0-9a-f-]{36}$/i.test(value)) ||
+              new Set(monitorIds).size !== monitorIds.length))) {
+          return json({ error: "INVALID_STATUS_PAGE_INPUT" }, 400);
+        }
+        if (hasMonitorIds && monitorIds.length) {
+          const placeholders = monitorIds.map(() => "?").join(",");
+          const valid = await env.DB.prepare(`SELECT COUNT(*) AS count FROM monitors
+            WHERE organization_id = ? AND deleted_at IS NULL AND id IN (${placeholders})`)
+            .bind(page.organizationId, ...monitorIds).first<{ count: number }>();
+          if ((valid?.count ?? 0) !== monitorIds.length) return json({ error: "INVALID_STATUS_PAGE_MONITORS" }, 400);
+        }
+        if (hasMonitorIds && monitorIds.length === 0 && Number(page.isPublished) === 1) {
+          return json({ error: "STATUS_PAGE_REQUIRES_COMPONENT" }, 409);
+        }
+        const statements = [
+          env.DB.prepare("UPDATE status_pages SET name = ?, slug = ?, description = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ? AND archived_at IS NULL")
+            .bind(name, slug, description, pageId, page.organizationId)
+        ];
+        if (hasMonitorIds) {
+          statements.push(env.DB.prepare("DELETE FROM status_page_monitors WHERE page_id = ?").bind(pageId));
+          for (let position = 0; position < monitorIds.length; position++) {
+            statements.push(env.DB.prepare("INSERT INTO status_page_monitors (page_id, monitor_id, position) VALUES (?, ?, ?)")
+              .bind(pageId, monitorIds[position], position));
+          }
+        }
+        statements.push(env.DB.prepare("INSERT INTO audit_logs (id, organization_id, actor_user_id, action, resource_type, resource_id, metadata_json) VALUES (?, ?, ?, 'status_page.updated', 'status_page', ?, ?)")
+          .bind(id(), page.organizationId, user.id, pageId, JSON.stringify({ slug, componentsChanged: hasMonitorIds })));
+        try {
+          await env.DB.batch(statements);
+        } catch {
+          return json({ error: "STATUS_PAGE_UPDATE_CONFLICT" }, 409);
+        }
+        return json({ message: "Status page updated.", statusPage: { id: pageId, name, slug, description } });
+      }
+
+      if (request.method === "POST" && action === "publish") {
+        if (!["owner", "admin"].includes(membership.role)) return json({ error: "FORBIDDEN" }, 403);
+        if (!(await rateLimit(request, env, "status-page-publish", 20))) return json({ error: "RATE_LIMITED" }, 429);
+        const body = await request.json().catch(() => null) as Record<string, unknown> | null;
+        if (typeof body?.published !== "boolean") return json({ error: "INVALID_PUBLISH_STATE" }, 400);
+        if (body.published) {
+          const count = await env.DB.prepare(`SELECT COUNT(*) AS count
+            FROM status_page_monitors spm JOIN monitors m ON m.id = spm.monitor_id
+            WHERE spm.page_id = ? AND m.deleted_at IS NULL`)
+            .bind(pageId).first<{ count: number }>();
+          if ((count?.count ?? 0) < 1) return json({ error: "STATUS_PAGE_REQUIRES_COMPONENT" }, 409);
+        }
+        const publishAction = body.published ? "status_page.published" : "status_page.unpublished";
+        const result = await env.DB.batch([
+          env.DB.prepare("UPDATE status_pages SET is_published = ?, published_at = CASE WHEN ? = 1 THEN COALESCE(published_at, CURRENT_TIMESTAMP) ELSE NULL END, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ? AND archived_at IS NULL AND is_published != ?")
+            .bind(body.published ? 1 : 0, body.published ? 1 : 0, pageId, page.organizationId, body.published ? 1 : 0),
+          env.DB.prepare("INSERT INTO audit_logs (id, organization_id, actor_user_id, action, resource_type, resource_id) SELECT ?, ?, ?, ?, 'status_page', ? WHERE changes() = 1")
+            .bind(id(), page.organizationId, user.id, publishAction, pageId)
+        ]);
+        return json({ message: body.published ? "Status page published." : "Status page unpublished.", changed: (result[0]?.meta?.changes ?? 0) === 1 });
+      }
+
+      if (request.method === "DELETE" && !action) {
+        if (!["owner", "admin"].includes(membership.role)) return json({ error: "FORBIDDEN" }, 403);
+        if (!(await rateLimit(request, env, "status-page-archive", 20))) return json({ error: "RATE_LIMITED" }, 429);
+        const result = await env.DB.batch([
+          env.DB.prepare("UPDATE status_pages SET is_published = 0, published_at = NULL, archived_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ? AND archived_at IS NULL")
+            .bind(pageId, page.organizationId),
+          env.DB.prepare("INSERT INTO audit_logs (id, organization_id, actor_user_id, action, resource_type, resource_id) SELECT ?, ?, ?, 'status_page.archived', 'status_page', ? WHERE changes() = 1")
+            .bind(id(), page.organizationId, user.id, pageId)
+        ]);
+        return json({ message: "Status page archived.", changed: (result[0]?.meta?.changes ?? 0) === 1 });
+      }
       return json({ error: "METHOD_NOT_ALLOWED" }, 405);
     }
 
@@ -586,7 +827,8 @@ export default {
           env.DB.prepare("INSERT INTO audit_logs (id, organization_id, actor_user_id, action, resource_type, resource_id) SELECT ?, ?, ?, 'monitor.deleted', 'monitor', ? WHERE changes() = 1")
             .bind(id(), monitor.organization_id, user.id, monitorId)
         ]);
-        if ((results[0] as D1Result).meta?.changes !== 1) return json({ error: "MONITOR_ALREADY_DELETED" }, 409);
+        // SQLite/D1 may include trigger side-effects in batch metadata. The status-page trigger can also unpublish a page, so a successful monitor update may report more than one changed row.
+        if (((results[0] as D1Result).meta?.changes ?? 0) < 1) return json({ error: "MONITOR_ALREADY_DELETED" }, 409);
         return json({ message: "Monitor deleted. Check history and incident timelines are retained." });
       }
       return json({ error: "METHOD_NOT_ALLOWED" }, 405);
