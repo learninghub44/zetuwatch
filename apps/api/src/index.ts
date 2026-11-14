@@ -111,7 +111,7 @@ export default {
     // Public status pages expose only explicitly published configuration and
     // customer-visible incident updates. Live health remains unknown until
     // the secure scheduled monitoring runner is enabled.
-    const publicStatusMatch = url.pathname.match(/^\\/public\\/status-pages\\/([a-z0-9-]{3,48})$/i);
+    const publicStatusMatch = url.pathname.match(/^\/public\/status-pages\/([a-z0-9-]{3,48})$/i);
     if (request.method === "GET" && publicStatusMatch) {
       const slug = publicStatusMatch[1].toLowerCase();
       const page = await env.DB.prepare(`SELECT id, name, slug, description, published_at AS publishedAt
@@ -375,7 +375,7 @@ export default {
     }
 
 
-    const statusPagesCollectionMatch = url.pathname.match(/^\\/v1\\/organizations\\/([0-9a-f-]{36})\\/status-pages$/i);
+    const statusPagesCollectionMatch = url.pathname.match(/^\/v1\/organizations\/([0-9a-f-]{36})\/status-pages$/i);
     if (statusPagesCollectionMatch) {
       const user = await currentUser(request, env);
       if (!user) return json({ error: "UNAUTHENTICATED" }, 401);
@@ -411,7 +411,7 @@ export default {
         const slugPattern = /^[a-z0-9](?:[a-z0-9-]{1,46}[a-z0-9])$/;
         const reservedSlugs = new Set(["admin", "api", "app", "auth", "health", "status", "status-pages"]);
         if (name.length < 2 || description.length > 240 ||
-            /[\\u0000-\\u001f\\u007f]/.test(description) ||
+            /[\u0000-\u001f\u007f]/.test(description) ||
             !slugPattern.test(slug) || reservedSlugs.has(slug) ||
             !monitorIds || monitorIds.length > 50 ||
             monitorIds.some(value => typeof value !== "string" || !/^[0-9a-f-]{36}$/i.test(value)) ||
@@ -451,7 +451,7 @@ export default {
       return json({ error: "METHOD_NOT_ALLOWED" }, 405);
     }
 
-    const statusPageMatch = url.pathname.match(/^\\/v1\\/status-pages\\/([0-9a-f-]{36})(?:\\/(publish))?$/i);
+    const statusPageMatch = url.pathname.match(/^\/v1\/status-pages\/([0-9a-f-]{36})(?:\/(publish))?$/i);
     if (statusPageMatch) {
       const user = await currentUser(request, env);
       if (!user) return json({ error: "UNAUTHENTICATED" }, 401);
@@ -493,7 +493,7 @@ export default {
         const hasMonitorIds = body?.monitorIds !== undefined;
         const monitorIds = hasMonitorIds && Array.isArray(body.monitorIds) ? body.monitorIds : [];
         if (name.length < 2 || description.length > 240 ||
-            /[\\u0000-\\u001f\\u007f]/.test(description) ||
+            /[\u0000-\u001f\u007f]/.test(description) ||
             !slugPattern.test(slug) || reservedSlugs.has(slug) ||
             (hasMonitorIds && (!Array.isArray(body?.monitorIds) || monitorIds.length > 50 ||
               monitorIds.some(value => typeof value !== "string" || !/^[0-9a-f-]{36}$/i.test(value)) ||
