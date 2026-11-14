@@ -61,3 +61,28 @@ WHEN NOT EXISTS (
 BEGIN
   SELECT RAISE(ABORT, 'STATUS_PAGE_MONITOR_TENANT_MISMATCH');
 END;
+
+-- If the final live component is soft-deleted, automatically unpublish the
+-- page so a stale public URL cannot imply that a service is still represented.
+CREATE TRIGGER IF NOT EXISTS status_page_unpublish_without_live_components
+AFTER UPDATE OF deleted_at ON monitors
+WHEN NEW.deleted_at IS NOT NULL
+BEGIN
+  UPDATE status_pages
+  SET is_published = 0,
+      published_at = NULL,
+      updated_at = CURRENT_TIMESTAMP
+  WHERE is_published = 1
+    AND id IN (
+      SELECT spm.page_id
+      FROM status_page_monitors spm
+      WHERE spm.monitor_id = NEW.id
+    )
+    AND NOT EXISTS (
+      SELECT 1
+      FROM status_page_monitors spm
+      JOIN monitors m ON m.id = spm.monitor_id
+      WHERE spm.page_id = status_pages.id
+        AND m.deleted_at IS NULL
+    );
+END;
