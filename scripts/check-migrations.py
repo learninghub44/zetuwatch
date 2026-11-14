@@ -18,7 +18,7 @@ def main() -> None:
         "monitor_checks", "incidents", "incident_events", "notification_channels",
         "audit_logs", "auth_tokens", "auth_sessions", "auth_rate_limits",
         "organization_invitations", "api_keys", "notification_deliveries",
-        "maintenance_windows",
+        "maintenance_windows", "status_pages", "status_page_monitors",
     }
     existing = {row[0] for row in db.execute(
         "SELECT name FROM sqlite_master WHERE type = 'table'"
