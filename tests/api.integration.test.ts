@@ -865,14 +865,11 @@ describe("Status pages", () => {
     expect(count?.count).toBe(0);
 
     const pageId = crypto.randomUUID();
-    const pageId2 = crypto.randomUUID();
     await env.DB.prepare("INSERT INTO status_pages (id, organization_id, name, slug) VALUES (?, ?, ?, ?)")
       .bind(pageId, owner.organizationId, "Direct fixture", "direct-fixture").run();
     await expect(env.DB.prepare("INSERT INTO status_page_monitors (page_id, monitor_id, position) VALUES (?, ?, 0)")
       .bind(pageId, foreignMonitorId).run()).rejects.toThrow(/STATUS_PAGE_MONITOR_TENANT_MISMATCH/);
     await env.DB.prepare("DELETE FROM status_pages WHERE id = ?").bind(pageId).run();
-    await env.DB.prepare("INSERT INTO status_pages (id, organization_id, name, slug) VALUES (?, ?, ?, ?)")
-      .bind(pageId2, owner.organizationId, "Empty fixture", "empty-fixture").run();
   });
 
   it("allows workspace members to list pages but reserves mutations for owners and admins", async () => {
@@ -905,7 +902,7 @@ describe("Status pages", () => {
     expect([create.status, publish.status]).toEqual([403, 403]);
   });
 
-  it("requires a live component to publish and archives pages without exposing them publicly", async () => {
+  it("requires at least one configured component to publish and archives pages without exposing them publicly", async () => {
     const owner = await createIdentity("owner");
     const empty = await api("/v1/organizations/" + owner.organizationId + "/status-pages", {
       token: owner.sessionToken,
