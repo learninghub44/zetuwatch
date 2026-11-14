@@ -131,9 +131,6 @@ export default {
 
       const updates = await env.DB.prepare(`SELECT
           m.name AS monitorName,
-          i.status,
-          i.started_at AS startedAt,
-          i.resolved_at AS resolvedAt,
           e.message,
           e.created_at AS createdAt
         FROM status_page_monitors spm
@@ -146,7 +143,7 @@ export default {
         .bind(page.id)
         .all();
       return json({
-        page,
+        page: { name: page.name, slug: page.slug, description: page.description, publishedAt: page.publishedAt },
         overallStatus: "unknown",
         monitoringEnabled: false,
         components: components.results.map(component => ({
@@ -389,7 +386,7 @@ export default {
         const pages = await env.DB.prepare(`SELECT
             p.id, p.name, p.slug, p.description, p.is_published AS isPublished,
             p.published_at AS publishedAt, p.created_at AS createdAt,
-            (SELECT COUNT(*) FROM status_page_monitors spm WHERE spm.page_id = p.id) AS componentCount
+            (SELECT COUNT(*) FROM status_page_monitors spm JOIN monitors cm ON cm.id = spm.monitor_id WHERE spm.page_id = p.id AND cm.deleted_at IS NULL) AS componentCount
           FROM status_pages p
           WHERE p.organization_id = ? AND p.archived_at IS NULL
           ORDER BY p.created_at DESC
@@ -410,7 +407,7 @@ export default {
         const monitorIds = Array.isArray(monitorIdsValue) ? monitorIdsValue : null;
         const slugPattern = /^[a-z0-9](?:[a-z0-9-]{1,46}[a-z0-9])$/;
         const reservedSlugs = new Set(["admin", "api", "app", "auth", "health", "status", "status-pages"]);
-        if (name.length < 2 || description.length > 240 ||
+        if (name.length < 2 || /[\u0000-\u001f\u007f]/.test(name) || description.length > 240 ||
             /[\u0000-\u001f\u007f]/.test(description) ||
             !slugPattern.test(slug) || reservedSlugs.has(slug) ||
             !monitorIds || monitorIds.length > 50 ||
@@ -492,7 +489,7 @@ export default {
         const reservedSlugs = new Set(["admin", "api", "app", "auth", "health", "status", "status-pages"]);
         const hasMonitorIds = body?.monitorIds !== undefined;
         const monitorIds = hasMonitorIds && Array.isArray(body.monitorIds) ? body.monitorIds : [];
-        if (name.length < 2 || description.length > 240 ||
+        if (name.length < 2 || /[\u0000-\u001f\u007f]/.test(name) || description.length > 240 ||
             /[\u0000-\u001f\u007f]/.test(description) ||
             !slugPattern.test(slug) || reservedSlugs.has(slug) ||
             (hasMonitorIds && (!Array.isArray(body?.monitorIds) || monitorIds.length > 50 ||
@@ -506,6 +503,9 @@ export default {
             WHERE organization_id = ? AND deleted_at IS NULL AND id IN (${placeholders})`)
             .bind(page.organizationId, ...monitorIds).first<{ count: number }>();
           if ((valid?.count ?? 0) !== monitorIds.length) return json({ error: "INVALID_STATUS_PAGE_MONITORS" }, 400);
+        }
+        if (hasMonitorIds && monitorIds.length === 0 && Number(page.isPublished) === 1) {
+          return json({ error: "STATUS_PAGE_REQUIRES_COMPONENT" }, 409);
         }
         const statements = [
           env.DB.prepare("UPDATE status_pages SET name = ?, slug = ?, description = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ? AND archived_at IS NULL")
