@@ -1003,7 +1003,10 @@ describe("Workspace analytics", () => {
     const firstMonitorId = await createMonitor(owner.organizationId);
     const secondMonitorId = await createMonitor(owner.organizationId);
     const now = Date.now();
-    const checkedAt = (minutesAgo: number) => new Date(now - minutesAgo * 60 * 1000).toISOString();
+    const baseTime = new Date(now);
+    baseTime.setUTCHours(12, 0, 0, 0);
+    if (baseTime.getTime() > now) baseTime.setUTCDate(baseTime.getUTCDate() - 1);
+    const checkedAt = (minutesAgo: number) => new Date(baseTime.getTime() - minutesAgo * 60 * 1000).toISOString();
     const checkRows = [
       { monitorId: firstMonitorId, at: checkedAt(180), up: 1, status: 200, latency: 40, error: null },
       { monitorId: firstMonitorId, at: checkedAt(120), up: 1, status: 200, latency: 100, error: null },
