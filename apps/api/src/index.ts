@@ -749,7 +749,7 @@ export default {
     if (request.method === "GET" && url.pathname === "/v1/analytics") {
       const user = await currentUser(request, env);
       if (!user) return json({ error: "UNAUTHENTICATED" }, 401);
-      const organizationId = cleanText(url.searchParams.get("organizationId"), 36);
+      const organizationId = (url.searchParams.get("organizationId") || "").trim();
       const range = url.searchParams.get("range") || "7d";
       const rangeSeconds: Record<string, number> = {
         "24h": 24 * 60 * 60,
