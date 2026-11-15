@@ -73,7 +73,7 @@ The URL policy, fail-closed HTTP probe, pure IP classifier and bounded DNS resol
 - Keys use a cryptographically random 256-bit secret with the `zw_live_` prefix. Only a SHA-256 hash is stored; the full secret is returned once at creation and is never included in list responses or audit metadata.
 - Only verified workspace owners/admins may create, list or revoke keys. Keys are bound to one organization, expire after 30, 90 or 365 days, and are capped at 10 active keys per workspace.
 - A key remains valid only while its creator remains a verified owner/admin of that organization. Revocation is immediate and idempotent. Successful authentication updates `last_used_at`.
-- The initial key scope is read-only: monitor list/detail/check history and incident list/detail. Keys cannot mutate monitors/incidents, access authentication/team-management routes, or read internal incident timeline notes.
+- The initial key scope is read-only: monitor list/detail/check history, incident list/detail and workspace analytics. Keys cannot mutate monitors/incidents, access authentication/team-management routes, or read internal incident timeline notes.
 - Keys are accepted only in an `Authorization: Bearer` header, never in query parameters. When the header is present it takes precedence over session cookies, and an invalid bearer never falls back to a cookie. Treat them as server-side secrets; do not embed them in browser bundles, URLs, logs or source control. The workspace UI displays the secret once and does not persist it in browser storage.
 
 
