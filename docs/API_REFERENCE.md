@@ -22,7 +22,7 @@ API keys are created, listed and revoked by workspace owners/admins using a veri
 - `GET /v1/organizations/<organization-id>/api-keys` — list safe key metadata. The secret and hash are never returned.
 - `POST /v1/organizations/<organization-id>/api-keys` — create a key with `{ name, expiresInDays: 30|90|365 }`. The response includes `secret` exactly once. Store it in a server-side secret manager; it cannot be retrieved later.
 - `DELETE /v1/organizations/<organization-id>/api-keys/<key-id>` — revoke a key immediately. Repeated revocation is idempotent.
-- Use `Authorization: Bearer zw_live_...` on supported read endpoints: monitor list/detail/check history and incident list/detail. Keys cannot create, update, pause, resume or delete monitors, change incidents, access authentication or team endpoints, or view internal incident timeline notes.
+- Use `Authorization: Bearer zw_live_...` on supported read endpoints: monitor list/detail/check history, incident list/detail and workspace analytics. Keys cannot create, update, pause, resume or delete monitors, change incidents, access authentication or team endpoints, or view internal incident timeline notes.
 
 An explicit `Authorization` header takes precedence over a session cookie; an invalid bearer credential never falls back to a valid cookie. The key is stored as a SHA-256 hash of a cryptographically random 256-bit secret. Authentication requires the creator to remain a verified owner/admin of the key's workspace; demotion/removal therefore disables the key. `last_used_at` is updated on successful authentication. Do not put API keys in browser code, URLs, logs or source control.
 
