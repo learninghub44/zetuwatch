@@ -1122,7 +1122,14 @@ describe("Workspace analytics", () => {
     const invalidRange = await api("/v1/analytics?organizationId=" + owner.organizationId + "&range=all", {
       token: owner.sessionToken
     });
-    expect([missingOrganization.status, invalidRange.status]).toEqual([400, 400]);
+    const inheritedRange = await api("/v1/analytics?organizationId=" + owner.organizationId + "&range=toString", {
+      token: owner.sessionToken
+    });
+    const malformedOrganization = await api("/v1/analytics?organizationId=" + owner.organizationId + "suffix&range=7d", {
+      token: owner.sessionToken
+    });
+    expect([missingOrganization.status, invalidRange.status, inheritedRange.status, malformedOrganization.status])
+      .toEqual([400, 400, 400, 400]);
   });
 
   it("groups a 24-hour range into hourly buckets using persisted check timestamps", async () => {
