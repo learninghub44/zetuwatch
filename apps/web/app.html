@@ -432,13 +432,13 @@ function renderAnalyticsSeries(series){
     const column=document.createElement("div");column.className="analytics-column";
     const track=document.createElement("div");track.className="analytics-bar-track";
     track.setAttribute("aria-hidden","true");
-    if(upHeight){const good=document.createElement("span");good.className="analytics-bar-up";good.style.height=upHeight+"px";track.appendChild(good)}
     if(downHeight){const bad=document.createElement("span");bad.className="analytics-bar-down";bad.style.height=downHeight+"px";track.appendChild(bad)}
+    if(upHeight){const good=document.createElement("span");good.className="analytics-bar-up";good.style.height=upHeight+"px";track.appendChild(good)}
     const label=document.createElement("small");
     const date=hourly?new Date(point.bucket):new Date(String(point.bucket)+"T12:00:00");
     label.textContent=Number.isNaN(date.getTime())?String(point.bucket):hourly?date.toLocaleTimeString([],{hour:"2-digit"}):date.toLocaleDateString([],{month:"short",day:"numeric"});
     column.setAttribute("role","listitem");column.setAttribute("aria-label",label.textContent+": "+total+" checks, "+up+" passed, "+down+" failed");
-    column.title=total+" checks: "+up+" passed, "+down+" failed";
+    column.title=total+" checks: "+up+" passed, "+down+" failed"+(point.avgLatencyMs===null?"":" · average "+point.avgLatencyMs+" ms");
     column.append(track,label);container.appendChild(column);
   }
 }
