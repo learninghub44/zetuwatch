@@ -55,7 +55,7 @@
 <div class="stat"><small>Open incidents</small><strong id="analytics-open-incidents">—</strong><div class="foot" id="analytics-open-foot">Currently unresolved</div></div>
 </div>
 <div class="analytics-grid">
-<div class="analytics-chart"><h3>Checks over time</h3><div id="analytics-series" class="analytics-bars" role="img" aria-label="Recorded successful and failed checks over the selected period"></div><div id="analytics-empty" class="empty hidden"><div class="empty-mark">◷</div><h3>No check data yet</h3><p>Charts will appear when genuine check results have been recorded. Monitor configuration alone is not a measurement.</p></div><p id="analytics-last-check" class="analytics-footnote">No checks recorded in this period.</p></div>
+<div class="analytics-chart"><h3>Checks over time</h3><div id="analytics-series" class="analytics-bars" role="list" aria-label="Recorded successful and failed checks over the selected period"></div><div id="analytics-empty" class="empty hidden"><div class="empty-mark">◷</div><h3>No check data yet</h3><p>Charts will appear when genuine check results have been recorded. Monitor configuration alone is not a measurement.</p></div><p id="analytics-last-check" class="analytics-footnote">No checks recorded in this period.</p></div>
 <div class="analytics-failures"><h3>Most failed monitors</h3><ol id="analytics-failures-list" class="analytics-failure-list"><li>No failed checks recorded in this period.</li></ol><p class="analytics-footnote">Ranked by failed check count in the selected period.</p></div>
 </div>
 <p class="analytics-footnote">Availability is calculated from stored check samples only. It is not an SLA or a guarantee of continuous uptime. Scheduled probes are currently disabled, so this page will not invent measurements.</p>
@@ -435,8 +435,9 @@ function renderAnalyticsSeries(series){
     if(upHeight){const good=document.createElement("span");good.className="analytics-bar-up";good.style.height=upHeight+"px";track.appendChild(good)}
     if(downHeight){const bad=document.createElement("span");bad.className="analytics-bar-down";bad.style.height=downHeight+"px";track.appendChild(bad)}
     const label=document.createElement("small");
-    const date=new Date(point.bucket);
+    const date=hourly?new Date(point.bucket):new Date(String(point.bucket)+"T12:00:00");
     label.textContent=Number.isNaN(date.getTime())?String(point.bucket):hourly?date.toLocaleTimeString([],{hour:"2-digit"}):date.toLocaleDateString([],{month:"short",day:"numeric"});
+    column.setAttribute("role","listitem");column.setAttribute("aria-label",label.textContent+": "+total+" checks, "+up+" passed, "+down+" failed");
     column.title=total+" checks: "+up+" passed, "+down+" failed";
     column.append(track,label);container.appendChild(column);
   }
