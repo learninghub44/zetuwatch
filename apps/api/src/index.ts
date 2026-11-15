@@ -756,7 +756,7 @@ export default {
         "7d": 7 * 24 * 60 * 60,
         "30d": 30 * 24 * 60 * 60
       };
-      if (!/^[0-9a-f-]{36}$/i.test(organizationId) || !Object.prototype.hasOwnProperty.call(rangeSeconds, range)) {
+      if (!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(organizationId) || !Object.prototype.hasOwnProperty.call(rangeSeconds, range)) {
         return json({ error: "INVALID_ANALYTICS_QUERY" }, 400);
       }
       if (!apiKeyAllows(user, organizationId, "read")) return json({ error: "FORBIDDEN" }, 403);
