@@ -94,6 +94,7 @@ The current API deliberately returns `executionEnabled: false`. Creating a monit
 - `GET /v1/analytics?organizationId=<uuid>&range=24h|7d|30d` — returns tenant-scoped analytics from persisted `monitor_checks` and incident rows. `organizationId` is required; `range` defaults to `7d`.
 - Requires a verified browser session or a read-only workspace API key. Membership and API-key workspace scope are checked server-side. A read-only API key can access only its own workspace.
 - The response includes configured live monitor count, recorded/up/down checks, observed availability percentage, unresolved incidents, incidents started in the selected period, hourly (24h) or daily (7d/30d) buckets, and the five monitors with the most failed samples.
+- Every time-series query is bounded by the returned inclusive UTC window (`from` through `to`); future-dated check and incident rows are excluded from counts, percentiles, buckets and last-check timestamps.
 - Latency p50/p95 is calculated from the most recent 5,000 non-negative latency samples in the selected period. The response reports sample count and whether the sample was truncated.
 - When no check rows exist, availability and latency percentiles are `null`; no 0% or 100% availability is fabricated. The endpoint returns `source: "persisted_checks"`, `observedOnly: true` and `executionEnabled: false`.
 - Analytics never returns raw target URLs, response bodies, custom headers or secrets. Results are sample-based observations, not an SLA. Requests are rate-limited to 120 per source IP per 15 minutes.
