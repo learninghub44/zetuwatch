@@ -1149,6 +1149,7 @@ describe("Workspace analytics", () => {
     expect(payload.series[0].bucket).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:00:00Z$/);
     expect(payload.series[0].totalChecks).toBe(1);
   });
+
   it("excludes future-dated checks and incidents from the selected analytics window", async () => {
     const owner = await createIdentity("owner");
     const monitorId = await createMonitor(owner.organizationId);
