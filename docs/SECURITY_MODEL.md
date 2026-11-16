@@ -88,3 +88,11 @@ The URL policy, fail-closed HTTP probe, pure IP classifier and bounded DNS resol
 - The public renderer uses `textContent`/DOM nodes for all database-backed strings. It does not interpolate page content into HTML or execute scripts from stored values.
 
 This is a public information surface, not a live service-health assertion. Do not remove the explicit unknown-state notice until the secure outbound runner and real measurements are enabled and independently verified.
+
+
+## Analytics time-window integrity
+
+- Analytics derives measurements only from persisted check rows and returns the exact UTC `from`/`to` window used by the queries.
+- Check totals, trend buckets, latency samples, failure rankings and last-check timestamps are bounded on both sides of that window. Future-dated rows are excluded rather than being allowed to distort observed availability or latency.
+- Open incidents count only incidents whose start timestamp is not in the future; incident-start counts are bounded to the selected window.
+- Analytics is sample-based and does not imply probe execution is enabled.
