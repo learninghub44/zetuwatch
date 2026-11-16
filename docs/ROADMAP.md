@@ -270,5 +270,5 @@ No Cloudflare resources were created and no deployment was attempted. This is fe
 - Added `GET /v1/analytics` with mandatory organization membership and read-only API-key workspace scoping.
 - The endpoint aggregates persisted check rows only, with selectable 24-hour/hourly, 7-day/daily and 30-day/daily buckets, observed availability, open/started incident counts, top failure counts and p50/p95 latency from a bounded 5,000-row sample.
 - Added a responsive Analytics section to the customer workspace with range selection, observed metrics, success/failure bars, top failures and explicit no-data states. It does not imply probes are running.
-- Added D1-backed API tests for real persisted aggregation, latency percentiles, empty data, tenant/API-key isolation, invalid ranges and hourly grouping. CI verification is pending.
+- Added D1-backed API tests for persisted aggregation, latency percentiles, empty data, tenant/API-key isolation, query validation, hourly grouping and exclusion of future-dated check/incident rows. All check and incident-start aggregates are bounded to the selected inclusive UTC window. CI verification is pending.
 - No migration, new dependency, external resource or deployment was required. Scheduled probes remain disabled; analytics will remain empty until genuine checks are persisted.
