@@ -769,11 +769,12 @@ export default {
       }
 
       const now = new Date();
+      const to = now.toISOString();
       const from = new Date(now.getTime() - rangeSeconds[range] * 1000).toISOString();
       const bucketExpression = range === "24h"
         ? "strftime('%Y-%m-%dT%H:00:00Z', c.checked_at)"
         : "date(c.checked_at)";
-      const checkFilter = "m.organization_id = ? AND julianday(c.checked_at) >= julianday(?)";
+      const checkFilter = "m.organization_id = ? AND julianday(c.checked_at) >= julianday(?) AND julianday(c.checked_at) <= julianday(?)";
 
       const [monitorCount, totals, buckets, latencyRows, failures, incidentStats, lastCheck] = await Promise.all([
         env.DB.prepare(
@@ -784,7 +785,7 @@ export default {
             COALESCE(SUM(CASE WHEN c.is_up = 0 THEN 1 ELSE 0 END), 0) AS downChecks
           FROM monitor_checks c JOIN monitors m ON m.id = c.monitor_id
           WHERE ${checkFilter}`)
-          .bind(organizationId, from)
+          .bind(organizationId, from, to)
           .first<{ totalChecks: number; upChecks: number; downChecks: number }>(),
         env.DB.prepare(`SELECT ${bucketExpression} AS bucket,
             COUNT(*) AS totalChecks,
@@ -796,7 +797,7 @@ export default {
           GROUP BY bucket
           ORDER BY bucket ASC
           LIMIT 31`)
-          .bind(organizationId, from)
+          .bind(organizationId, from, to)
           .all<{
             bucket: string;
             totalChecks: number;
@@ -809,7 +810,7 @@ export default {
           WHERE ${checkFilter} AND c.response_time_ms IS NOT NULL AND c.response_time_ms >= 0
           ORDER BY julianday(c.checked_at) DESC
           LIMIT 5001`)
-          .bind(organizationId, from)
+          .bind(organizationId, from, to)
           .all<{ responseTimeMs: number }>(),
         env.DB.prepare(`SELECT m.id AS monitorId, m.name AS monitorName, COUNT(*) AS failureCount
           FROM monitor_checks c JOIN monitors m ON m.id = c.monitor_id
@@ -817,21 +818,21 @@ export default {
           GROUP BY m.id, m.name
           ORDER BY failureCount DESC, m.name COLLATE NOCASE ASC
           LIMIT 5`)
-          .bind(organizationId, from)
+          .bind(organizationId, from, to)
           .all<{ monitorId: string; monitorName: string; failureCount: number }>(),
         env.DB.prepare(`SELECT
-            COALESCE(SUM(CASE WHEN i.resolved_at IS NULL THEN 1 ELSE 0 END), 0) AS openIncidents,
-            COALESCE(SUM(CASE WHEN julianday(i.started_at) >= julianday(?) THEN 1 ELSE 0 END), 0) AS incidentsStarted
+            COALESCE(SUM(CASE WHEN i.resolved_at IS NULL AND julianday(i.started_at) <= julianday(?) THEN 1 ELSE 0 END), 0) AS openIncidents,
+            COALESCE(SUM(CASE WHEN julianday(i.started_at) >= julianday(?) AND julianday(i.started_at) <= julianday(?) THEN 1 ELSE 0 END), 0) AS incidentsStarted
           FROM incidents i JOIN monitors m ON m.id = i.monitor_id
           WHERE m.organization_id = ?`)
-          .bind(from, organizationId)
+          .bind(to, from, to, organizationId)
           .first<{ openIncidents: number; incidentsStarted: number }>(),
         env.DB.prepare(`SELECT c.checked_at AS lastCheckAt
           FROM monitor_checks c JOIN monitors m ON m.id = c.monitor_id
           WHERE ${checkFilter}
           ORDER BY julianday(c.checked_at) DESC
           LIMIT 1`)
-          .bind(organizationId, from)
+          .bind(organizationId, from, to)
           .first<{ lastCheckAt: string }>()
       ]);
 
@@ -856,7 +857,7 @@ export default {
       return json({
         range,
         from,
-        to: now.toISOString(),
+        to,
         source: "persisted_checks",
         observedOnly: true,
         executionEnabled: false,
