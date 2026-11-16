@@ -1149,4 +1149,52 @@ describe("Workspace analytics", () => {
     expect(payload.series[0].bucket).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:00:00Z$/);
     expect(payload.series[0].totalChecks).toBe(1);
   });
+  it("excludes future-dated checks and incidents from the selected analytics window", async () => {
+    const owner = await createIdentity("owner");
+    const monitorId = await createMonitor(owner.organizationId);
+    const currentCheckAt = new Date(Date.now() - 60 * 1000).toISOString();
+    const futureAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO monitor_checks (id, monitor_id, checked_at, is_up, status_code, response_time_ms) VALUES (?, ?, ?, 1, 200, 25)")
+        .bind(crypto.randomUUID(), monitorId, currentCheckAt),
+      env.DB.prepare("INSERT INTO monitor_checks (id, monitor_id, checked_at, is_up, status_code, response_time_ms, error_code) VALUES (?, ?, ?, 0, 503, 999, 'HTTP_STATUS_MISMATCH')")
+        .bind(crypto.randomUUID(), monitorId, futureAt),
+      env.DB.prepare("INSERT INTO incidents (id, monitor_id, started_at, status, summary) VALUES (?, ?, ?, 'investigating', ?)")
+        .bind(crypto.randomUUID(), monitorId, futureAt, "Future-dated incident")
+    ]);
+
+    const response = await api("/v1/analytics?organizationId=" + owner.organizationId + "&range=7d", {
+      token: owner.sessionToken
+    });
+    expect(response.status).toBe(200);
+    const payload = await response.json() as {
+      summary: {
+        totalChecks: number;
+        upChecks: number;
+        downChecks: number;
+        availabilityPercent: number | null;
+        openIncidents: number;
+        incidentsStarted: number;
+      };
+      latency: { sampleCount: number; p50Ms: number | null; p95Ms: number | null };
+      series: Array<{ totalChecks: number; upChecks: number; downChecks: number }>;
+      topFailures: unknown[];
+      lastCheckAt: string | null;
+    };
+
+    expect(payload.summary).toMatchObject({
+      totalChecks: 1,
+      upChecks: 1,
+      downChecks: 0,
+      availabilityPercent: 100,
+      openIncidents: 0,
+      incidentsStarted: 0
+    });
+    expect(payload.latency).toMatchObject({ sampleCount: 1, p50Ms: 25, p95Ms: 25 });
+    expect(payload.series).toHaveLength(1);
+    expect(payload.series[0]).toMatchObject({ totalChecks: 1, upChecks: 1, downChecks: 0 });
+    expect(payload.topFailures).toEqual([]);
+    expect(payload.lastCheckAt).toBe(currentCheckAt);
+  });
 });
