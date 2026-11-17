@@ -46,10 +46,13 @@ describe("Webhook signing", () => {
     const secret = createWebhookSecret();
     const body = "{\"ok\":true}";
     const valid = await signWebhookPayload(secret, body, 1_800_000_000);
+    const originalSignature = valid.slice(valid.indexOf("v1=") + 3);
+    const tamperedLastHex = originalSignature.endsWith("0") ? "1" : "0";
+    const tampered = valid.slice(0, -1) + tamperedLastHex;
 
     await expect(verifyWebhookSignature(secret, body, "t=1,v1=abc", 1_800_000_000)).resolves.toBe(false);
     await expect(verifyWebhookSignature(secret, body, valid + ",v1=" + "0".repeat(64), 1_800_000_000)).resolves.toBe(false);
-    await expect(verifyWebhookSignature(secret, body, valid.replace(/[a-f0-9]$/, "0"), 1_800_000_000)).resolves.toBe(false);
+    await expect(verifyWebhookSignature(secret, body, tampered, 1_800_000_000)).resolves.toBe(false);
     await expect(verifyWebhookSignature("wrong-secret", body, valid, 1_800_000_000)).resolves.toBe(false);
   });
 
