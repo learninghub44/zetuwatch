@@ -16,7 +16,8 @@
     "test": "vitest run",
     "test:integration": "vitest run tests/*.integration.test.ts",
     "test:watch": "vitest",
-    "check:inline-js": "node scripts/check-inline-js.mjs"
+    "check:inline-js": "node scripts/check-inline-js.mjs",
+    "test:probe-agent": "node --test apps/probe-agent/test/*.test.mjs packages/probe-client/test/*.test.mjs"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "1.6.0",
