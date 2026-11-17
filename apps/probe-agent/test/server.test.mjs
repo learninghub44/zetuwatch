@@ -77,7 +77,7 @@ test("exposes a minimal health response without revealing configuration", async 
   const server = createServer((request, response) => { void handler(request, response); });
   const port = await listen(server);
   try {
-    const response = await send(port, { methoi: "GET", path: "/healthz" });
+    const response = await send(port, { method: "GET", path: "/healthz" });
     assert.equal(response.status, 200);
     assert.deepEqual(await response.json(), { status: "ok" });
   } finally { await close(server); }
