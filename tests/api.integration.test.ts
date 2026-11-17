@@ -995,3 +995,139 @@ describe("Status pages", () => {
     expect(response.status).toBe(403);
   });
 });
+
+describe("Workspace data exports", () => {
+  it("exports only persisted checks in the selected time window and records an audit event", async () => {
+    const owner = await createIdentity("owner");
+    const monitorId = await createMonitor(owner.organizationId);
+    const currentAt = new Date(Date.now() - 60 * 1000).toISOString();
+    const oldAt = new Date(Date.now() - 40 * 24 * 60 * 60 * 1000).toISOString();
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO monitor_checks (id, monitor_id, checked_at, is_up, status_code, response_time_ms, error_code) VALUES (?, ?, ?, 1, 200, 42, NULL)")
+        .bind(crypto.randomUUID(), monitorId, currentAt),
+      env.DB.prepare("INSERT INTO monitor_checks (id, monitor_id, checked_at, is_up, status_code, response_time_ms, error_code) VALUES (?, ?, ?, 0, 503, 900, 'HTTP_STATUS_MISMATCH')")
+        .bind(crypto.randomUUID(), monitorId, oldAt)
+    ]);
+
+    const response = await api("/v1/exports?organizationId=" + owner.organizationId + "&type=checks&range=7d", {
+      token: owner.sessionToken
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("text/csv");
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("content-disposition")).toContain("zetuwatch-checks-7d.csv");
+    expect(response.headers.get("x-zetuwatch-row-limit")).toBe("5000");
+    expect(response.headers.get("x-zetuwatch-may-be-truncated")).toBe("false");
+
+    const csv = await response.text();
+    expect(csv.startsWith("\uFEFF\"checked_at\",")).toBe(true);
+    expect(csv).toContain("\"up\"");
+    expect(csv).toContain("\"https://status.example.com/health\"");
+    expect(csv).not.toContain("\"HTTP_STATUS_MISMATCH\"");
+
+    const audit = await env.DB.prepare(
+      "SELECT action, resource_type, resource_id, metadata_json FROM audit_logs WHERE organization_id = ? AND action = 'data.exported' ORDER BY created_at DESC LIMIT 1"
+    ).bind(owner.organizationId).first<{ action: string; resource_type: string; resource_id: string; metadata_json: string }>();
+    expect(audit?.action).toBe("data.exported");
+    expect(audit?.resource_type).toBe("export");
+    expect(audit?.resource_id).toBe("checks");
+    expect(JSON.parse(audit?.metadata_json || "{}")).toMatchObject({ range: "7d", rowCount: 1, mayBeTruncated: false });
+  });
+
+  it("allows workspace admins but denies members and viewers", async () => {
+    const admin = await createIdentity("admin");
+    const member = await createIdentity("member");
+    const viewer = await createIdentity("viewer");
+
+    const adminExport = await api("/v1/exports?organizationId=" + admin.organizationId + "&type=monitors", {
+      token: admin.sessionToken
+    });
+    const memberExport = await api("/v1/exports?organizationId=" + member.organizationId, {
+      token: member.sessionToken
+    });
+    const viewerExport = await api("/v1/exports?organizationId=" + viewer.organizationId, {
+      token: viewer.sessionToken
+    });
+
+    expect(adminExport.status).toBe(200);
+    expect(memberExport.status).toBe(403);
+    expect(viewerExport.status).toBe(403);
+  });
+
+  it("does not export another tenant's records", async () => {
+    const owner = await createIdentity("owner");
+    const foreignOrganizationId = await createForeignOrganization();
+    const response = await api("/v1/exports?organizationId=" + foreignOrganizationId + "&type=checks", {
+      token: owner.sessionToken
+    });
+    expect(response.status).toBe(403);
+    expect(response.headers.get("content-type")).toContain("application/json");
+  });
+
+  it("neutralizes spreadsheet formulas and correctly quotes untrusted CSV cells", async () => {
+    const owner = await createIdentity("owner");
+    const monitorId = await createMonitor(owner.organizationId);
+    const formulaName = '=HYPERLINK("https://evil.test","click")';
+    await env.DB.prepare("UPDATE monitors SET name = ? WHERE id = ?").bind(formulaName, monitorId).run();
+    await env.DB.prepare(
+      "INSERT INTO monitor_checks (id, monitor_id, checked_at, is_up, status_code, response_time_ms) VALUES (?, ?, ?, 1, 200, 10)"
+    ).bind(crypto.randomUUID(), monitorId, new Date().toISOString()).run();
+
+    const response = await api("/v1/exports?organizationId=" + owner.organizationId + "&type=checks", {
+      token: owner.sessionToken
+    });
+    expect(response.status).toBe(200);
+    const csv = await response.text();
+    expect(csv).toContain("'=HYPERLINK(");
+    expect(csv).toContain('""https://evil.test""');
+    expect(csv).toContain('""click""');
+  });
+
+  it("exports unresolved incidents that overlap the selected period", async () => {
+    const owner = await createIdentity("owner");
+    const monitorId = await createMonitor(owner.organizationId);
+    const oldUnresolved = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString();
+    await env.DB.prepare(
+      "INSERT INTO incidents (id, monitor_id, started_at, status, summary) VALUES (?, ?, ?, 'investigating', ?)"
+    ).bind(crypto.randomUUID(), monitorId, oldUnresolved, "Still unresolved").run();
+
+    const response = await api("/v1/exports?organizationId=" + owner.organizationId + "&type=incidents&range=7d", {
+      token: owner.sessionToken
+    });
+    expect(response.status).toBe(200);
+    const csv = await response.text();
+    expect(csv).toContain('"Still unresolved"');
+    expect(csv).toContain('"investigating"');
+  });
+
+  it("exports monitor configuration including soft-deleted records", async () => {
+    const owner = await createIdentity("owner");
+    const monitorId = await createMonitor(owner.organizationId);
+    await env.DB.prepare("UPDATE monitors SET deleted_at = ?, is_enabled = 0 WHERE id = ?")
+      .bind(new Date().toISOString(), monitorId).run();
+
+    const response = await api("/v1/exports?organizationId=" + owner.organizationId + "&type=monitors", {
+      token: owner.sessionToken
+    });
+    expect(response.status).toBe(200);
+    const csv = await response.text();
+    expect(csv).toContain('"target_url"');
+    expect(csv).toContain('"https://status.example.com/health"');
+    expect(csv).toContain('"paused"');
+    expect(csv).toContain('"deleted_at"');
+  });
+
+  it("rejects invalid export parameters and read-only API keys", async () => {
+    const owner = await createIdentity("owner");
+    const invalidType = await api("/v1/exports?organizationId=" + owner.organizationId + "&type=users", {
+      token: owner.sessionToken
+    });
+    const invalidRange = await api("/v1/exports?organizationId=" + owner.organizationId + "&range=all", {
+      token: owner.sessionToken
+    });
+    const key = await createApiKeyFixture(owner);
+    const keyExport = await api("/v1/exports?organizationId=" + owner.organizationId, { apiKey: key.secret });
+
+    expect([invalidType.status, invalidRange.status, keyExport.status]).toEqual([400, 400, 403]);
+  });
+});
