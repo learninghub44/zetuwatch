@@ -1019,8 +1019,11 @@ describe("Workspace data exports", () => {
     expect(response.headers.get("x-zetuwatch-row-limit")).toBe("5000");
     expect(response.headers.get("x-zetuwatch-may-be-truncated")).toBe("false");
 
-    const csv = await response.text();
-    expect(csv.startsWith("\uFEFF\"checked_at\",")).toBe(true);
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    expect(Array.from(bytes.slice(0, 3))).toEqual([0xef, 0xbb, 0xbf]);
+    const csv = new TextDecoder().decode(bytes);
+    expect(csv.startsWith("\"checked_at\",")).toBe(true);
+    expect(csv).toContain("\r\n");
     expect(csv).toContain("\"up\"");
     expect(csv).toContain("\"https://status.example.com/health\"");
     expect(csv).not.toContain("\"HTTP_STATUS_MISMATCH\"");
