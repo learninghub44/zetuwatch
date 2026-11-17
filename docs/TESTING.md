@@ -114,3 +114,16 @@ The static `apps/web/status.html` renderer is included in the existing inline-sc
 
 
 The status-page implementation passed GitHub Actions run [#182](https://github.com/learninghub44/zetuwatch/actions/runs/43568666409): TypeScript, inline browser JavaScript syntax (five HTML files), SQLite migration validation (seven migrations) and the full Vitest suite (13 files, 129 tests). This does not replace browser E2E or accessibility testing.
+
+## Workspace data export coverage
+
+The Worker API integration suite now includes checks for:
+- persisted check export window filtering and audit records;
+- owner/admin access and member/viewer denial;
+- cross-tenant export denial;
+- spreadsheet formula neutralization and CSV quoting;
+- inclusion of unresolved incidents overlapping the selected period;
+- retained soft-deleted monitor configuration;
+- invalid export parameters and API-key denial.
+
+The new export tests are committed on `feat/workspace-data-exports`. Do not count them as passing until the corresponding GitHub Actions run or a clean local Worker/D1 test run succeeds.
