@@ -91,7 +91,7 @@ test("rejects methods, custom headers, and non-default ports", () => {
 
 test("detects redirect loops without making a repeated connection", async () => {
   let requests = 0;
-  const result = await runProbe({ targetUrl: "loop.example.com/", maxRedirects: 3 }, {
+  const result = await runProbe({ targetUrl: "https://loop.example.com/", maxRedirects: 3 }, {
     resolver: async () => [publicAddress],
     requester: async () => { requests += 1; return { statusCode: 302, location: "https://loop.example.com/" }; }
   });
