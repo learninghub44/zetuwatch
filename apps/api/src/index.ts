@@ -743,6 +743,101 @@ export default {
       return json({ monitor: { id: monitorId, organizationId, name, monitorType, targetUrl: target, method, expectedStatus, intervalSeconds, timeoutMs, state: "awaiting_first_check" }, executionEnabled: false }, 201);
     }
 
+    if (request.method === "GET" && url.pathname === "/v1/exports") {
+      const user = await currentUser(request, env);
+      if (!user) return json({ error: "UNAUTHENTICATED" }, 401);
+      if (user.authMethod === "api_key") return json({ error: "FORBIDDEN" }, 403);
+
+      const organizationId = cleanText(url.searchParams.get("organizationId"), 64);
+      const type = url.searchParams.get("type") || "checks";
+      const range = url.searchParams.get("range") || "7d";
+      const rangeSeconds: Record<string, number> = {
+        "24h": 24 * 60 * 60,
+        "7d": 7 * 24 * 60 * 60,
+        "30d": 30 * 24 * 60 * 60
+      };
+      if (!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(organizationId) ||
+          !["checks", "incidents", "monitors"].includes(type) ||
+          !Object.prototype.hasOwnProperty.call(rangeSeconds, range)) {
+        return json({ error: "INVALID_EXPORT_QUERY" }, 400);
+      }
+
+      const membership = await env.DB.prepare(
+        "SELECT role FROM organization_members WHERE organization_id = ? AND user_id = ?"
+      ).bind(organizationId, user.id).first<{ role: string }>();
+      if (!membership || !["owner", "admin"].includes(membership.role)) {
+        return json({ error: "FORBIDDEN" }, 403);
+      }
+      if (!(await rateLimit(request, env, "data-export", 10))) {
+        return json({ error: "RATE_LIMITED" }, 429);
+      }
+
+      const now = new Date();
+      const to = now.toISOString();
+      const from = new Date(now.getTime() - rangeSeconds[range] * 1000).toISOString();
+      const limit = type === "monitors" ? 1000 : 5000;
+      let columns: string[];
+      let result: { results: Array<Record<string, unknown>> };
+
+      if (type === "checks") {
+        columns = ["checked_at", "monitor_name", "target_url", "result", "status_code", "response_time_ms", "error_code"];
+        result = await env.DB.prepare(
+          "SELECT c.checked_at AS checked_at, m.name AS monitor_name, m.target_url AS target_url, " +
+          "CASE WHEN c.is_up = 1 THEN 'up' ELSE 'down' END AS result, " +
+          "c.status_code AS status_code, c.response_time_ms AS response_time_ms, c.error_code AS error_code " +
+          "FROM monitor_checks c JOIN monitors m ON m.id = c.monitor_id " +
+          "WHERE m.organization_id = ? AND julianday(c.checked_at) >= julianday(?) AND julianday(c.checked_at) <= julianday(?) " +
+          "ORDER BY julianday(c.checked_at) DESC LIMIT 5000"
+        ).bind(organizationId, from, to).all<Record<string, unknown>>();
+      } else if (type === "incidents") {
+        columns = ["started_at", "resolved_at", "monitor_name", "target_url", "status", "summary"];
+        result = await env.DB.prepare(
+          "SELECT i.started_at AS started_at, i.resolved_at AS resolved_at, m.name AS monitor_name, " +
+          "m.target_url AS target_url, i.status AS status, i.summary AS summary " +
+          "FROM incidents i JOIN monitors m ON m.id = i.monitor_id " +
+          "WHERE m.organization_id = ? AND julianday(i.started_at) <= julianday(?) " +
+          "AND (i.resolved_at IS NULL OR julianday(i.resolved_at) >= julianday(?)) " +
+          "ORDER BY julianday(i.started_at) DESC LIMIT 5000"
+        ).bind(organizationId, to, from).all<Record<string, unknown>>();
+      } else {
+        columns = ["name", "target_url", "monitor_type", "method", "expected_status", "interval_seconds", "timeout_ms", "state", "created_at", "updated_at", "deleted_at"];
+        result = await env.DB.prepare(
+          "SELECT name, target_url, monitor_type, method, expected_status, interval_seconds, timeout_ms, " +
+          "CASE WHEN is_enabled = 1 THEN 'enabled' ELSE 'paused' END AS state, " +
+          "created_at, updated_at, deleted_at FROM monitors WHERE organization_id = ? " +
+          "ORDER BY created_at DESC LIMIT 1000"
+        ).bind(organizationId).all<Record<string, unknown>>();
+      }
+
+      const encodeCell = (value: unknown): string => {
+        let text = value === null || value === undefined ? "" : String(value);
+        // Spreadsheet programs may evaluate cells beginning with formula characters.
+        if (/^[\\u0000-\\u0020]*[=+\\-@]/.test(text)) text = "'" + text;
+        return '"' + text.replace(/"/g, '""') + '"';
+      };
+      const lines = [columns.map(encodeCell).join(",")];
+      for (const row of result.results) lines.push(columns.map(column => encodeCell(row[column])).join(","));
+      const csv = "\\uFEFF" + lines.join("\\r\\n") + "\\r\\n";
+      const truncated = result.results.length >= limit;
+
+      await env.DB.prepare(
+        "INSERT INTO audit_logs (id, organization_id, actor_user_id, action, resource_type, resource_id, metadata_json) " +
+        "VALUES (?, ?, ?, 'data.exported', 'export', ?, ?)"
+      ).bind(id(), organizationId, user.id, type, JSON.stringify({ range, rowCount: result.results.length, mayBeTruncated: truncated })).run();
+
+      return new Response(csv, {
+        status: 200,
+        headers: {
+          "content-type": "text/csv; charset=utf-8",
+          "content-disposition": 'attachment; filename="zetuwatch-' + type + '-' + range + '.csv"',
+          "cache-control": "no-store",
+          "x-content-type-options": "nosniff",
+          "x-zetuwatch-row-limit": String(limit),
+          "x-zetuwatch-may-be-truncated": truncated ? "true" : "false"
+        }
+      });
+    }
+
     const monitorMatch = url.pathname.match(/^\/v1\/monitors\/([0-9a-f-]{36})(\/checks|\/pause|\/resume)?$/i);
     if (monitorMatch) {
       const user = await currentUser(request, env);
