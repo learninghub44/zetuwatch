@@ -812,12 +812,12 @@ export default {
       const encodeCell = (value: unknown): string => {
         let text = value === null || value === undefined ? "" : String(value);
         // Spreadsheet programs may evaluate cells beginning with formula characters.
-        if (/^[\\u0000-\\u0020]*[=+\\-@]/.test(text)) text = "'" + text;
+        if (/^[\u0000-\u0020]*[=+\-@]/.test(text)) text = "'" + text;
         return '"' + text.replace(/"/g, '""') + '"';
       };
       const lines = [columns.map(encodeCell).join(",")];
       for (const row of result.results) lines.push(columns.map(column => encodeCell(row[column])).join(","));
-      const csv = "\\uFEFF" + lines.join("\\r\\n") + "\\r\\n";
+      const csv = "\uFEFF" + lines.join("\r\n") + "\r\n";
       const truncated = result.results.length >= limit;
 
       await env.DB.prepare(
