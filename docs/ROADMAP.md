@@ -36,7 +36,7 @@ The product is built in vertical slices. A slice is complete only when UI, API, 
 - [ ] Incident timeline and customer-facing updates (tenant-scoped list/detail, role-protected status transitions, authored internal/public notes and responsive controls are implemented; public publishing, browser QA/accessibility and notification delivery remain)
 - [ ] Status-page builder and public status pages
 - [ ] Team invitations, roles and organization settings (initial member/invitation screen and API implemented; tenant-isolated member listing, concurrent invitation acceptance and owner-demotion protection are integration-tested, while complete settings, email delivery and browser QA remain)
-- [ ] Analytics, exports and maintenance windows
+- [ ] Analytics, exports and maintenance windows (owner/admin CSV exports for checks, incidents and monitor configuration are implemented on `feat/workspace-data-exports` with tenant scoping, hard row caps, formula-safe CSV and audit events; CI/browser acceptance remains pending. Analytics is in separate unmerged PR #2.)
 
 ## Phase 4 — revenue and integrations
 - [ ] Plan/usage enforcement and transparent upgrade UX
@@ -263,3 +263,14 @@ No Cloudflare resources were created and no deployment was attempted. This is fe
 - GitHub Actions [CI run #182](https://github.com/learninghub44/zetuwatch/actions/runs/43568666409) completed successfully on head commit `612533f31ca69f058e07211b40ed7c643949a974` after a regression fix for monitor-deletion trigger side effects. Verified: TypeScript typecheck, inline browser JavaScript syntax across five HTML files, SQLite validation (7 migrations, 16 previously required tables; status-page tables were exercised by the new D1 integration tests), and Vitest (13 files, 129 tests).
 - Browser E2E, responsive/keyboard/screen-reader acceptance, custom domains, subscriptions and public-page cache behavior remain future work. Status pages are implemented and CI-verified but not launch-complete.
 - Follow-up main commit `a3bcb10bd7033d0ef8a93dd0d09020d8dbb25d59` adds `status_pages` and `status_page_monitors` to the migration validator's required-table set (18 total). The post-merge main-branch CI result for that validator change has not yet been observed.
+
+## Workspace data export implementation update (2026-11-17)
+
+- Added owner/admin-only `GET /v1/exports` for checks, incidents and monitor configuration; read-only API keys are denied.
+- Check and incident rows are bounded by the selected inclusive UTC range. Unresolved incidents that overlap the range are retained, and monitor exports include soft-deleted configurations for data portability.
+- Check/incident exports are capped at 5,000 rows and monitor exports at 1,000 rows. Responses disclose the cap and whether the result may be truncated, use UTF-8 CSV with CRLF, quote/escape cells and neutralize spreadsheet formula prefixes.
+- Successful exports create an audit event without storing exported values. Responses are no-store/nosniff and rate-limited to 10 requests per source IP per 15 minutes.
+- Added a responsive workspace Data export panel with role-aware visibility and browser download handling.
+- Added seven D1-backed API integration tests for date filtering, role policy, tenant isolation, formula injection, incident overlap, soft-deleted monitor inclusion, invalid parameters and API-key denial.
+- No schema migration or dependency was added. The branch's new tests and browser code have not yet received a GitHub Actions run. Do not mark exports complete until CI and browser acceptance pass.
+- Cloudflare's D1 query result size is capped at 50 MB from 2026-11-04; export queries select explicit columns and impose SQL row limits to stay bounded. See [D1 query result size limit](https://developers.cloudflare.com/changelog/post/2026-10-30-query-result-size-limit/).
