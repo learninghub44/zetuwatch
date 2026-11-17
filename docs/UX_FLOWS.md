@@ -90,3 +90,12 @@ After save: take user to monitor detail with live/pending state; do not fabricat
 - Never use color alone to communicate health; include text and iconography.
 - Avoid empty dashboard cards; guide the user to the next useful action.
 - Keep forms short, group related fields, preserve input on errors and show validation beside the field.
+
+## Workspace data export
+
+- Add a Data export destination under workspace management for owners and admins.
+- Offer separate CSV downloads for check history, incidents and monitor configuration.
+- Check and incident exports offer 24-hour, 7-day and 30-day windows; monitor configuration exports include retained soft-deleted records.
+- Explain the hard row caps before download and warn when an export reaches its cap.
+- Keep the download action explicit and report errors without clearing the selected export type or period.
+- Do not expose export controls to members/viewers; the API remains authoritative.
