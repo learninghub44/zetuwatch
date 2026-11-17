@@ -16,7 +16,8 @@ async function send(port, options = {}) {
   return fetch(`http://127.0.0.1:${port}${options.path ?? "/v1/probe"}`, {
     method: options.method ?? "POST",
     headers: {
-      "content-type": "application/json",
+      "content-type": options.contentType ?? "application/json",
+      ...(options.contentEncoding ? { "content-encoding": options.contentEncoding } : {}),
       "x-zw-timestamp": timestamp,
       "x-zw-nonce": nonce,
       "x-zw-signature": signature
@@ -81,4 +82,43 @@ test("exposes a minimal health response without revealing configuration", async 
     assert.equal(response.status, 200);
     assert.deepEqual(await response.json(), { status: "ok" });
   } finally { await close(server); }
+});
+
+
+test("rejects non-JSON and compressed request bodies", async () => {
+  const handler = createProbeHandler({ secret, probe: async () => { throw new Error("must not run"); } });
+  const server = createServer((request, response) => { void handler(request, response); });
+  const port = await listen(server);
+  try {
+    assert.equal((await send(port, { contentType: "text/plain", nonce: "3123456789abcdef3123456789abcdef" })).status, 415);
+    assert.equal((await send(port, { contentEncoding: "gzip", nonce: "4123456789abcdef4123456789abcdef" })).status, 415);
+  } finally { await close(server); }
+});
+
+test("bounds concurrent probe execution", async () => {
+  let started = 0;
+  let signalStarted;
+  const allStarted = new Promise(resolve => { signalStarted = resolve; });
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  const handler = createProbeHandler({ secret, probe: async () => {
+    started += 1;
+    if (started === 20) signalStarted();
+    await gate;
+    return { isUp: true, statusCode: 200, responseTimeMs: 1, errorCode: null, redirectCount: 0 };
+  } });
+  const server = createServer((request, response) => { void handler(request, response); });
+  const port = await listen(server);
+  try {
+    const pending = Array.from({ length: 20 }, (_, index) => send(port, { nonce: ("concurrency-" + index).padEnd(32, "x") }));
+    await allStarted;
+    const overflow = await send(port, { nonce: "concurrency-overflow-nonce-0000" });
+    assert.equal(overflow.status, 429);
+    release();
+    const responses = await Promise.all(pending);
+    assert.equal(responses.every(response => response.status === 200), true);
+  } finally {
+    release?.();
+    await close(server);
+  }
 });
