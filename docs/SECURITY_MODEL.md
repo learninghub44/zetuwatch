@@ -88,3 +88,10 @@ The URL policy, fail-closed HTTP probe, pure IP classifier and bounded DNS resol
 - The public renderer uses `textContent`/DOM nodes for all database-backed strings. It does not interpolate page content into HTML or execute scripts from stored values.
 
 This is a public information surface, not a live service-health assertion. Do not remove the explicit unknown-state notice until the secure outbound runner and real measurements are enabled and independently verified.
+
+## Workspace data exports
+
+- Exports require a verified browser session and owner/admin membership; read-only API keys are denied.
+- Every query is scoped by the requested organization and uses bound parameters. Check and incident data is bounded by an explicit UTC time window; all result sets have hard SQL limits (5,000 checks/incidents or 1,000 monitor configurations).
+- CSV values are quoted, double-quote escaped and neutralized when their first non-control/space character is `=`, `+`, `-` or `@`. Responses are UTF-8 CSV with `no-store` and `nosniff` headers.
+- Successful exports are audited without storing exported data in audit metadata. The endpoint is rate-limited to 10 requests per source IP per 15 minutes.
