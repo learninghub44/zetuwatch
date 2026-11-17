@@ -1,0 +1,84 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { createServer } from "node:http";
+import { createProbeHandler, signProbeRequest } from "../src/server.mjs";
+
+const secret = "test-only-shared-secret-with-at-least-32-bytes";
+const job = { targetUrl: "https://monitor.example.com/health", method: "GET", expectedStatus: 200, timeoutMs: 2_000, maxRedirects: 0 };
+function listen(server) { return new Promise(resolve => server.listen(0, "127.0.0.1", () => resolve(server.address().port))); }
+function close(server) { return new Promise(resolve => server.close(resolve)); }
+
+async function send(port, options = {}) {
+  const body = options.body ?? JSON.stringify(job);
+  const timestamp = options.timestamp ?? String(Math.floor(Date.now() / 1000));
+  const nonce = options.nonce ?? "0123456789abcdef0123456789abcdef";
+  const signature = options.signature ?? signProbeRequest(secret, timestamp, nonce, body);
+  return fetch(`http://127.0.0.1:${port}${options.path ?? "/v1/probe"}`, {
+    method: options.method ?? "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-zw-timestamp": timestamp,
+      "x-zw-nonce": nonce,
+      "x-zw-signature": signature
+    },
+    body: options.method === "GET" ? undefined : body
+  });
+}
+
+test("requires a sufficiently strong shared secret", () => {
+  assert.throws(() => createProbeHandler({ secret: "short" }), /PROBE_SHARED_SECRET_REQUIRED/);
+});
+
+test("accepts a signed bounded job and returns only the normalized result", async () => {
+  let called = 0;
+  const handler = createProbeHandler({ secret, probe: async received => {
+    called += 1;
+    assert.deepEqual(received, job);
+    return { isUp: true, statusCode: 200, responseTimeMs: 12, errorCode: null, redirectCount: 0 };
+  } });
+  const server = createServer((request, response) => { void handler(request, response); });
+  const port = await listen(server);
+  try {
+    const response = await send(port);
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { result: { isUp: true, statusCode: 200, responseTimeMs: 12, errorCode: null, redirectCount: 0 } });
+    assert.equal(called, 1);
+  } finally { await close(server); }
+});
+
+test("rejects replayed nonces and tampered bodies", async () => {
+  const handler = createProbeHandler({ secret, probe: async () => ({ isUp: true, statusCode: 200, responseTimeMs: 1, errorCode: null, redirectCount: 0 }) });
+  const server = createServer((request, response) => { void handler(request, response); });
+  const port = await listen(server);
+  try {
+    const nonce = "abcdef0123456789abcdef0123456789";
+    assert.equal((await send(port, { nonce })).status, 200);
+    assert.equal((await send(port, { nonce })).status, 409);
+    const body = JSON.stringify(job);
+    const valid = signProbeRequest(secret, String(Math.floor(Date.now() / 1000)), "fedcba9876543210fedcba9876543210", body);
+    assert.equal((await send(port, { body: body + " ", nonce: "fedcba9876543210fedcba9876543210", signature: valid })).status, 401);
+  } finally { await close(server); }
+});
+
+test("rejects stale timestamps, invalid jobs, and oversized bodies", async () => {
+  const handler = createProbeHandler({ secret, probe: async () => { throw new Error("must not run"); } });
+  const server = createServer((request, response) => { void handler(request, response); });
+  const port = await listen(server);
+  try {
+    const stale = String(Math.floor(Date.now() / 1000) - 600);
+    assert.equal((await send(port, { timestamp: stale })).status, 401);
+    assert.equal((await send(port, { body: JSON.stringify({ ...job, headers: { authorization: "x" } }), nonce: "1123456789abcdef1123456789abcdef" })).status, 400);
+    assert.equal((await send(port, { body: "x".repeat(17 * 1024), nonce: "2123456789abcdef2123456789abcdef" })).status, 413);
+  } finally { await close(server); }
+});
+
+test("exposes a minimal health response without revealing configuration", async () => {
+  const handler = createProbeHandler({ secret });
+  const server = createServer((request, response) => { void handler(request, response); });
+  const port = await listen(server);
+  try {
+    const response = await send(port, { methoi: "GET", path: "/healthz" });
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { status: "ok" });
+  } finally { await close(server); }
+});
