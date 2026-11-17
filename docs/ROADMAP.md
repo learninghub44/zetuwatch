@@ -263,3 +263,13 @@ No Cloudflare resources were created and no deployment was attempted. This is fe
 - GitHub Actions [CI run #182](https://github.com/learninghub44/zetuwatch/actions/runs/43568666409) completed successfully on head commit `612533f31ca69f058e07211b40ed7c643949a974` after a regression fix for monitor-deletion trigger side effects. Verified: TypeScript typecheck, inline browser JavaScript syntax across five HTML files, SQLite validation (7 migrations, 16 previously required tables; status-page tables were exercised by the new D1 integration tests), and Vitest (13 files, 129 tests).
 - Browser E2E, responsive/keyboard/screen-reader acceptance, custom domains, subscriptions and public-page cache behavior remain future work. Status pages are implemented and CI-verified but not launch-complete.
 - Follow-up main commit `a3bcb10bd7033d0ef8a93dd0d09020d8dbb25d59` adds `status_pages` and `status_page_monitors` to the migration validator's required-table set (18 total). The post-merge main-branch CI result for that validator change has not yet been observed.
+
+
+## Webhook security primitives (2026-11-17)
+
+- Added dependency-free HMAC-SHA256 signing and verification helpers using the Cloudflare Workers Web Crypto API. Secrets are 256-bit random values with a `whsec_` prefix; signatures cover the exact raw UTF-8 body plus a Unix timestamp, use a strict single-value header, and reject stale/future timestamps and payloads above 256 KiB.
+- Added a bounded retry policy: network failures and HTTP 408/425/429/5xx are retryable; other 3xx/4xx responses are permanent. Backoff starts at 30 seconds with 0.5x–1.5x jitter, is capped at six hours, and stops after ten attempts.
+- Added unit tests for secret generation, signature verification/tampering/replay-window rejection, oversized payloads, retryable statuses, jitter bounds and exhaustion.
+- These are cryptographic and policy primitives only. No webhook endpoint API/UI, encrypted secret storage/rotation, event outbox, delivery dispatcher/logs or safe destination transport exists yet. Do not send requests to customer-configured webhook URLs. The webhook launch gate remains open pending SSRF-safe egress and end-to-end delivery tests.
+- Cloudflare's official Web Crypto documentation confirms `crypto.subtle` support for HMAC and signing/verification: https://developers.cloudflare.com/workers/runtime-apis/web-crypto/
+- CI has not yet been run for this feature branch in this execution environment; the test cases are committed but are not counted as passing until a GitHub Actions run verifies them.
