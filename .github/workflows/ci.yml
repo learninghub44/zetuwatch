@@ -2,9 +2,10 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, "feat/**"]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -37,3 +38,5 @@ jobs:
         run: python scripts/check-migrations.py
       - name: Unit tests
         run: npm test
+      - name: Probe agent security tests
+        run: npm run test:probe-agent
