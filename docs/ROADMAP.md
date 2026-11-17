@@ -9,7 +9,7 @@ The product is built in vertical slices. A slice is complete only when UI, API, 
 - [x] Conservative HTTP probe foundation
 - [x] Product scope and user journey specification
 - [x] CI typecheck workflow added and verified in GitHub Actions
-- [ ] Unit and integration test suite (115 tests across 13 files passed CI in run #175 on commit `a6cac79dcd3ccc2865629d93829d6e5cb0a782e8`; payment lifecycle coverage, browser E2E and provider tests remain)
+- [ ] Unit and integration test suite (129 tests across 13 files passed CI in run #182 on commit `612533f31ca69f058e07211b40ed7c643949a974`; analytics integration coverage is being added in the current branch. Payment lifecycle, browser E2E and provider tests remain)
 - [x] Direct development-tool versions checked against current package releases and pinned
 - [ ] Lockfile generation and clean-install verification
 
@@ -36,7 +36,7 @@ The product is built in vertical slices. A slice is complete only when UI, API, 
 - [ ] Incident timeline and customer-facing updates (tenant-scoped list/detail, role-protected status transitions, authored internal/public notes and responsive controls are implemented; public publishing, browser QA/accessibility and notification delivery remain)
 - [ ] Status-page builder and public status pages
 - [ ] Team invitations, roles and organization settings (initial member/invitation screen and API implemented; tenant-isolated member listing, concurrent invitation acceptance and owner-demotion protection are integration-tested, while complete settings, email delivery and browser QA remain)
-- [ ] Analytics, exports and maintenance windows
+- [ ] Analytics, exports and maintenance windows (tenant-scoped observed-check analytics API and responsive dashboard implemented for 24h/7d/30d; availability, p50/p95 latency, check trends and top failures use persisted rows only. Browser acceptance and live measurements remain; exports and maintenance windows are not implemented.)
 
 ## Phase 4 — revenue and integrations
 - [ ] Plan/usage enforcement and transparent upgrade UX
@@ -263,3 +263,13 @@ No Cloudflare resources were created and no deployment was attempted. This is fe
 - GitHub Actions [CI run #182](https://github.com/learninghub44/zetuwatch/actions/runs/43568666409) completed successfully on head commit `612533f31ca69f058e07211b40ed7c643949a974` after a regression fix for monitor-deletion trigger side effects. Verified: TypeScript typecheck, inline browser JavaScript syntax across five HTML files, SQLite validation (7 migrations, 16 previously required tables; status-page tables were exercised by the new D1 integration tests), and Vitest (13 files, 129 tests).
 - Browser E2E, responsive/keyboard/screen-reader acceptance, custom domains, subscriptions and public-page cache behavior remain future work. Status pages are implemented and CI-verified but not launch-complete.
 - Follow-up main commit `a3bcb10bd7033d0ef8a93dd0d09020d8dbb25d59` adds `status_pages` and `status_page_monitors` to the migration validator's required-table set (18 total). The post-merge main-branch CI result for that validator change has not yet been observed.
+
+
+## Observed analytics implementation update (2026-11-15)
+
+- Added `GET /v1/analytics` with mandatory organization membership and read-only API-key workspace scoping.
+- The endpoint aggregates persisted check rows only, with selectable 24-hour/hourly, 7-day/daily and 30-day/daily buckets, observed availability, open/started incident counts, top failure counts and p50/p95 latency from a bounded 5,000-row sample.
+- Added a responsive Analytics section to the customer workspace with range selection, observed metrics, success/failure bars, top failures and explicit no-data states. It does not imply probes are running.
+- Added D1-backed API tests for persisted aggregation, latency percentiles, empty data, tenant/API-key isolation, query validation, hourly grouping and exclusion of future-dated check/incident rows. All check and incident-start aggregates are bounded to the selected inclusive UTC window. CI verification is pending.
+- No migration, new dependency, external resource or deployment was required. Scheduled probes remain disabled; analytics will remain empty until genuine checks are persisted.
+- An independent SQLite query sanity check passed for the upper-bound regression. It is not a substitute for the pending Worker/D1 CI run.

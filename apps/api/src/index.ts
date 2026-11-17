@@ -743,6 +743,158 @@ export default {
       return json({ monitor: { id: monitorId, organizationId, name, monitorType, targetUrl: target, method, expectedStatus, intervalSeconds, timeoutMs, state: "awaiting_first_check" }, executionEnabled: false }, 201);
     }
 
+
+    // Workspace analytics are derived only from persisted check and incident rows.
+    // They are sample-based observations, not an SLA or a claim that probes are active.
+    if (request.method === "GET" && url.pathname === "/v1/analytics") {
+      const user = await currentUser(request, env);
+      if (!user) return json({ error: "UNAUTHENTICATED" }, 401);
+      const organizationId = (url.searchParams.get("organizationId") || "").trim();
+      const range = url.searchParams.get("range") || "7d";
+      const rangeSeconds: Record<string, number> = {
+        "24h": 24 * 60 * 60,
+        "7d": 7 * 24 * 60 * 60,
+        "30d": 30 * 24 * 60 * 60
+      };
+      if (!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(organizationId) || !Object.prototype.hasOwnProperty.call(rangeSeconds, range)) {
+        return json({ error: "INVALID_ANALYTICS_QUERY" }, 400);
+      }
+      if (!apiKeyAllows(user, organizationId, "read")) return json({ error: "FORBIDDEN" }, 403);
+      const membership = await env.DB.prepare(
+        "SELECT role FROM organization_members WHERE organization_id = ? AND user_id = ?"
+      ).bind(organizationId, user.id).first<{ role: string }>();
+      if (!membership) return json({ error: "FORBIDDEN" }, 403);
+      if (!(await rateLimit(request, env, "workspace-analytics", 120))) {
+        return json({ error: "RATE_LIMITED" }, 429);
+      }
+
+      const now = new Date();
+      const to = now.toISOString();
+      const from = new Date(now.getTime() - rangeSeconds[range] * 1000).toISOString();
+      const bucketExpression = range === "24h"
+        ? "strftime('%Y-%m-%dT%H:00:00Z', c.checked_at)"
+        : "date(c.checked_at)";
+      const checkFilter = "m.organization_id = ? AND julianday(c.checked_at) >= julianday(?) AND julianday(c.checked_at) <= julianday(?)";
+
+      const [monitorCount, totals, buckets, latencyRows, failures, incidentStats, lastCheck] = await Promise.all([
+        env.DB.prepare(
+          "SELECT COUNT(*) AS count FROM monitors WHERE organization_id = ? AND deleted_at IS NULL"
+        ).bind(organizationId).first<{ count: number }>(),
+        env.DB.prepare(`SELECT COUNT(*) AS totalChecks,
+            COALESCE(SUM(CASE WHEN c.is_up = 1 THEN 1 ELSE 0 END), 0) AS upChecks,
+            COALESCE(SUM(CASE WHEN c.is_up = 0 THEN 1 ELSE 0 END), 0) AS downChecks
+          FROM monitor_checks c JOIN monitors m ON m.id = c.monitor_id
+          WHERE ${checkFilter}`)
+          .bind(organizationId, from, to)
+          .first<{ totalChecks: number; upChecks: number; downChecks: number }>(),
+        env.DB.prepare(`SELECT ${bucketExpression} AS bucket,
+            COUNT(*) AS totalChecks,
+            COALESCE(SUM(CASE WHEN c.is_up = 1 THEN 1 ELSE 0 END), 0) AS upChecks,
+            COALESCE(SUM(CASE WHEN c.is_up = 0 THEN 1 ELSE 0 END), 0) AS downChecks,
+            ROUND(AVG(c.response_time_ms), 1) AS avgLatencyMs
+          FROM monitor_checks c JOIN monitors m ON m.id = c.monitor_id
+          WHERE ${checkFilter}
+          GROUP BY bucket
+          ORDER BY bucket ASC
+          LIMIT 31`)
+          .bind(organizationId, from, to)
+          .all<{
+            bucket: string;
+            totalChecks: number;
+            upChecks: number;
+            downChecks: number;
+            avgLatencyMs: number | null;
+          }>(),
+        env.DB.prepare(`SELECT c.response_time_ms AS responseTimeMs
+          FROM monitor_checks c JOIN monitors m ON m.id = c.monitor_id
+          WHERE ${checkFilter} AND c.response_time_ms IS NOT NULL AND c.response_time_ms >= 0
+          ORDER BY julianday(c.checked_at) DESC
+          LIMIT 5001`)
+          .bind(organizationId, from, to)
+          .all<{ responseTimeMs: number }>(),
+        env.DB.prepare(`SELECT m.id AS monitorId, m.name AS monitorName, COUNT(*) AS failureCount
+          FROM monitor_checks c JOIN monitors m ON m.id = c.monitor_id
+          WHERE ${checkFilter} AND c.is_up = 0
+          GROUP BY m.id, m.name
+          ORDER BY failureCount DESC, m.name COLLATE NOCASE ASC
+          LIMIT 5`)
+          .bind(organizationId, from, to)
+          .all<{ monitorId: string; monitorName: string; failureCount: number }>(),
+        env.DB.prepare(`SELECT
+            COALESCE(SUM(CASE WHEN i.resolved_at IS NULL AND julianday(i.started_at) <= julianday(?) THEN 1 ELSE 0 END), 0) AS openIncidents,
+            COALESCE(SUM(CASE WHEN julianday(i.started_at) >= julianday(?) AND julianday(i.started_at) <= julianday(?) THEN 1 ELSE 0 END), 0) AS incidentsStarted
+          FROM incidents i JOIN monitors m ON m.id = i.monitor_id
+          WHERE m.organization_id = ?`)
+          .bind(to, from, to, organizationId)
+          .first<{ openIncidents: number; incidentsStarted: number }>(),
+        env.DB.prepare(`SELECT c.checked_at AS lastCheckAt
+          FROM monitor_checks c JOIN monitors m ON m.id = c.monitor_id
+          WHERE ${checkFilter}
+          ORDER BY julianday(c.checked_at) DESC
+          LIMIT 1`)
+          .bind(organizationId, from, to)
+          .first<{ lastCheckAt: string }>()
+      ]);
+
+      const totalChecks = Number(totals?.totalChecks ?? 0);
+      const upChecks = Number(totals?.upChecks ?? 0);
+      const downChecks = Number(totals?.downChecks ?? 0);
+      const latencyValues = latencyRows.results
+        .slice(0, 5000)
+        .map(row => Number(row.responseTimeMs))
+        .filter(value => Number.isFinite(value) && value >= 0)
+        .sort((left, right) => left - right);
+      const percentile = (fraction: number): number | null => {
+        if (!latencyValues.length) return null;
+        const position = (latencyValues.length - 1) * fraction;
+        const lower = Math.floor(position);
+        const upper = Math.ceil(position);
+        const value = latencyValues[lower] +
+          (latencyValues[upper] - latencyValues[lower]) * (position - lower);
+        return Math.round(value * 10) / 10;
+      };
+
+      return json({
+        range,
+        from,
+        to,
+        source: "persisted_checks",
+        observedOnly: true,
+        executionEnabled: false,
+        summary: {
+          monitorCount: Number(monitorCount?.count ?? 0),
+          totalChecks,
+          upChecks,
+          downChecks,
+          availabilityPercent: totalChecks
+            ? Math.round((upChecks / totalChecks) * 10000) / 100
+            : null,
+          openIncidents: Number(incidentStats?.openIncidents ?? 0),
+          incidentsStarted: Number(incidentStats?.incidentsStarted ?? 0)
+        },
+        latency: {
+          sampleCount: latencyValues.length,
+          sampleLimit: 5000,
+          sampleTruncated: latencyRows.results.length > 5000,
+          p50Ms: percentile(0.5),
+          p95Ms: percentile(0.95)
+        },
+        series: buckets.results.map(row => ({
+          bucket: row.bucket,
+          totalChecks: Number(row.totalChecks),
+          upChecks: Number(row.upChecks),
+          downChecks: Number(row.downChecks),
+          avgLatencyMs: row.avgLatencyMs === null ? null : Number(row.avgLatencyMs)
+        })),
+        topFailures: failures.results.map(row => ({
+          monitorId: row.monitorId,
+          monitorName: row.monitorName,
+          failureCount: Number(row.failureCount)
+        })),
+        lastCheckAt: lastCheck?.lastCheckAt ?? null
+      });
+    }
+
     const monitorMatch = url.pathname.match(/^\/v1\/monitors\/([0-9a-f-]{36})(\/checks|\/pause|\/resume)?$/i);
     if (monitorMatch) {
       const user = await currentUser(request, env);

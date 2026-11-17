@@ -22,7 +22,7 @@ API keys are created, listed and revoked by workspace owners/admins using a veri
 - `GET /v1/organizations/<organization-id>/api-keys` — list safe key metadata. The secret and hash are never returned.
 - `POST /v1/organizations/<organization-id>/api-keys` — create a key with `{ name, expiresInDays: 30|90|365 }`. The response includes `secret` exactly once. Store it in a server-side secret manager; it cannot be retrieved later.
 - `DELETE /v1/organizations/<organization-id>/api-keys/<key-id>` — revoke a key immediately. Repeated revocation is idempotent.
-- Use `Authorization: Bearer zw_live_...` on supported read endpoints: monitor list/detail/check history and incident list/detail. Keys cannot create, update, pause, resume or delete monitors, change incidents, access authentication or team endpoints, or view internal incident timeline notes.
+- Use `Authorization: Bearer zw_live_...` on supported read endpoints: monitor list/detail/check history, incident list/detail and workspace analytics. Keys cannot create, update, pause, resume or delete monitors, change incidents, access authentication or team endpoints, or view internal incident timeline notes.
 
 An explicit `Authorization` header takes precedence over a session cookie; an invalid bearer credential never falls back to a valid cookie. The key is stored as a SHA-256 hash of a cryptographically random 256-bit secret. Authentication requires the creator to remain a verified owner/admin of the key's workspace; demotion/removal therefore disables the key. `last_used_at` is updated on successful authentication. Do not put API keys in browser code, URLs, logs or source control.
 
@@ -88,6 +88,16 @@ The workspace monitor list provides a **View** action that opens a detail panel.
 ## Monitor execution status
 
 The current API deliberately returns `executionEnabled: false`. Creating a monitor stores its configuration but does not run a network request or schedule a check. Pausing and resuming only changes its persisted enabled state and due time; it does not activate execution. The current URL validator is preliminary and does not provide DNS resolution/pinning or DNS-rebinding protection. Do not enable scheduled probes until the egress security architecture is implemented and reviewed.
+
+## Workspace analytics
+
+- `GET /v1/analytics?organizationId=<uuid>&range=24h|7d|30d` — returns tenant-scoped analytics from persisted `monitor_checks` and incident rows. `organizationId` is required; `range` defaults to `7d`.
+- Requires a verified browser session or a read-only workspace API key. Membership and API-key workspace scope are checked server-side. A read-only API key can access only its own workspace.
+- The response includes configured live monitor count, recorded/up/down checks, observed availability percentage, unresolved incidents, incidents started in the selected period, hourly (24h) or daily (7d/30d) buckets, and the five monitors with the most failed samples.
+- Every time-series query is bounded by the returned inclusive UTC window (`from` through `to`); future-dated check and incident rows are excluded from counts, percentiles, buckets and last-check timestamps.
+- Latency p50/p95 is calculated from the most recent 5,000 non-negative latency samples in the selected period. The response reports sample count and whether the sample was truncated.
+- When no check rows exist, availability and latency percentiles are `null`; no 0% or 100% availability is fabricated. The endpoint returns `source: "persisted_checks"`, `observedOnly: true` and `executionEnabled: false`.
+- Analytics never returns raw target URLs, response bodies, custom headers or secrets. Results are sample-based observations, not an SLA. Requests are rate-limited to 120 per source IP per 15 minutes.
 
 ## Error responses
 

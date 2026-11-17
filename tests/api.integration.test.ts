@@ -995,3 +995,207 @@ describe("Status pages", () => {
     expect(response.status).toBe(403);
   });
 });
+
+
+describe("Workspace analytics", () => {
+  it("aggregates persisted checks, observed availability, latency percentiles and incident counts", async () => {
+    const owner = await createIdentity("owner");
+    const firstMonitorId = await createMonitor(owner.organizationId);
+    const secondMonitorId = await createMonitor(owner.organizationId);
+    const now = Date.now();
+    const baseTime = new Date(now);
+    baseTime.setUTCHours(12, 0, 0, 0);
+    if (baseTime.getTime() > now) baseTime.setUTCDate(baseTime.getUTCDate() - 1);
+    const checkedAt = (minutesAgo: number) => new Date(baseTime.getTime() - minutesAgo * 60 * 1000).toISOString();
+    const checkRows = [
+      { monitorId: firstMonitorId, at: checkedAt(180), up: 1, status: 200, latency: 40, error: null },
+      { monitorId: firstMonitorId, at: checkedAt(120), up: 1, status: 200, latency: 100, error: null },
+      { monitorId: firstMonitorId, at: checkedAt(60), up: 0, status: 503, latency: 200, error: "HTTP_STATUS_MISMATCH" },
+      { monitorId: secondMonitorId, at: checkedAt(30), up: 1, status: 200, latency: 400, error: null },
+      { monitorId: secondMonitorId, at: checkedAt(31 * 24 * 60), up: 0, status: 500, latency: 900, error: "HTTP_STATUS_MISMATCH" }
+    ];
+    await env.DB.batch(checkRows.map(row => env.DB.prepare(
+      "INSERT INTO monitor_checks (id, monitor_id, checked_at, is_up, status_code, response_time_ms, error_code) VALUES (?, ?, ?, ?, ?, ?, ?)"
+    ).bind(crypto.randomUUID(), row.monitorId, row.at, row.up, row.status, row.latency, row.error)));
+
+    const activeIncidentId = crypto.randomUUID();
+    const resolvedIncidentId = crypto.randomUUID();
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO incidents (id, monitor_id, started_at, status, summary) VALUES (?, ?, ?, 'investigating', ?)")
+        .bind(activeIncidentId, firstMonitorId, checkedAt(90), "Current interruption"),
+      env.DB.prepare("INSERT INTO incidents (id, monitor_id, started_at, resolved_at, status, summary) VALUES (?, ?, ?, ?, 'resolved', ?)")
+        .bind(resolvedIncidentId, secondMonitorId, checkedAt(75), checkedAt(45), "Recovered interruption")
+    ]);
+
+    const response = await api("/v1/analytics?organizationId=" + owner.organizationId + "&range=7d", {
+      token: owner.sessionToken
+    });
+    expect(response.status).toBe(200);
+    const payload = await response.json() as {
+      range: string;
+      source: string;
+      observedOnly: boolean;
+      executionEnabled: boolean;
+      summary: {
+        monitorCount: number;
+        totalChecks: number;
+        upChecks: number;
+        downChecks: number;
+        availabilityPercent: number | null;
+        openIncidents: number;
+        incidentsStarted: number;
+      };
+      latency: { sampleCount: number; p50Ms: number | null; p95Ms: number | null; sampleTruncated: boolean };
+      series: Array<{ bucket: string; totalChecks: number; upChecks: number; downChecks: number; avgLatencyMs: number | null }>;
+      topFailures: Array<{ monitorName: string; failureCount: number }>;
+      lastCheckAt: string | null;
+    };
+    expect(payload).toMatchObject({
+      range: "7d",
+      source: "persisted_checks",
+      observedOnly: true,
+      executionEnabled: false,
+      summary: {
+        monitorCount: 2,
+        totalChecks: 4,
+        upChecks: 3,
+        downChecks: 1,
+        availabilityPercent: 75,
+        openIncidents: 1,
+        incidentsStarted: 2
+      },
+      latency: { sampleCount: 4, p50Ms: 150, p95Ms: 370, sampleTruncated: false }
+    });
+    expect(payload.series).toHaveLength(1);
+    expect(payload.series[0]).toMatchObject({
+      totalChecks: 4,
+      upChecks: 3,
+      downChecks: 1,
+      avgLatencyMs: 185
+    });
+    expect(payload.topFailures).toEqual([{ monitorName: "Private fixture", failureCount: 1 }]);
+    expect(payload.lastCheckAt).toBe(checkedAt(30));
+  });
+
+  it("returns explicit null metrics and an empty series when no checks exist", async () => {
+    const viewer = await createIdentity("viewer");
+    const response = await api("/v1/analytics?organizationId=" + viewer.organizationId + "&range=30d", {
+      token: viewer.sessionToken
+    });
+    expect(response.status).toBe(200);
+    const payload = await response.json() as {
+      summary: { totalChecks: number; availabilityPercent: number | null };
+      latency: { sampleCount: number; p50Ms: number | null; p95Ms: number | null };
+      series: unknown[];
+      topFailures: unknown[];
+      lastCheckAt: string | null;
+    };
+    expect(payload.summary).toMatchObject({ totalChecks: 0, availabilityPercent: null });
+    expect(payload.latency).toMatchObject({ sampleCount: 0, p50Ms: null, p95Ms: null });
+    expect(payload.series).toEqual([]);
+    expect(payload.topFailures).toEqual([]);
+    expect(payload.lastCheckAt).toBeNull();
+  });
+
+  it("enforces organization membership and API-key workspace scope", async () => {
+    const owner = await createIdentity("owner");
+    const foreignOrganizationId = await createForeignOrganization();
+    const sessionResponse = await api("/v1/analytics?organizationId=" + foreignOrganizationId, {
+      token: owner.sessionToken
+    });
+    expect(sessionResponse.status).toBe(403);
+
+    const key = await createApiKeyFixture(owner);
+    const ownWorkspace = await api("/v1/analytics?organizationId=" + owner.organizationId, {
+      apiKey: key.secret
+    });
+    const foreignWorkspace = await api("/v1/analytics?organizationId=" + foreignOrganizationId, {
+      apiKey: key.secret
+    });
+    expect(ownWorkspace.status).toBe(200);
+    expect(foreignWorkspace.status).toBe(403);
+  });
+
+  it("rejects missing organization IDs and unsupported time ranges", async () => {
+    const owner = await createIdentity("owner");
+    const missingOrganization = await api("/v1/analytics?range=7d", { token: owner.sessionToken });
+    const invalidRange = await api("/v1/analytics?organizationId=" + owner.organizationId + "&range=all", {
+      token: owner.sessionToken
+    });
+    const inheritedRange = await api("/v1/analytics?organizationId=" + owner.organizationId + "&range=toString", {
+      token: owner.sessionToken
+    });
+    const malformedOrganization = await api("/v1/analytics?organizationId=" + owner.organizationId + "suffix&range=7d", {
+      token: owner.sessionToken
+    });
+    expect([missingOrganization.status, invalidRange.status, inheritedRange.status, malformedOrganization.status])
+      .toEqual([400, 400, 400, 400]);
+  });
+
+  it("groups a 24-hour range into hourly buckets using persisted check timestamps", async () => {
+    const owner = await createIdentity("owner");
+    const monitorId = await createMonitor(owner.organizationId);
+    const checkedAt = new Date(Date.now() - 20 * 60 * 1000).toISOString();
+    await env.DB.prepare(
+      "INSERT INTO monitor_checks (id, monitor_id, checked_at, is_up, status_code, response_time_ms) VALUES (?, ?, ?, 1, 200, 25)"
+    ).bind(crypto.randomUUID(), monitorId, checkedAt).run();
+
+    const response = await api("/v1/analytics?organizationId=" + owner.organizationId + "&range=24h", {
+      token: owner.sessionToken
+    });
+    expect(response.status).toBe(200);
+    const payload = await response.json() as { series: Array<{ bucket: string; totalChecks: number }> };
+    expect(payload.series).toHaveLength(1);
+    expect(payload.series[0].bucket).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:00:00Z$/);
+    expect(payload.series[0].totalChecks).toBe(1);
+  });
+
+  it("excludes future-dated checks and incidents from the selected analytics window", async () => {
+    const owner = await createIdentity("owner");
+    const monitorId = await createMonitor(owner.organizationId);
+    const currentCheckAt = new Date(Date.now() - 60 * 1000).toISOString();
+    const futureAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO monitor_checks (id, monitor_id, checked_at, is_up, status_code, response_time_ms) VALUES (?, ?, ?, 1, 200, 25)")
+        .bind(crypto.randomUUID(), monitorId, currentCheckAt),
+      env.DB.prepare("INSERT INTO monitor_checks (id, monitor_id, checked_at, is_up, status_code, response_time_ms, error_code) VALUES (?, ?, ?, 0, 503, 999, 'HTTP_STATUS_MISMATCH')")
+        .bind(crypto.randomUUID(), monitorId, futureAt),
+      env.DB.prepare("INSERT INTO incidents (id, monitor_id, started_at, status, summary) VALUES (?, ?, ?, 'investigating', ?)")
+        .bind(crypto.randomUUID(), monitorId, futureAt, "Future-dated incident")
+    ]);
+
+    const response = await api("/v1/analytics?organizationId=" + owner.organizationId + "&range=7d", {
+      token: owner.sessionToken
+    });
+    expect(response.status).toBe(200);
+    const payload = await response.json() as {
+      summary: {
+        totalChecks: number;
+        upChecks: number;
+        downChecks: number;
+        availabilityPercent: number | null;
+        openIncidents: number;
+        incidentsStarted: number;
+      };
+      latency: { sampleCount: number; p50Ms: number | null; p95Ms: number | null };
+      series: Array<{ totalChecks: number; upChecks: number; downChecks: number }>;
+      topFailures: unknown[];
+      lastCheckAt: string | null;
+    };
+
+    expect(payload.summary).toMatchObject({
+      totalChecks: 1,
+      upChecks: 1,
+      downChecks: 0,
+      availabilityPercent: 100,
+      openIncidents: 0,
+      incidentsStarted: 0
+    });
+    expect(payload.latency).toMatchObject({ sampleCount: 1, p50Ms: 25, p95Ms: 25 });
+    expect(payload.series).toHaveLength(1);
+    expect(payload.series[0]).toMatchObject({ totalChecks: 1, upChecks: 1, downChecks: 0 });
+    expect(payload.topFailures).toEqual([]);
+    expect(payload.lastCheckAt).toBe(currentCheckAt);
+  });
+});

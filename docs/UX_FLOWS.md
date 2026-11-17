@@ -90,3 +90,14 @@ After save: take user to monitor detail with live/pending state; do not fabricat
 - Never use color alone to communicate health; include text and iconography.
 - Avoid empty dashboard cards; guide the user to the next useful action.
 - Keep forms short, group related fields, preserve input on errors and show validation beside the field.
+
+
+## Analytics page
+
+- Provide 24-hour, 7-day and 30-day periods with an explicit refresh action.
+- Show observed availability, stored check count, p95 latency and currently unresolved incidents.
+- Plot only buckets that contain persisted check rows; use separate success/failure segments and accessible text summaries.
+- Rank the five monitors with the most failed samples in the selected period.
+- Calculate p50/p95 from at most the most recent 5,000 latency samples and disclose the sample count/truncation state.
+- If no checks exist, show an empty state and null metrics rather than 0% or 100% availability.
+- Label the figures as sample-based observations, not an SLA. While scheduled probes are disabled, the UI must not imply that a monitor is actively being checked.
