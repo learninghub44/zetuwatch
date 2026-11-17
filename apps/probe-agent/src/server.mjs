@@ -162,11 +162,11 @@ export function createProbeHandler(options = {}) {
 
       let job;
       try { job = normalizeProbeInput(JSON.parse(body)); }
-      catch { sendJson(response, 400, { error: "INVALID_PROBE_JOB }); return; }
+      catch { sendJson(response, 400, { error: "INVALID_PROBE_JOB" }); return; }
 
       const result = await probe(job);
       sendJson(response, 200, { result });
-    } catch { 
+    } catch {
       if (!response.headersSent) sendJson(response, 502, { error: "PROBE_FAILED" });
       else response.destroy();
     } finally {
