@@ -588,9 +588,9 @@ export default {
     }
 
     // Email notification channels are bound to the signed-in user's own verified address.
-    const notificationChannelsCollectionMatch = url.pathname.match(/^\/v1\/organizations\/([0-9a-f-]{36})\\/notification-channels$/i);
-    const notificationChannelItemMatch = url.pathname.match(/^\/v1\/organizations\/([0-9a-f-]{36})\\/notification-channels\\/([0-9a-f-]{36})$/i);
-    const notificationDeliveriesMatch = url.pathname.match(/^\/v1\/organizations\/([0-9a-f-]{36})\\/notification-deliveries$/i);
+    const notificationChannelsCollectionMatch = url.pathname.match(/^\/v1\/organizations\/([0-9a-f-]{36})\/notification-channels$/i);
+    const notificationChannelItemMatch = url.pathname.match(/^\/v1\/organizations\/([0-9a-f-]{36})\/notification-channels\/([0-9a-f-]{36})$/i);
+    const notificationDeliveriesMatch = url.pathname.match(/^\/v1\/organizations\/([0-9a-f-]{36})\/notification-deliveries$/i);
     if (notificationChannelsCollectionMatch || notificationChannelItemMatch || notificationDeliveriesMatch) {
       const user = await currentUser(request, env);
       if (!user) return json({ error: "UNAUTHENTICATED" }, 401);
