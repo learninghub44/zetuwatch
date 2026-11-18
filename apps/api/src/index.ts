@@ -588,9 +588,9 @@ export default {
     }
 
     // Email notification channels are bound to the signed-in user's own verified address.
-    const notificationChannelsCollectionMatch = url.pathname.match(/^\\/v1\\/organizations\\/([0-9a-f-]{36})\\/notification-channels$/i);
-    const notificationChannelItemMatch = url.pathname.match(/^\\/v1\\/organizations\\/([0-9a-f-]{36})\\/notification-channels\\/([0-9a-f-]{36})$/i);
-    const notificationDeliveriesMatch = url.pathname.match(/^\\/v1\\/organizations\\/([0-9a-f-]{36})\\/notification-deliveries$/i);
+    const notificationChannelsCollectionMatch = url.pathname.match(/^\/v1\/organizations\/([0-9a-f-]{36})\\/notification-channels$/i);
+    const notificationChannelItemMatch = url.pathname.match(/^\/v1\/organizations\/([0-9a-f-]{36})\\/notification-channels\\/([0-9a-f-]{36})$/i);
+    const notificationDeliveriesMatch = url.pathname.match(/^\/v1\/organizations\/([0-9a-f-]{36})\\/notification-deliveries$/i);
     if (notificationChannelsCollectionMatch || notificationChannelItemMatch || notificationDeliveriesMatch) {
       const user = await currentUser(request, env);
       if (!user) return json({ error: "UNAUTHENTICATED" }, 401);
@@ -675,10 +675,10 @@ export default {
           const results = await env.DB.batch([
             env.DB.prepare("UPDATE notification_channels SET is_enabled = ?, updated_at = ? WHERE id = ? AND organization_id = ? AND is_enabled <> ?")
               .bind(enabled, now, channelId, organizationId, enabled),
+            env.DB.prepare("INSERT INTO audit_logs (id, organization_id, actor_user_id, action, resource_type, resource_id, metadata_json) SELECT ?, ?, ?, ?, 'notification_channel', ?, ? WHERE changes() = 1")
+              .bind(id(), organizationId, user.id, enabled ? "notification.email_channel_enabled" : "notification.email_channel_disabled", channelId, JSON.stringify({ enabled: Boolean(enabled) })),
             env.DB.prepare("UPDATE notification_deliveries SET status = 'failed', next_attempt_at = NULL, last_error_code = 'CHANNEL_DISABLED', lease_token = NULL, lease_until = NULL, updated_at = ? WHERE channel_id = ? AND status = 'queued' AND ? = 0")
-              .bind(now, channelId, enabled),
-            env.DB.prepare("INSERT INTO audit_logs (id, organization_id, actor_user_id, action, resource_type, resource_id, metadata_json) VALUES (?, ?, ?, ?, 'notification_channel', ?, ?)")
-              .bind(id(), organizationId, user.id, enabled ? "notification.email_channel_enabled" : "notification.email_channel_disabled", channelId, JSON.stringify({ enabled: Boolean(enabled) }))
+              .bind(now, channelId, enabled)
           ]);
           return json({ message: enabled ? "Email alerts enabled." : "Email alerts disabled.", changed: (results[0]?.meta?.changes ?? 0) === 1 });
         }
@@ -689,7 +689,7 @@ export default {
             .bind(now, channelId),
           env.DB.prepare("DELETE FROM notification_channels WHERE id = ? AND organization_id = ?")
             .bind(channelId, organizationId),
-          env.DB.prepare("INSERT INTO audit_logs (id, organization_id, actor_user_id, action, resource_type, resource_id) VALUES (?, ?, ?, 'notification.email_channel_removed', 'notification_channel', ?)")
+          env.DB.prepare("INSERT INTO audit_logs (id, organization_id, actor_user_id, action, resource_type, resource_id) SELECT ?, ?, ?, 'notification.email_channel_removed', 'notification_channel', ? WHERE changes() = 1")
             .bind(id(), organizationId, user.id, channelId)
         ]);
         return json({ message: "Email alert channel removed. Pending deliveries were cancelled." });
