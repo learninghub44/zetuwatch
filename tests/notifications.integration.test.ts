@@ -2,6 +2,7 @@ import { env, exports } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vitest";
 import { finalizeMonitorCheck } from "../packages/scheduler-core/src/claims";
 import { claimDueNotificationDeliveries, settleNotificationDelivery } from "../packages/notifications-core/src/outbox";
+import { dispatchNotificationBatch } from "../packages/notifications-core/src/dispatch";
 
 type Role = "owner" | "admin" | "member" | "viewer";
 interface Identity {
@@ -212,6 +213,98 @@ describe("email notification channels and delivery", () => {
     const rows = await env.DB.prepare("SELECT event_type, recipient_email FROM notification_deliveries WHERE incident_id = ?")
       .bind(incident.id).all<{ event_type: string; recipient_email: string }>();
     expect(rows.results).toEqual([{ event_type: "incident.status_changed", recipient_email: owner.email }]);
+  });
+
+  it("never enqueues or dispatches internal incident notes or status changes", async () => {
+    const owner = await createIdentity("owner");
+    const channel = await createEmailChannel(owner);
+    const monitorId = await createMonitor(owner.organizationId);
+    const incident = await createIncident(monitorId);
+
+    const statusChanged = await api(`/v1/incidents/${incident.id}`, owner, {
+      method: "PATCH",
+      body: { status: "identified" }
+    });
+    expect(statusChanged.status).toBe(200);
+    const statusEvent = await env.DB.prepare(
+      "SELECT id, visibility FROM incident_events WHERE incident_id = ? AND event_type = 'incident.status_changed' ORDER BY created_at DESC LIMIT 1"
+    ).bind(incident.id).first<{ id: string; visibility: string }>();
+    expect(statusEvent?.visibility).toBe("internal");
+    const statusDeliveryCount = await env.DB.prepare(
+      "SELECT COUNT(*) AS count FROM notification_deliveries WHERE event_id = ?"
+    ).bind(statusEvent!.id).first<{ count: number }>();
+    expect(statusDeliveryCount?.count).toBe(0);
+
+    const internalResponse = await api(`/v1/incidents/${incident.id}/updates`, owner, {
+      method: "POST",
+      body: { message: "Internal operator note must never be emailed.", visibility: "internal" }
+    });
+    expect(internalResponse.status).toBe(201);
+    const internalPayload = await internalResponse.json() as { eventId: string };
+    const internalDeliveryCount = await env.DB.prepare(
+      "SELECT COUNT(*) AS count FROM notification_deliveries WHERE event_id = ?"
+    ).bind(internalPayload.eventId).first<{ count: number }>();
+    expect(internalDeliveryCount?.count).toBe(0);
+
+    const publicResponse = await api(`/v1/incidents/${incident.id}/updates`, owner, {
+      method: "POST",
+      body: { message: "Public update should be emailed.", visibility: "public" }
+    });
+    expect(publicResponse.status).toBe(201);
+    const publicPayload = await publicResponse.json() as { eventId: string };
+    const publicDelivery = await env.DB.prepare(
+      "SELECT id FROM notification_deliveries WHERE event_id = ? AND channel_id = ?"
+    ).bind(publicPayload.eventId, channel.id).first<{ id: string }>();
+    expect(publicDelivery?.id).toBeTruthy();
+
+    // Simulate an older or manually inserted outbox row to prove the dispatcher
+    // independently rechecks visibility before contacting the email provider.
+    const legacyInternalDeliveryId = crypto.randomUUID();
+    await env.DB.prepare(`INSERT INTO notification_deliveries
+      (id, organization_id, incident_id, channel_id, provider, status, attempt_count,
+       next_attempt_at, event_id, event_type, recipient_email, channel_created_by)
+      VALUES (?, ?, ?, ?, 'resend', 'queued', 0, ?, ?, 'incident.update', ?, ?)`)
+      .bind(
+        legacyInternalDeliveryId,
+        owner.organizationId,
+        incident.id,
+        channel.id,
+        new Date(Date.now() - 1_000).toISOString(),
+        internalPayload.eventId,
+        owner.email,
+        owner.userId
+      ).run();
+
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ id: "re_public_update_only" }), {
+      status: 200,
+      headers: { "content-type": "application/json" }
+    }));
+    const summary = await dispatchNotificationBatch({
+      DB: env.DB,
+      PUBLIC_APP_URL: "https://app.zetuwatch.test",
+      RESEND_API_KEY: "re_test_only",
+      EMAIL_FROM: "ZetuWatch <alerts@example.test>"
+    }, {
+      limit: 5,
+      fetcher: fetchMock as unknown as typeof fetch
+    });
+
+    expect(summary).toMatchObject({ claimed: 2, sent: 1, failed: 1 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const internalRow = await env.DB.prepare(
+      "SELECT status, last_error_code FROM notification_deliveries WHERE id = ?"
+    ).bind(legacyInternalDeliveryId).first<{ status: string; last_error_code: string }>();
+    expect(internalRow).toMatchObject({ status: "failed", last_error_code: "RECIPIENT_NOT_ELIGIBLE" });
+    const publicRow = await env.DB.prepare(
+      "SELECT status FROM notification_deliveries WHERE id = ?"
+    ).bind(publicDelivery.id).first<{ status: string }>();
+    expect(publicRow?.status).toBe("sent");
+
+    const requestInit = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined;
+    const emailBody = JSON.parse(String(requestInit?.body)) as { html: string; text: string };
+    expect(emailBody.html).toContain("Public update should be emailed.");
+    expect(emailBody.html).not.toContain("Internal operator note must never be emailed.");
+    expect(emailBody.text).not.toContain("Internal operator note must never be emailed.");
   });
 
   it("sends a claimed notification once and records the provider message id", async () => {

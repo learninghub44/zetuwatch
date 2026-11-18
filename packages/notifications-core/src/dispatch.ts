@@ -137,6 +137,7 @@ async function loadDeliveryContext(
     JOIN incident_events e ON e.id = d.event_id AND e.incident_id = i.id
     WHERE d.id = ? AND d.lease_token = ? AND d.status = 'queued'
       AND d.lease_until > ? AND d.recipient_email = c.destination
+      AND (e.event_type NOT IN ('incident.update', 'incident.status_changed') OR e.visibility = 'public')
   `).bind(delivery.id, delivery.leaseToken, nowIso).first<DeliveryContext>();
 }
 

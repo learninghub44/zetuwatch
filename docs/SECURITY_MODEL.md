@@ -104,3 +104,6 @@ This is a public information surface, not a live service-health assertion. Do no
 
 - Delivery records retain a non-secret channel-creator identifier independently of the channel foreign key. Removing a channel sets the channel reference to null and cancels queued work but preserves the operational log; member access remains scoped to the retained creator identifier and current workspace membership.
 - Email subjects strip control characters, plain-text bodies remove non-printing controls, and application links are built only from an HTTPS origin (HTTP is allowed only for localhost development). Credentials embedded in the configured URL are rejected. This protects recipients from a misconfigured link becoming a script or credential-bearing URL.
+
+
+- Customer-authored `incident.update` and `incident.status_changed` events enter the email outbox only when `visibility = 'public'`. Internal notes/status transitions are excluded at enqueue time and checked again by the dispatcher before provider delivery. System-generated incident lifecycle events remain eligible. This prevents workspace-only notes from leaking to email subscribers, including through legacy queued rows.

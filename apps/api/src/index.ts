@@ -112,6 +112,7 @@ function enqueueNotificationDeliveries(env: Env, eventId: string, eventType: str
     JOIN organization_members om
       ON om.organization_id = m.organization_id AND om.user_id = u.id
     WHERE e.id = ? AND e.event_type = ?
+      AND (e.event_type NOT IN ('incident.update', 'incident.status_changed') OR e.visibility = 'public')
       AND c.channel_type = 'email' AND c.is_enabled = 1
       AND c.verified_at IS NOT NULL
   `).bind(eventId, now, now, eventId, eventType);

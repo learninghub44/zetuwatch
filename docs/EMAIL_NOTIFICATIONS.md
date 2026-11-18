@@ -53,3 +53,8 @@ The current monitoring probe runner remains disabled. Email notifications can di
 The dispatcher requires `PUBLIC_APP_URL` to be an absolute HTTPS URL. HTTP is accepted only for `localhost` or `127.0.0.1` during local development. URL credentials are rejected. The application link is normalized to the workspace incident view; untrusted organization/monitor/timeline text is HTML-escaped and control characters are removed from email headers/plain text.
 
 Removing a channel preserves its delivery log. The channel foreign key becomes null, but the creator-scoped history remains visible to that member while they remain in the workspace; owners/admins can see all workspace delivery history.
+
+
+## Timeline visibility and email delivery
+
+System-generated lifecycle events (opened, recovery monitoring, resolved and reopened) are eligible for email alerts. Customer-authored incident status changes and timeline notes are emailed only when their visibility is explicitly `public`. Internal notes and internal status changes are never enqueued. The dispatcher repeats this visibility check when loading a claimed delivery, so an older or manually inserted internal-event row is rejected before any provider request.

@@ -288,3 +288,11 @@ No Cloudflare resources were created and no deployment was attempted. This is fe
 - Dispatch uses the actual Cron invocation time for leases and records scheduler lag without recipient data. Missing provider, sender or app URL configuration leaves queued work unclaimed.
 - Added regression coverage for delivery history after channel removal, safe application links, subject control characters, missing configuration and delayed Cron delivery.
 - These changes remain in draft PR #6. Full GitHub Actions CI and browser acceptance have not been observed; do not mark notifications complete.
+
+
+### Email notification privacy hardening (2026-11-18)
+
+- Excluded internal customer-authored incident notes and status changes from outbox enqueue; public updates remain eligible and system-generated lifecycle events continue to alert.
+- Added a second visibility check when dispatching, so a previously queued internal event is marked ineligible without contacting Resend.
+- Added a D1 Worker integration regression test for internal status changes, internal/public notes, legacy queued rows and delivered email content.
+- Full feature-branch CI verification is pending; do not mark email notifications launch-complete until it passes and the controlled provider/browser checks are completed.
