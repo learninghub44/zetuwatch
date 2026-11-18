@@ -67,3 +67,8 @@ These tests use injected DNS answers and a local HTTP server. They do not perfor
 - Complete a production-like Worker-to-agent-to-D1 end-to-end test before enabling Cron.
 
 Until those gates pass, scheduled monitoring stays disabled and public status pages must continue to report health as unknown.
+
+
+## DNS query cancellation
+
+The agent creates an isolated Node `dns/promises.Resolver` for each hostname, limits the resolver to one attempt per query, and uses one shared deadline for the A/AAAA pair. If that deadline expires, it calls `resolver.cancel()` before returning `DNS_TIMEOUT`; a timed-out target therefore cannot leave DNS queries running after the probe slot has been released. This uses the documented Node resolver timeout, retry and cancellation APIs: https://nodejs.org/api/dns.html#class-dnspromisesresolver.

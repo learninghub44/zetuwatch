@@ -87,3 +87,6 @@ No scheduler integration, live monitor execution, production agent deployment or
 - The public renderer uses `textContent`/DOM nodes for all database-backed strings. It does not interpolate page content into HTML or execute scripts from stored values.
 
 This is a public information surface, not a live service-health assertion. Do not remove the explicit unknown-state notice until the secure outbound runner and real measurements are enabled and independently verified.
+
+
+- The standalone probe agent uses a per-hostname Node DNS resolver with a shared A/AAAA deadline and cancels outstanding DNS queries on timeout. This keeps timed-out resolver work within the same bounded probe lifetime instead of allowing abandoned DNS requests to accumulate after an active slot is released.

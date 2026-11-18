@@ -264,3 +264,10 @@ No Cloudflare resources were created and no deployment was attempted. This is fe
 - GitHub Actions [CI run #182](https://github.com/learninghub44/zetuwatch/actions/runs/43568666409) completed successfully on head commit `612533f31ca69f058e07211b40ed7c643949a974` after a regression fix for monitor-deletion trigger side effects. Verified: TypeScript typecheck, inline browser JavaScript syntax across five HTML files, SQLite validation (7 migrations, 16 previously required tables; status-page tables were exercised by the new D1 integration tests), and Vitest (13 files, 129 tests).
 - Browser E2E, responsive/keyboard/screen-reader acceptance, custom domains, subscriptions and public-page cache behavior remain future work. Status pages are implemented and CI-verified but not launch-complete.
 - Follow-up main commit `a3bcb10bd7033d0ef8a93dd0d09020d8dbb25d59` adds `status_pages` and `status_page_monitors` to the migration validator's required-table set (18 total). The post-merge main-branch CI result for that validator change has not yet been observed.
+
+
+### Probe-agent DNS resource-bound hardening (2026-11-18)
+
+- Replaced the uncancelled DNS Promise timeout wrapper with a per-hostname Node resolver, one-attempt query policy and explicit cancellation when the shared A/AAAA deadline expires.
+- Added tests for timeout cancellation, A-only/AAAA-only answers, resolver failures, mixed public/private answers, empty answers and invalid bounds.
+- This is a security hardening slice only. The agent remains separate from the scheduler; full PR CI, real DNS/TLS tests, durable replay storage, per-tenant quotas and Worker-to-agent integration remain open.
