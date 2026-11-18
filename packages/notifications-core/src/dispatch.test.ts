@@ -22,3 +22,31 @@ describe("incident email rendering", () => {
     expect(email.html).not.toContain("target_url");
   });
 });
+
+
+describe("notification email URL and header safety", () => {
+  const context = {
+    organizationName: "Acme",
+    monitorName: "Payments API",
+    incidentStatus: "investigating",
+    incidentSummary: "Service unavailable",
+    eventType: "incident.opened",
+    eventMessage: "Incident opened",
+    recipientEmail: "ops@example.test",
+    channelId: "channel-id",
+    eventId: "event-id"
+  };
+
+  it("rejects unsafe application link protocols and credential-bearing URLs", () => {
+    expect(() => buildIncidentEmail(context, "javascript:alert(1)")).toThrow("NOTIFICATION_APP_URL_INVALID");
+    expect(() => buildIncidentEmail(context, "https://user:pass@app.example.test")).toThrow("NOTIFICATION_APP_URL_INVALID");
+  });
+
+  it("removes control characters from the email subject", () => {
+    const email = buildIncidentEmail({
+      ...context,
+      organizationName: "Acme\\r\\nBcc: attacker@example.test"
+    }, "https://app.example.test");
+    expect(email.subject).not.toMatch(/[\\r\\n]/);
+  });
+});
