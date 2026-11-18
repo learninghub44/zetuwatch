@@ -5,8 +5,8 @@
 @media(max-width:850px){.shell{grid-template-columns:205px 1fr}.content{padding:25px}.top{padding:0 25px}}
 @media(max-width:650px){.monitor-meta-grid{grid-template-columns:1fr 1fr}.setup-grid{grid-template-columns:1fr}.shell{display:block}.side{display:none}.mobile-head{display:flex;align-items:center;justify-content:space-between;background:#fff;border-bottom:1px solid var(--line);padding:14px 17px}.mobile-nav{display:flex;gap:7px;overflow-x:auto;padding:8px 16px;background:#fff;border-bottom:1px solid var(--line)}.mobile-nav a{white-space:nowrap;text-decoration:none;color:#56635b;font-size:11px;font-weight:600;padding:7px 9px;border:1px solid var(--line);border-radius:8px}.status-monitor-options{grid-template-columns:1fr}.top{height:52px;padding:0 17px}.content{padding:22px 16px}.heading{align-items:flex-start;flex-direction:column}.stats{grid-template-columns:1fr 1fr}.stat:last-child{grid-column:span 2}table{min-width:620px}.panel{overflow-x:auto}.row{grid-template-columns:1fr}.incident-status-grid{grid-template-columns:1fr}.heading h1{font-size:24px}}
 </style></head><body>
-<div class="mobile-head"><a class="brand" href="./index.html" style="padding:0"><span class="mark">⌁</span>ZetuWatch</a><button class="btn" id="mobile-logout">Sign out</button></div><nav class="mobile-nav" aria-label="Workspace navigation"><a href="#monitors">Monitors</a><a href="#incidents">Incidents</a><a href="#status-pages">Status pages</a><a href="#team">Team</a><a href="#api-keys">API keys</a></nav>
-<div class="shell"><aside class="side"><a class="brand" href="./index.html"><span class="mark">⌁</span>ZetuWatch</a><button class="workspace" id="workspace-switch"><small>WORKSPACE</small><strong id="workspace-name">Loading workspace…</strong></button><div class="nav-label">Workspace</div><nav class="nav"><a class="active" href="./app.html"><span class="ico">◫</span>Overview</a><a href="#monitors" id="nav-monitors"><span class="ico">⌁</span>Monitors</a><a href="#incidents" id="nav-incidents"><span class="ico">◷</span>Incidents</a><a href="#status-pages" id="nav-status-pages"><span class="ico">▤</span>Status pages</a><a class="disabled" aria-disabled="true"><span class="ico">⌁</span>Analytics · coming soon</a><a class="disabled" aria-disabled="true"><span class="ico">◎</span>Alerts · coming soon</a><div class="nav-label" style="margin-top:20px">Manage</div><a href="#team" id="nav-team"><span class="ico">♧</span>Team</a><a href="#api-keys" id="nav-api-keys"><span class="ico">⌘</span>API keys</a><a class="disabled" aria-disabled="true"><span class="ico">▣</span>Billing · coming soon</a></nav><div class="side-bottom"><div class="profile"><div class="avatar" id="avatar">?</div><div><strong id="user-name">Loading</strong><small id="user-email"></small></div><button id="logout" title="Sign out" aria-label="Sign out">↗</button></div></div></aside>
+<div class="mobile-head"><a class="brand" href="./index.html" style="padding:0"><span class="mark">⌁</span>ZetuWatch</a><button class="btn" id="mobile-logout">Sign out</button></div><nav class="mobile-nav" aria-label="Workspace navigation"><a href="#monitors">Monitors</a><a href="#incidents">Incidents</a><a href="#status-pages">Status pages</a><a href="#team">Team</a><a href="#api-keys">API keys</a><a href="#data-export">Data export</a></nav>
+<div class="shell"><aside class="side"><a class="brand" href="./index.html"><span class="mark">⌁</span>ZetuWatch</a><button class="workspace" id="workspace-switch"><small>WORKSPACE</small><strong id="workspace-name">Loading workspace…</strong></button><div class="nav-label">Workspace</div><nav class="nav"><a class="active" href="./app.html"><span class="ico">◫</span>Overview</a><a href="#monitors" id="nav-monitors"><span class="ico">⌁</span>Monitors</a><a href="#incidents" id="nav-incidents"><span class="ico">◷</span>Incidents</a><a href="#status-pages" id="nav-status-pages"><span class="ico">▤</span>Status pages</a><a class="disabled" aria-disabled="true"><span class="ico">⌁</span>Analytics · coming soon</a><a class="disabled" aria-disabled="true"><span class="ico">◎</span>Alerts · coming soon</a><div class="nav-label" style="margin-top:20px">Manage</div><a href="#team" id="nav-team"><span class="ico">♧</span>Team</a><a href="#api-keys" id="nav-api-keys"><span class="ico">⌘</span>API keys</a><a href="#data-export" id="nav-data-export"><span class="ico">⇩</span>Data export</a><a class="disabled" aria-disabled="true"><span class="ico">▣</span>Billing · coming soon</a></nav><div class="side-bottom"><div class="profile"><div class="avatar" id="avatar">?</div><div><strong id="user-name">Loading</strong><small id="user-email"></small></div><button id="logout" title="Sign out" aria-label="Sign out">↗</button></div></div></aside>
 <main class="main"><header class="top"><span class="crumb">Workspace / <strong>Overview</strong></span><div class="top-actions"><button class="btn" id="top-help">Help</button><button class="btn primary" id="top-add">Add monitor +</button></div></header><section class="content">
 <div id="notice" class="notice hidden" role="status" aria-live="polite"></div>
 <div class="heading"><div><h1 id="greeting">Workspace overview</h1><p>A clear view of the services you have configured.</p></div><button class="btn primary" id="add-monitor">Add monitor +</button></div>
@@ -44,6 +44,16 @@
 <div id="api-key-created" class="notice hidden" role="status"><strong>Copy this key now. It will not be shown again.</strong><code id="api-key-secret" style="display:block;overflow-wrap:anywhere;padding:10px;margin:9px 0;background:#fff;border:1px solid var(--line);border-radius:8px"></code><button class="btn" id="api-key-copy" type="button">Copy key</button></div>
 <div style="overflow-x:auto"><table><thead><tr><th>Name</th><th>Prefix</th><th>Created</th><th>Last used</th><th>Expires</th><th>Status</th><th></th></tr></thead><tbody id="api-key-rows"><tr><td colspan="7">Loading API keys…</td></tr></tbody></table></div>
 <p style="font-size:11px;color:var(--muted);line-height:1.6;margin:14px 0 0">Keys are scoped to this workspace and can read monitors, stored checks and incident summaries. They cannot change data or access team details. Store a key in a server-side secret manager; never put it in browser code or commit it to source control.</p>
+</div></section><section class="panel" id="data-export" style="margin-top:22px">
+<div class="panel-head"><div><h2>Data export</h2><span>Download a portable copy of workspace records</span></div><span>CSV</span></div>
+<div style="padding:18px 19px">
+<div id="export-message" class="notice hidden" role="status" aria-live="polite"></div>
+<form id="export-form" class="row" style="align-items:end;grid-template-columns:minmax(0,1fr) minmax(150px,180px) auto">
+<div class="field" style="margin:0"><label for="export-type">Data to export</label><select id="export-type"><option value="checks">Check history</option><option value="incidents">Incidents</option><option value="monitors">Monitor configuration</option></select></div>
+<div class="field" style="margin:0"><label for="export-range">Time period</label><select id="export-range"><option value="24h">Last 24 hours</option><option value="7d" selected>Last 7 days</option><option value="30d">Last 30 days</option></select></div>
+<button class="btn primary" id="export-submit" type="submit">Download CSV</button>
+</form>
+<p style="font-size:11px;color:var(--muted);line-height:1.6;margin:14px 0 0">Exports are available to workspace owners and admins. Check and incident exports cover the selected period; monitor configuration includes retained soft-deleted monitors. Each file is capped at 5,000 rows (1,000 for monitor configuration). Export requests are recorded in the workspace audit log.</p>
 </div></section><section class="panel" id="status-pages" style="margin-top:22px"><div class="panel-head"><div><h2>Status pages</h2><span>Create and publish a customer-facing service summary</span></div><span id="status-page-count">Loading…</span></div><div style="padding:18px 19px"><div id="status-page-message" class="notice hidden" role="status" aria-live="polite"></div><form id="status-page-form"><div class="row"><div class="field"><label for="status-page-name">Page name</label><input id="status-page-name" maxlength="80" required placeholder="Acme service status"></div><div class="field"><label for="status-page-slug">Public URL slug</label><input id="status-page-slug" maxlength="48" required pattern="[a-z0-9][a-z0-9-]{1,46}[a-z0-9]" placeholder="acme-status" autocomplete="off"></div></div><div class="field"><label for="status-page-description">Description · optional</label><textarea id="status-page-description" maxlength="240" rows="2" placeholder="Current service availability and customer updates"></textarea></div><div class="field"><label>Components</label><div id="status-page-monitors" class="status-monitor-options"></div><small style="display:block;color:var(--muted);font-size:11px;margin-top:7px">Select monitors to display. Public pages show configured components as unknown until secure live checks are enabled; they never invent uptime.</small></div><div class="row" style="align-items:center"><button class="btn primary" id="status-page-submit" type="submit">Create draft</button><button class="btn hidden" id="status-page-cancel" type="button">Cancel edit</button></div></form><div style="overflow-x:auto;margin-top:20px"><table><thead><tr><th>Page</th><th>Components</th><th>Visibility</th><th>Created</th><th></th></tr></thead><tbody id="status-page-rows"><tr><td colspan="5">Loading status pages…</td></tr></tbody></table></div><p style="font-size:11px;color:var(--muted);line-height:1.6;margin:14px 0 0">Publishing makes the page public at <code>status.html?slug=…</code>. Only public incident timeline updates are shown. Internal notes, target URLs and workspace identifiers are never exposed.</p></div></section><div class="notice" style="margin-top:18px">Monitoring setup is in progress. Monitors can be configured and saved, but scheduled probes, uptime measurements and incident alerts are not active yet. Do not rely on this workspace for production monitoring.</div>
 </section></main></div>
 <div id="modal-backdrop" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="modal-title"><form class="modal" id="monitor-form">
@@ -60,7 +70,7 @@ const API=(document.querySelector('meta[name="api-base"]')?.content||"/api").rep
 const $=id=>document.getElementById(id);
 function showNotice(text,error=false){$("notice").textContent=text;$("notice").classList.remove("hidden","error");if(error)$("notice").classList.add("error")}
 async function request(path,options={}){const r=await fetch(API+path,{credentials:"include",...options,headers:{"content-type":"application/json",...(options.headers||{})}});const d=await r.json().catch(()=>({}));if(r.status===401){location.href="./auth.html";throw new Error("Please sign in again.")}if(!r.ok)throw new Error(d.message||d.error||"Request failed");return d}
-async function load(){try{const me=await request("/auth/me");user=me.user;orgs=me.organizations||[];if(!orgs.length)throw new Error("No workspace is connected to this account.");orgId=orgs[0].id;$("workspace-name").textContent=orgs[0].name;$("user-name").textContent=user.name||"Account";$("user-email").textContent=user.email;$("avatar").textContent=(user.name||user.email||"?").slice(0,1).toUpperCase();$("greeting").textContent="Good to see you, "+(user.name||"there");await loadMonitors();await loadIncidents();await loadTeam();await loadApiKeys();await loadStatusPages()}catch(e){showNotice(e.message,true)}}
+async function load(){try{const me=await request("/auth/me");user=me.user;orgs=me.organizations||[];if(!orgs.length)throw new Error("No workspace is connected to this account.");orgId=orgs[0].id;$("workspace-name").textContent=orgs[0].name;$("user-name").textContent=user.name||"Account";$("user-email").textContent=user.email;$("avatar").textContent=(user.name||user.email||"?").slice(0,1).toUpperCase();$("greeting").textContent="Good to see you, "+(user.name||"there");await loadMonitors();await loadIncidents();await loadTeam();await loadApiKeys();await loadStatusPages();await loadDataExport()}catch(e){showNotice(e.message,true)}}
 async function loadMonitors(){
   const data=await request("/v1/monitors?organizationId="+encodeURIComponent(orgId));
   monitors=data.monitors||[];
@@ -575,5 +585,56 @@ $("monitor-form").addEventListener("submit",async e=>{
   finally{$("save").disabled=false;$("save").textContent="Save monitor"}
 });
 async function logout(){try{await request("/auth/logout",{method:"POST"})}finally{location.href="./auth.html"}}$("logout").addEventListener("click",logout);$("mobile-logout").addEventListener("click",logout);$("workspace-switch").addEventListener("click",()=>{if(orgs.length>1)showNotice("Workspace switching is being implemented. Your current workspace remains selected.")});$("top-help").addEventListener("click",()=>window.open("https://github.com/learninghub44/zetuwatch","_blank","noopener"));
+
+function exportMessage(message,error=false){
+  const node=$("export-message");
+  node.textContent=message;
+  node.classList.remove("hidden","error");
+  if(error)node.classList.add("error");
+}
+async function loadDataExport(){
+  const role=orgs.find(org=>org.id===orgId)?.role||"viewer";
+  const canExport=role==="owner"||role==="admin";
+  $("export-form").classList.toggle("hidden",!canExport);
+  $("export-message").classList.add("hidden");
+  if(!canExport)exportMessage("Only workspace owners and admins can export workspace data.");
+}
+$("export-type").addEventListener("change",()=>{
+  $("export-range").disabled=$("export-type").value==="monitors";
+});
+$("export-form").addEventListener("submit",async event=>{
+  event.preventDefault();
+  const button=$("export-submit");
+  const type=$("export-type").value;
+  const range=$("export-range").value;
+  button.disabled=true;
+  button.textContent="Preparing…";
+  try{
+    const query=new URLSearchParams({organizationId:orgId,type,range});
+    const response=await fetch(API+"/v1/exports?"+query.toString(),{credentials:"include"});
+    if(response.status===401){location.href="./auth.html";throw new Error("Please sign in again.")}
+    if(!response.ok){
+      const data=await response.json().catch(()=>({}));
+      throw new Error(data.message||data.error||"The export could not be created.");
+    }
+    const blob=await response.blob();
+    const objectUrl=URL.createObjectURL(blob);
+    const link=document.createElement("a");
+    link.href=objectUrl;
+    link.download="zetuwatch-"+type+"-"+(type==="monitors"?"all":range)+".csv";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(()=>URL.revokeObjectURL(objectUrl),1000);
+    const mayBeTruncated=response.headers.get("x-zetuwatch-may-be-truncated")==="true";
+    exportMessage(mayBeTruncated?"Download started. The export reached its row limit and may be incomplete.":"Download started. The file contains only records available in the selected export.");
+  }catch(error){
+    exportMessage(error.message||"The export could not be created.",true);
+  }finally{
+    button.disabled=false;
+    button.textContent="Download CSV";
+  }
+});
+
 load();
 </script></body></html>

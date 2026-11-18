@@ -92,3 +92,13 @@ The current API deliberately returns `executionEnabled: false`. Creating a monit
 ## Error responses
 
 Errors use JSON such as `{ "error": "UNAUTHENTICATED" }`. Common status codes: 400 invalid input, 401 no valid session, 403 insufficient membership/role, 404 missing resource, 405 unsupported method, 429 rate limit, and 503 unconfigured provider. Error messages must not include secrets, full response bodies or internal network details.
+
+## Workspace data exports
+
+- `GET /v1/exports?organizationId=<uuid>&type=checks|incidents|monitors&range=24h|7d|30d` — downloads a UTF-8 CSV export. `type` defaults to `checks`; `range` defaults to `7d`.
+- Requires a verified browser session and an `owner` or `admin` membership in the requested workspace. Read-only API keys are not accepted for exports.
+- Check rows are bounded to the selected inclusive UTC interval. Incident exports include incidents that overlap the selected interval, including unresolved incidents that started earlier. Monitor configuration exports include retained soft-deleted monitors.
+- Check and incident exports are capped at 5,000 rows; monitor configuration exports are capped at 1,000 rows. The response includes `X-ZetuWatch-Row-Limit` and `X-ZetuWatch-May-Be-Truncated` headers. A `true` truncation header means the result reached the cap and may omit additional rows.
+- CSV fields are quoted and escaped. Cells beginning with spreadsheet formula characters (including after control/space prefixes) are prefixed with an apostrophe to reduce CSV formula injection risk. Files include a UTF-8 BOM and CRLF row endings.
+- Export responses use `Cache-Control: no-store` and `X-Content-Type-Options: nosniff`. Successful exports create a `data.exported` audit event containing the export type, selected range and row count, but no exported values.
+- Export requests are limited to 10 per source IP per 15 minutes. Large exports should be split by time range; the endpoint intentionally does not stream unbounded D1 result sets.
