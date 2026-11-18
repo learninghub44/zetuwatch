@@ -38,7 +38,7 @@ def main() -> None:
             raise SystemExit(f"Missing notification_channels.{column}")
 
     delivery_columns = {row[1] for row in db.execute("PRAGMA table_info(notification_deliveries)")}
-    for column in ("event_id", "event_type", "recipient_email", "lease_token", "lease_until", "updated_at"):
+    for column in ("event_id", "event_type", "recipient_email", "channel_created_by", "lease_token", "lease_until", "updated_at"):
         if column not in delivery_columns:
             raise SystemExit(f"Missing notification_deliveries.{column}")
 
@@ -46,6 +46,7 @@ def main() -> None:
         "idx_notification_channels_email_destination",
         "idx_notification_deliveries_event_channel",
         "idx_notification_deliveries_due",
+        "idx_notification_deliveries_channel_creator",
     }
     existing_indexes = {row[0] for row in db.execute(
         "SELECT name FROM sqlite_master WHERE type = 'index'"
