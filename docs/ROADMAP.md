@@ -278,3 +278,13 @@ No Cloudflare resources were created and no deployment was attempted. This is fe
 - Hardened settlement so an expired lease cannot be settled by a stale worker; context loading also refuses an expired claim. Added tests for expired/reclaimed leases, timestamp/token validation, delta-seconds Retry-After, provider concurrent-idempotency retries and tenant-scoped delivery logs.
 - CI and D1 integration verification for this feature branch are pending. No live Resend request has been made; provider fetch is mocked in tests. The Resend API key and verified sender domain must be configured by the operator before real email can be delivered.
 - Email notifications are not launch-complete until the full feature-branch CI passes, browser acceptance is completed and a controlled real-provider delivery/unsubscribe exercise is verified. Webhook alerts, SMS and monitor probes remain separate work.
+
+
+### Email notification hardening follow-up (2026-11-18)
+
+- Delivery rows now retain the channel creator identifier independently of the nullable channel foreign key. Removing a channel cancels queued work but preserves the creator's delivery history; owners/admins retain workspace-wide visibility.
+- Migration validation now requires `channel_created_by` and its organization/time index.
+- Email subjects strip control characters, plain text is normalized, and links are constructed from HTTPS origins (localhost HTTP only for development); URL credentials and unsafe protocols are rejected.
+- Dispatch uses the actual Cron invocation time for leases and records scheduler lag without recipient data. Missing provider, sender or app URL configuration leaves queued work unclaimed.
+- Added regression coverage for delivery history after channel removal, safe application links, subject control characters, missing configuration and delayed Cron delivery.
+- These changes remain in draft PR #6. Full GitHub Actions CI and browser acceptance have not been observed; do not mark notifications complete.
