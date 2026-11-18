@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildIncidentEmail } from "./dispatch";
+import { buildIncidentEmail, dispatchNotificationBatch } from "./dispatch";
 
 describe("incident email rendering", () => {
   it("escapes workspace and incident text and does not include target URLs", () => {
@@ -48,5 +48,24 @@ describe("notification email URL and header safety", () => {
       organizationName: "Acme\r\nBcc: attacker@example.test"
     }, "https://app.example.test");
     expect(email.subject).not.toMatch(/[\r\n]/);
+  });
+});
+
+
+describe("notification dispatch configuration", () => {
+  it("does not claim deliveries until provider and application configuration exist", async () => {
+    const result = await dispatchNotificationBatch({
+      DB: {} as D1Database,
+      PUBLIC_APP_URL: "",
+      RESEND_API_KEY: undefined,
+      EMAIL_FROM: undefined
+    });
+    expect(result).toEqual({
+      skipped: true,
+      claimed: 0,
+      sent: 0,
+      retried: 0,
+      failed: 0
+    });
   });
 });
