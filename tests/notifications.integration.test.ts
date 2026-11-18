@@ -1,6 +1,7 @@
 import { env, exports } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vitest";
 import { finalizeMonitorCheck } from "../packages/scheduler-core/src/claims";
+import { claimDueNotificationDeliveries, settleNotificationDelivery } from "../packages/notifications-core/src/outbox";
 
 type Role = "owner" | "admin" | "member" | "viewer";
 interface Identity {
@@ -295,5 +296,132 @@ describe("email notification channels and delivery", () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+});
+
+ 
+describe("notification outbox lease safety", () => {
+  it("rejects expired claims and allows only the replacement lease to settle", async () => {
+    const owner = await createIdentity("owner");
+    const channel = await createEmailChannel(owner);
+    const monitorId = await createMonitor(owner.organizationId);
+    const deliveryId = await queueDelivery(owner, monitorId, channel.id);
+    const now = new Date(Date.now() + 2_000);
+
+    const first = await claimDueNotificationDeliveries(env.DB, {
+      now,
+      leaseMs: 30_000,
+      token: "notification-lease-first-0001"
+    });
+    expect(first).toHaveLength(1);
+    expect(first[0]?.id).toBe(deliveryId);
+
+    const expiredAt = new Date(now.getTime() + 30_001);
+    const expiredSettlement = await settleNotificationDelivery(env.DB, first[0]!, {
+      kind: "sent",
+      providerMessageId: "stale-provider-message",
+      now: expiredAt
+    });
+    expect(expiredSettlement).toBe(false);
+
+    const replacement = await claimDueNotificationDeliveries(env.DB, {
+      now: expiredAt,
+      leaseMs: 30_000,
+      token: "notification-lease-second-0002"
+    });
+    expect(replacement).toHaveLength(1);
+    expect(replacement[0]?.attemptCount).toBe(2);
+
+    const staleAfterReclaim = await settleNotificationDelivery(env.DB, first[0]!, {
+      kind: "sent",
+      providerMessageId: "stale-provider-message",
+      now: new Date(expiredAt.getTime() + 1)
+    });
+    expect(staleAfterReclaim).toBe(false);
+
+    const currentSettlement = await settleNotificationDelivery(env.DB, replacement[0]!, {
+      kind: "sent",
+      providerMessageId: "current-provider-message",
+      now: new Date(expiredAt.getTime() + 1)
+    });
+    expect(currentSettlement).toBe(true);
+
+    const row = await env.DB.prepare("SELECT status, attempt_count, provider_message_id FROM notification_deliveries WHERE id = ?")
+      .bind(deliveryId).first<{ status: string; attempt_count: number; provider_message_id: string }>();
+    expect(row).toMatchObject({
+      status: "sent",
+      attempt_count: 2,
+      provider_message_id: "current-provider-message"
+    });
+  });
+});
+
+describe("Resend idempotency conflict handling", () => {
+  it("retries concurrent idempotent requests with the same stable key", async () => {
+    const owner = await createIdentity("owner");
+    const channel = await createEmailChannel(owner);
+    const monitorId = await createMonitor(owner.organizationId);
+    const deliveryId = await queueDelivery(owner, monitorId, channel.id);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        name: "concurrent_idempotent_requests",
+        message: "Another request with this key is still processing."
+      }), { status: 409, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "re_concurrent_retry" }), {
+        status: 200, headers: { "content-type": "application/json" }
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const now = new Date();
+      await runScheduled(now);
+      const queued = await env.DB.prepare("SELECT status, attempt_count, last_error_code FROM notification_deliveries WHERE id = ?")
+        .bind(deliveryId).first<{ status: string; attempt_count: number; last_error_code: string }>();
+      expect(queued).toMatchObject({
+        status: "queued",
+        attempt_count: 1,
+        last_error_code: "PROVIDER_REQUEST_IN_PROGRESS"
+      });
+
+      await env.DB.prepare("UPDATE notification_deliveries SET next_attempt_at = ? WHERE id = ?")
+        .bind(new Date(now.getTime() - 1_000).toISOString(), deliveryId).run();
+      await runScheduled(new Date(now.getTime() + 1_000));
+
+      const sent = await env.DB.prepare("SELECT status, attempt_count, provider_message_id FROM notification_deliveries WHERE id = ?")
+        .bind(deliveryId).first<{ status: string; attempt_count: number; provider_message_id: string }>();
+      expect(sent).toMatchObject({
+        status: "sent",
+        attempt_count: 2,
+        provider_message_id: "re_concurrent_retry"
+      });
+      const firstKey = (fetchMock.mock.calls[0]?.[1]?.headers as Record<string, string>)["Idempotency-Key"];
+      const secondKey = (fetchMock.mock.calls[1]?.[1]?.headers as Record<string, string>)["Idempotency-Key"];
+      expect(firstKey).toBe(secondKey);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
+describe("notification delivery log access", () => {
+  it("returns only the current workspace delivery records", async () => {
+    const owner = await createIdentity("owner");
+    const channel = await createEmailChannel(owner);
+    const monitorId = await createMonitor(owner.organizationId);
+    const deliveryId = await queueDelivery(owner, monitorId, channel.id);
+
+    const own = await api("/v1/organizations/" + owner.organizationId + "/notification-deliveries", owner);
+    expect(own.status).toBe(200);
+    const ownPayload = await own.json() as { deliveries: Array<{ id: string; recipientEmail: string; monitorName: string }> };
+    expect(ownPayload.deliveries).toEqual([
+      expect.objectContaining({
+        id: deliveryId,
+        recipientEmail: owner.email,
+        monitorName: "Payments API"
+      })
+    ]);
+
+    const foreign = await createIdentity("owner");
+    const denied = await api("/v1/organizations/" + owner.organizationId + "/notification-deliveries", foreign);
+    expect(denied.status).toBe(403);
   });
 });
