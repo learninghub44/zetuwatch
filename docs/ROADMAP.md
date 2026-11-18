@@ -27,7 +27,7 @@ The product is built in vertical slices. A slice is complete only when UI, API, 
 - [ ] Bounded scheduled runner / Cron Trigger integration (load, lag and retry behavior remain untested; real execution is blocked on hardened DNS-pinned egress)
 - [ ] HTTP/HTTPS checks, history and latency
 - [ ] Incident confirmation, deduplication and recovery (D1-backed finalization confirms, deduplicates, monitors, resolves and reopens incidents; tenant-scoped incident list/detail APIs now return the timeline to workspace members. Member/admin/owner incident status transitions, internal/public customer-authored timeline notes, actor attribution, audit writes and responsive controls are implemented; seven D1-backed Worker API integration tests were added. Public updates are stored but not published, browser E2E/accessibility and notifications remain. Monitor deletion now soft-deletes and retains check, incident and timeline rows; retention and hard-purge workflows remain.)
-- [ ] Verified email alerts and delivery history
+- [ ] Verified email alerts and delivery history: channel management, durable outbox, bounded retries, delivery-log API and responsive Alerts UI are implemented on `feat/email-alert-outbox`; full CI, browser acceptance and live Resend delivery remain
 
 ## Phase 3 — complete customer experience
 - [ ] Public marketing website, docs and pricing
