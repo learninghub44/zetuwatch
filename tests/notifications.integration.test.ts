@@ -84,10 +84,10 @@ async function queueDelivery(identity: Identity, monitorId: string, channelId: s
   const deliveryId = crypto.randomUUID();
   await env.DB.prepare(`INSERT INTO notification_deliveries
     (id, organization_id, incident_id, channel_id, provider, status, attempt_count,
-     next_attempt_at, event_id, event_type, recipient_email)
-    VALUES (?, ?, ?, ?, 'resend', 'queued', 0, ?, ?, 'incident.opened', ?)`)
+     next_attempt_at, event_id, event_type, recipient_email, channel_created_by)
+    VALUES (?, ?, ?, ?, 'resend', 'queued', 0, ?, ?, 'incident.opened', ?, ?)`)
     .bind(deliveryId, identity.organizationId, incident.id, channelId,
-      new Date(Date.now() - 1000).toISOString(), incident.eventId, identity.email).run();
+      new Date(Date.now() - 1000).toISOString(), incident.eventId, identity.email, identity.userId).run();
   return deliveryId;
 }
 
@@ -451,5 +451,35 @@ describe("notification scheduler lag handling", () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+});
+
+
+describe("notification delivery history retention", () => {
+  it("keeps a member's delivery history visible after their channel is removed", async () => {
+    const member = await createIdentity("member");
+    const channel = await createEmailChannel(member);
+    const monitorId = await createMonitor(member.organizationId);
+    const deliveryId = await queueDelivery(member, monitorId, channel.id);
+
+    const removed = await api("/v1/organizations/" + member.organizationId + "/notification-channels/" + channel.id, member, {
+      method: "DELETE"
+    });
+    expect(removed.status).toBe(200);
+
+    const stored = await env.DB.prepare("SELECT status, channel_id, channel_created_by FROM notification_deliveries WHERE id = ?")
+      .bind(deliveryId).first<{ status: string; channel_id: string | null; channel_created_by: string }>();
+    expect(stored).toMatchObject({
+      status: "failed",
+      channel_id: null,
+      channel_created_by: member.userId
+    });
+
+    const history = await api("/v1/organizations/" + member.organizationId + "/notification-deliveries", member);
+    expect(history.status).toBe(200);
+    const payload = await history.json() as { deliveries: Array<{ id: string; lastErrorCode: string }> };
+    expect(payload.deliveries).toEqual([
+      expect.objectContaining({ id: deliveryId, lastErrorCode: "CHANNEL_REMOVED" })
+    ]);
   });
 });
