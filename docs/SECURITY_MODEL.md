@@ -100,3 +100,7 @@ This is a public information surface, not a live service-health assertion. Do no
 - Transient network, timeout, rate-limit and provider 5xx failures use bounded retries. Retry-After is parsed as delta-seconds or an HTTP date and capped at six hours. Six total attempts are allowed.
 - Disabling/removing a channel cancels queued deliveries. It cannot recall a request already accepted by the provider; this limitation is disclosed in the UI.
 - The dispatcher skips sending when Resend credentials or sender configuration are missing. No real provider delivery has been verified. Never add provider secrets to source control, client code, logs or API responses.
+
+
+- Delivery records retain a non-secret channel-creator identifier independently of the channel foreign key. Removing a channel sets the channel reference to null and cancels queued work but preserves the operational log; member access remains scoped to the retained creator identifier and current workspace membership.
+- Email subjects strip control characters, plain-text bodies remove non-printing controls, and application links are built only from an HTTPS origin (HTTP is allowed only for localhost development). Credentials embedded in the configured URL are rejected. This protects recipients from a misconfigured link becoming a script or credential-bearing URL.
