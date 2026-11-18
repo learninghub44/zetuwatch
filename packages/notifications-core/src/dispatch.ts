@@ -84,7 +84,8 @@ export function buildIncidentEmail(context: DeliveryContext, appUrl: string): {
 
 async function loadDeliveryContext(
   env: NotificationDispatchEnv,
-  delivery: NotificationDelivery
+  delivery: NotificationDelivery,
+  nowIso: string
 ): Promise<DeliveryContext | null> {
   if (!delivery.channelId || !delivery.eventId || !delivery.incidentId) return null;
   return env.DB.prepare(`
@@ -112,8 +113,47 @@ async function loadDeliveryContext(
     JOIN monitors m ON m.id = i.monitor_id AND m.organization_id = d.organization_id
     JOIN incident_events e ON e.id = d.event_id AND e.incident_id = i.id
     WHERE d.id = ? AND d.lease_token = ? AND d.status = 'queued'
-      AND d.recipient_email = c.destination
-  `).bind(delivery.id, delivery.leaseToken).first<DeliveryContext>();
+      AND d.lease_until > ? AND d.recipient_email = c.destination
+  `).bind(delivery.id, delivery.leaseToken, nowIso).first<DeliveryContext>();
+}
+
+async function readProviderErrorName(response: Response): Promise<string | null> {
+  const reader = response.body?.getReader();
+  if (!reader) return null;
+  const chunks: Uint8Array[] = [];
+  let length = 0;
+  try {
+    while (length < 4096) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const remaining = 4096 - length;
+      const chunk = value.byteLength > remaining ? value.slice(0, remaining) : value;
+      chunks.push(chunk);
+      length += chunk.byteLength;
+      if (chunk.byteLength < value.byteLength || length === 4096) {
+        await reader.cancel().catch(() => undefined);
+        break;
+      }
+    }
+  } catch {
+    return null;
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  try {
+    const payload = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>;
+    const name = [payload.name, payload.error, payload.code]
+      .find(value => typeof value === "string") as string | undefined;
+    return name?.toLowerCase() ?? null;
+  } catch {
+    return null;
+  }
 }
 
 async function sendWithResend(
@@ -150,6 +190,14 @@ async function sendWithResend(
         return { kind: "retry", code: "PROVIDER_RESPONSE_INVALID", retryAfterSeconds: null };
       }
       return { kind: "sent", id: payload.id };
+    }
+    if (response.status === 409) {
+      const providerError = await readProviderErrorName(response);
+      if (providerError === "concurrent_idempotent_requests") {
+        return { kind: "retry", code: "PROVIDER_REQUEST_IN_PROGRESS", retryAfterSeconds: null };
+      }
+      return { kind: "failed", code: providerError === "invalid_idempotent_request"
+        ? "PROVIDER_IDEMPOTENCY_CONFLICT" : "PROVIDER_CONFLICT" };
     }
     if (response.status === 429) {
       return { kind: "retry", code: "PROVIDER_RATE_LIMITED", retryAfterSeconds: parseRetryAfter(response.headers.get("retry-after")) };
@@ -189,10 +237,10 @@ export async function dispatchNotificationBatch(
   };
 
   for (const delivery of deliveries) {
-    const context = await loadDeliveryContext(env, delivery);
+    const context = await loadDeliveryContext(env, delivery, new Date().toISOString());
     if (!context) {
       const settled = await settleNotificationDelivery(env.DB, delivery, {
-        kind: "failed", errorCode: "RECIPIENT_NOT_ELIGIBLE", now
+        kind: "failed", errorCode: "RECIPIENT_NOT_ELIGIBLE", now: new Date()
       });
       if (settled) summary.failed++;
       continue;
@@ -201,17 +249,17 @@ export async function dispatchNotificationBatch(
     const result = await sendWithResend(env, delivery, context, fetcher);
     if (result.kind === "sent") {
       if (await settleNotificationDelivery(env.DB, delivery, {
-        kind: "sent", providerMessageId: result.id, now
+        kind: "sent", providerMessageId: result.id, now: new Date()
       })) summary.sent++;
     } else if (result.kind === "retry") {
       if (await settleNotificationDelivery(env.DB, delivery, {
-        kind: "retry", errorCode: result.code, retryAfterSeconds: result.retryAfterSeconds, now
+        kind: "retry", errorCode: result.code, retryAfterSeconds: result.retryAfterSeconds, now: new Date()
       })) {
         if (delivery.attemptCount >= 6) summary.failed++;
         else summary.retried++;
       }
     } else if (await settleNotificationDelivery(env.DB, delivery, {
-      kind: "failed", errorCode: result.code, now
+      kind: "failed", errorCode: result.code, now: new Date()
     })) {
       summary.failed++;
     }
