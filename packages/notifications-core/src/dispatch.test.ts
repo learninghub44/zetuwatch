@@ -45,8 +45,8 @@ describe("notification email URL and header safety", () => {
   it("removes control characters from the email subject", () => {
     const email = buildIncidentEmail({
       ...context,
-      organizationName: "Acme\\r\\nBcc: attacker@example.test"
+      organizationName: "Acme\r\nBcc: attacker@example.test"
     }, "https://app.example.test");
-    expect(email.subject).not.toMatch(/[\\r\\n]/);
+    expect(email.subject).not.toMatch(/[\r\n]/);
   });
 });
