@@ -425,3 +425,31 @@ describe("notification delivery log access", () => {
     expect(denied.status).toBe(403);
   });
 });
+
+
+describe("notification scheduler lag handling", () => {
+  it("uses invocation time when a Cron event arrives after its scheduled timestamp", async () => {
+    const owner = await createIdentity("owner");
+    const channel = await createEmailChannel(owner);
+    const monitorId = await createMonitor(owner.organizationId);
+    const deliveryId = await queueDelivery(owner, monitorId, channel.id);
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ id: "re_delayed_cron" }), {
+      status: 200,
+      headers: { "content-type": "application/json" }
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      await runScheduled(new Date(Date.now() - 120_000));
+      const row = await env.DB.prepare("SELECT status, attempt_count, provider_message_id FROM notification_deliveries WHERE id = ?")
+        .bind(deliveryId).first<{ status: string; attempt_count: number; provider_message_id: string }>();
+      expect(row).toMatchObject({
+        status: "sent",
+        attempt_count: 1,
+        provider_message_id: "re_delayed_cron"
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
