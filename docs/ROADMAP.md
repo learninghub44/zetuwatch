@@ -287,7 +287,7 @@ No Cloudflare resources were created and no deployment was attempted. This is fe
 - Email subjects strip control characters, plain text is normalized, and links are constructed from HTTPS origins (localhost HTTP only for development); URL credentials and unsafe protocols are rejected.
 - Dispatch uses the actual Cron invocation time for leases and records scheduler lag without recipient data. Missing provider, sender or app URL configuration leaves queued work unclaimed.
 - Added regression coverage for delivery history after channel removal, safe application links, subject control characters, missing configuration and delayed Cron delivery.
-- These changes remain in draft PR #6. Full GitHub Actions CI and browser acceptance have not been observed; do not mark notifications complete.
+- These changes remain open in PR #6. Full GitHub Actions CI and browser acceptance have not been observed; do not mark notifications complete.
 
 
 ### Email notification privacy hardening (2026-11-18)
