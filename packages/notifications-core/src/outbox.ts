@@ -28,7 +28,7 @@ export interface NotificationClaimOptions {
 }
 
 function parseTimestamp(value: Date | string, label: string): { milliseconds: number; iso: string } {
-  if (typeof value === "string" && !/^\\d{4}-\\d{2}-\\d{2}T.*(?:Z|[+-]\\d{2}:\\d{2})$/.test(value)) {
+  if (typeof value === "string" && !/^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$/.test(value)) {
     throw new Error("NOTIFICATION_" + label + "_INVALID");
   }
   const date = value instanceof Date ? new Date(value.getTime()) : new Date(value);
@@ -53,7 +53,7 @@ export async function claimDueNotificationDeliveries(
   if (!Number.isInteger(limit) || limit < 1 || limit > MAX_NOTIFICATION_CLAIM_LIMIT) {
     throw new Error("NOTIFICATION_LIMIT_INVALID");
   }
-  if (typeof token !== "string" || token.length < 16 || token.length > 128 || /\\s/.test(token)) {
+  if (typeof token !== "string" || token.length < 16 || token.length > 128 || /\s/.test(token)) {
     throw new Error("NOTIFICATION_TOKEN_INVALID");
   }
 
@@ -121,7 +121,8 @@ export function notificationRetryDelaySeconds(attemptCount: number, retryAfterSe
 export function parseRetryAfter(value: string | null, now = Date.now()): number | null {
   if (!value) return null;
   const trimmed = value.trim();
-  if (/^\\d+$/.test(trimmed)) return Math.min(21_600, Math.max(1, Number(trimmed)));
+  if (/^\d+$/.test(trimmed)) return Math.min(21_600, Math.max(1, Number(trimmed)));
+  if (!/^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun), \d{2} (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{4} \d{2}:\d{2}:\d{2} GMT$/.test(trimmed)) return null;
   const timestamp = Date.parse(trimmed);
   if (!Number.isFinite(timestamp)) return null;
   return Math.min(21_600, Math.max(1, Math.ceil((timestamp - now) / 1000)));
@@ -153,8 +154,8 @@ export async function settleNotificationDelivery(
       SET status = 'sent', provider_message_id = ?, delivered_at = ?,
           next_attempt_at = NULL, last_error_code = NULL,
           lease_token = NULL, lease_until = NULL, updated_at = ?
-      WHERE id = ? AND lease_token = ? AND status = 'queued'`)
-      .bind(providerMessageId, now.iso, now.iso, delivery.id, delivery.leaseToken);
+      WHERE id = ? AND lease_token = ? AND status = 'queued' AND lease_until > ?`)
+      .bind(providerMessageId, now.iso, now.iso, delivery.id, delivery.leaseToken, now.iso);
   } else if (settlement.kind === "failed") {
     const errorCode = settlement.errorCode.trim();
     if (!/^[A-Z][A-Z0-9_]{0,63}$/.test(errorCode)) throw new Error("NOTIFICATION_ERROR_CODE_INVALID");
@@ -162,8 +163,8 @@ export async function settleNotificationDelivery(
       UPDATE notification_deliveries
       SET status = 'failed', next_attempt_at = NULL, last_error_code = ?,
           lease_token = NULL, lease_until = NULL, updated_at = ?
-      WHERE id = ? AND lease_token = ? AND status = 'queued'`)
-      .bind(errorCode, now.iso, delivery.id, delivery.leaseToken);
+      WHERE id = ? AND lease_token = ? AND status = 'queued' AND lease_until > ?`)
+      .bind(errorCode, now.iso, delivery.id, delivery.leaseToken, now.iso);
   } else {
     const errorCode = settlement.errorCode.trim();
     if (!/^[A-Z][A-Z0-9_]{0,63}$/.test(errorCode)) throw new Error("NOTIFICATION_ERROR_CODE_INVALID");
@@ -173,16 +174,16 @@ export async function settleNotificationDelivery(
         UPDATE notification_deliveries
         SET status = 'failed', next_attempt_at = NULL, last_error_code = ?,
             lease_token = NULL, lease_until = NULL, updated_at = ?
-        WHERE id = ? AND lease_token = ? AND status = 'queued'`)
-        .bind("RETRY_EXHAUSTED_" + errorCode, now.iso, delivery.id, delivery.leaseToken);
+        WHERE id = ? AND lease_token = ? AND status = 'queued' AND lease_until > ?`)
+        .bind("RETRY_EXHAUSTED_" + errorCode, now.iso, delivery.id, delivery.leaseToken, now.iso);
     } else {
       const nextAttemptAt = new Date(now.milliseconds + delay * 1000).toISOString();
       statement = db.prepare(`
         UPDATE notification_deliveries
         SET status = 'queued', next_attempt_at = ?, last_error_code = ?,
             lease_token = NULL, lease_until = NULL, updated_at = ?
-        WHERE id = ? AND lease_token = ? AND status = 'queued'`)
-        .bind(nextAttemptAt, errorCode, now.iso, delivery.id, delivery.leaseToken);
+        WHERE id = ? AND lease_token = ? AND status = 'queued' AND lease_until > ?`)
+        .bind(nextAttemptAt, errorCode, now.iso, delivery.id, delivery.leaseToken, now.iso);
     }
   }
 
