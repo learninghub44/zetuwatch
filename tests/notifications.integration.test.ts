@@ -275,7 +275,7 @@ describe("email notification channels and delivery", () => {
         owner.userId
       ).run();
 
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ id: "re_public_update_only" }), {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify({ id: "re_public_update_only" }), {
       status: 200,
       headers: { "content-type": "application/json" }
     }));
