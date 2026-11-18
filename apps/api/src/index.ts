@@ -99,9 +99,9 @@ function enqueueNotificationDeliveries(env: Env, eventId: string, eventType: str
   return env.DB.prepare(`
     INSERT OR IGNORE INTO notification_deliveries
       (id, organization_id, incident_id, channel_id, provider, status,
-       attempt_count, next_attempt_at, event_id, event_type, recipient_email, updated_at)
+       attempt_count, next_attempt_at, event_id, event_type, recipient_email, channel_created_by, updated_at)
     SELECT ? || ':' || c.id, m.organization_id, i.id, c.id, 'resend', 'queued',
-      0, ?, e.id, e.event_type, c.destination, ?
+      0, ?, e.id, e.event_type, c.destination, c.created_by, ?
     FROM incident_events e
     JOIN incidents i ON i.id = e.incident_id
     JOIN monitors m ON m.id = i.monitor_id
@@ -650,10 +650,9 @@ export default {
             d.created_at AS createdAt, d.delivered_at AS deliveredAt,
             d.next_attempt_at AS nextAttemptAt, m.name AS monitorName
           FROM notification_deliveries d
-          LEFT JOIN notification_channels c ON c.id = d.channel_id
           LEFT JOIN incidents i ON i.id = d.incident_id
           LEFT JOIN monitors m ON m.id = i.monitor_id
-          WHERE d.organization_id = ? AND (? = 1 OR c.created_by = ?)
+          WHERE d.organization_id = ? AND (? = 1 OR d.channel_created_by = ?)
           ORDER BY d.created_at DESC, d.id DESC
           LIMIT 100
         `).bind(organizationId, canManageAllChannels ? 1 : 0, user.id).all();
