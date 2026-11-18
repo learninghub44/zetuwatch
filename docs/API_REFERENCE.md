@@ -109,3 +109,6 @@ Incident lifecycle events and customer-authored incident updates are inserted in
 Configure `RESEND_API_KEY` and `EMAIL_FROM` in the Worker environment and set `PUBLIC_APP_URL` to the public HTTPS application origin. If the provider credentials or sender are absent, the scheduled dispatcher skips sending and leaves queued rows available for a later run. See [EMAIL_NOTIFICATIONS.md](EMAIL_NOTIFICATIONS.md) for setup and operational limitations.
 
 Disabling/removing a channel cancels queued work. It cannot recall an email already accepted by the provider. Delivery records are operational logs, not proof that the recipient's mailbox accepted or displayed a message.
+
+
+Delivery history retains the channel creator identifier independently of the channel row. Removing a channel sets the delivery's channel reference to null but does not erase the delivery record; the original member can still inspect their own retained log while they remain in the workspace. Workspace owners/admins can inspect all retained delivery records.
