@@ -48,3 +48,8 @@ Workspace owners/admins can manage all channels. Members can manage their own ch
 CI uses mocked provider responses and isolated local D1. No live Resend request or mailbox delivery is part of the automated suite. Before launch, verify the sender/domain and API key in the intended account, perform a controlled real delivery, verify the recipient experience, exercise disable/removal, and confirm that delivery logs do not expose secrets or internal target URLs.
 
 The current monitoring probe runner remains disabled. Email notifications can dispatch only for incident events that already exist; they do not imply that ZetuWatch is actively checking customer URLs.
+
+
+The dispatcher requires `PUBLIC_APP_URL` to be an absolute HTTPS URL. HTTP is accepted only for `localhost` or `127.0.0.1` during local development. URL credentials are rejected. The application link is normalized to the workspace incident view; untrusted organization/monitor/timeline text is HTML-escaped and control characters are removed from email headers/plain text.
+
+Removing a channel preserves its delivery log. The channel foreign key becomes null, but the creator-scoped history remains visible to that member while they remain in the workspace; owners/admins can see all workspace delivery history.
