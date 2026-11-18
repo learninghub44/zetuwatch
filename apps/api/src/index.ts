@@ -1151,7 +1151,7 @@ export default {
     const schedulerLagMs = Math.max(0, startedAt.getTime() - controller.scheduledTime);
     if (summary.skipped) {
       console.warn("notification_dispatch_skipped", {
-        reason: "RESEND_NOT_CONFIGURED",
+        reason: "NOTIFICATION_CONFIGURATION_MISSING",
         schedulerLagMs
       });
     } else if (summary.claimed > 0) {
