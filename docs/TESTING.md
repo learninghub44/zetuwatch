@@ -114,3 +114,10 @@ The static `apps/web/status.html` renderer is included in the existing inline-sc
 
 
 The status-page implementation passed GitHub Actions run [#182](https://github.com/learninghub44/zetuwatch/actions/runs/43568666409): TypeScript, inline browser JavaScript syntax (five HTML files), SQLite migration validation (seven migrations) and the full Vitest suite (13 files, 129 tests). This does not replace browser E2E or accessibility testing.
+
+
+## Email notification integration coverage
+
+The notification suite runs against the actual Worker entrypoint and isolated local D1. It covers verified-self-email channel creation, role and tenant restrictions, channel disable cancellation, scheduler-finalizer event enqueue, exactly-once event/channel rows, provider success and stable idempotency keys, rate-limit retries, concurrent scheduled invocations, expired lease rejection/reclaim, concurrent Resend idempotency 409 retry, and workspace-scoped delivery-log reads. Unit tests cover bounded retry delays, Retry-After delta-seconds/HTTP-date parsing, strict ISO timestamp input and lease-token whitespace rejection.
+
+All provider calls are intercepted with an injected/mock fetch. These tests do not send real email, verify a Resend domain, validate a production API key, or prove mailbox delivery. The notification feature branch still requires full GitHub Actions verification and browser acceptance.
