@@ -37,6 +37,29 @@ function escapeHtml(value: string): string {
     .replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 
+function safeSubjectText(value: string): string {
+  return value.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim().slice(0, 100);
+}
+
+function safePlainText(value: string, maxLength = 2_000): string {
+  return value.replace(/\r\n?/g, "\n")
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "")
+    .slice(0, maxLength);
+}
+
+function incidentAppLink(appUrl: string): string {
+  const url = new URL(appUrl);
+  const isLocalHttp = url.protocol === "http:" &&
+    (url.hostname === "localhost" || url.hostname === "127.0.0.1");
+  if (url.protocol !== "https:" && !isLocalHttp) throw new Error("NOTIFICATION_APP_URL_INVALID");
+  if (url.username || url.password) throw new Error("NOTIFICATION_APP_URL_INVALID");
+  url.pathname = "/app.html";
+  url.search = "";
+  url.hash = "incidents";
+  return url.toString();
+}
+
+
 export function buildIncidentEmail(context: DeliveryContext, appUrl: string): {
   subject: string;
   html: string;
@@ -51,13 +74,13 @@ export function buildIncidentEmail(context: DeliveryContext, appUrl: string): {
     "incident.update": "Incident update"
   };
   const label = labels[context.eventType] ?? "Incident update";
-  const subject = `[${context.organizationName}] ${label}: ${context.monitorName}`.slice(0, 180);
+  const subject = `[${safeSubjectText(context.organizationName)}] ${label}: ${safeSubjectText(context.monitorName)}`.slice(0, 180);
   const organization = escapeHtml(context.organizationName);
   const monitor = escapeHtml(context.monitorName);
   const status = escapeHtml(context.incidentStatus.replace(/_/g, " "));
   const summary = escapeHtml(context.incidentSummary);
   const message = escapeHtml(context.eventMessage);
-  const link = appUrl.replace(/\/$/, "") + "/app.html#incidents";
+  const link = incidentAppLink(appUrl);
   const safeLink = escapeHtml(link);
   const html = `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;color:#17211d">
     <p style="color:#16794b;font-weight:700">ZetuWatch</p>
@@ -71,11 +94,11 @@ export function buildIncidentEmail(context: DeliveryContext, appUrl: string): {
   </div>`;
   const text = [
     "ZetuWatch",
-    organization.replace(/&amp;/g, "&"),
-    `${label}: ${context.monitorName}`,
-    `Current incident state: ${context.incidentStatus}`,
-    context.incidentSummary,
-    context.eventMessage,
+    safePlainText(context.organizationName),
+    safePlainText(label + ": " + context.monitorName),
+    safePlainText("Current incident state: " + context.incidentStatus),
+    safePlainText(context.incidentSummary),
+    safePlainText(context.eventMessage),
     `Open incident in ZetuWatch: ${link}`,
     "You can disable or remove this channel from Workspace > Alerts."
   ].join("\n\n");
@@ -162,7 +185,12 @@ async function sendWithResend(
   context: DeliveryContext,
   fetcher: typeof fetch
 ): Promise<{ kind: "sent"; id: string } | { kind: "retry"; code: string; retryAfterSeconds: number | null } | { kind: "failed"; code: string }> {
-  const email = buildIncidentEmail(context, env.PUBLIC_APP_URL);
+  let email: ReturnType<typeof buildIncidentEmail>;
+  try {
+    email = buildIncidentEmail(context, env.PUBLIC_APP_URL);
+  } catch {
+    return { kind: "failed", code: "NOTIFICATION_APP_URL_INVALID" };
+  }
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 10_000);
   try {
@@ -223,7 +251,7 @@ export async function dispatchNotificationBatch(
   env: NotificationDispatchEnv,
   options: { now?: Date | string; limit?: number; fetcher?: typeof fetch } = {}
 ): Promise<NotificationDispatchSummary> {
-  if (!env.RESEND_API_KEY || !env.EMAIL_FROM) {
+  if (!env.RESEND_API_KEY || !env.EMAIL_FROM || !env.PUBLIC_APP_URL) {
     return { skipped: true, claimed: 0, sent: 0, retried: 0, failed: 0 };
   }
   const now = options.now ?? new Date();
