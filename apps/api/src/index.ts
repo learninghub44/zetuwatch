@@ -1144,14 +1144,19 @@ export default {
   },
   async scheduled(controller: ScheduledController, env: Env, _ctx: ExecutionContext): Promise<void> {
     if (controller.cron !== "*/1 * * * *") return;
+    const startedAt = new Date();
     const summary = await dispatchNotificationBatch(env, {
-      now: new Date(controller.scheduledTime),
+      now: startedAt,
       limit: 5
     });
+    const schedulerLagMs = Math.max(0, startedAt.getTime() - controller.scheduledTime);
     if (summary.skipped) {
-      console.warn("notification_dispatch_skipped", { reason: "RESEND_NOT_CONFIGURED" });
+      console.warn("notification_dispatch_skipped", {
+        reason: "RESEND_NOT_CONFIGURED",
+        schedulerLagMs
+      });
     } else if (summary.claimed > 0) {
-      console.info("notification_dispatch_completed", summary);
+      console.info("notification_dispatch_completed", { ...summary, schedulerLagMs });
     }
   }
 };
