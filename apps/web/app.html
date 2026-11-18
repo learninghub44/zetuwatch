@@ -5,13 +5,13 @@
 @media(max-width:850px){.shell{grid-template-columns:205px 1fr}.content{padding:25px}.top{padding:0 25px}}
 @media(max-width:650px){.monitor-meta-grid{grid-template-columns:1fr 1fr}.setup-grid{grid-template-columns:1fr}.shell{display:block}.side{display:none}.mobile-head{display:flex;align-items:center;justify-content:space-between;background:#fff;border-bottom:1px solid var(--line);padding:14px 17px}.mobile-nav{display:flex;gap:7px;overflow-x:auto;padding:8px 16px;background:#fff;border-bottom:1px solid var(--line)}.mobile-nav a{white-space:nowrap;text-decoration:none;color:#56635b;font-size:11px;font-weight:600;padding:7px 9px;border:1px solid var(--line);border-radius:8px}.status-monitor-options{grid-template-columns:1fr}.top{height:52px;padding:0 17px}.content{padding:22px 16px}.heading{align-items:flex-start;flex-direction:column}.stats{grid-template-columns:1fr 1fr}.stat:last-child{grid-column:span 2}table{min-width:620px}.panel{overflow-x:auto}.row{grid-template-columns:1fr}.incident-status-grid{grid-template-columns:1fr}.heading h1{font-size:24px}}
 </style></head><body>
-<div class="mobile-head"><a class="brand" href="./index.html" style="padding:0"><span class="mark">⌁</span>ZetuWatch</a><button class="btn" id="mobile-logout">Sign out</button></div><nav class="mobile-nav" aria-label="Workspace navigation"><a href="#monitors">Monitors</a><a href="#incidents">Incidents</a><a href="#status-pages">Status pages</a><a href="#team">Team</a><a href="#api-keys">API keys</a></nav>
-<div class="shell"><aside class="side"><a class="brand" href="./index.html"><span class="mark">⌁</span>ZetuWatch</a><button class="workspace" id="workspace-switch"><small>WORKSPACE</small><strong id="workspace-name">Loading workspace…</strong></button><div class="nav-label">Workspace</div><nav class="nav"><a class="active" href="./app.html"><span class="ico">◫</span>Overview</a><a href="#monitors" id="nav-monitors"><span class="ico">⌁</span>Monitors</a><a href="#incidents" id="nav-incidents"><span class="ico">◷</span>Incidents</a><a href="#status-pages" id="nav-status-pages"><span class="ico">▤</span>Status pages</a><a class="disabled" aria-disabled="true"><span class="ico">⌁</span>Analytics · coming soon</a><a class="disabled" aria-disabled="true"><span class="ico">◎</span>Alerts · coming soon</a><div class="nav-label" style="margin-top:20px">Manage</div><a href="#team" id="nav-team"><span class="ico">♧</span>Team</a><a href="#api-keys" id="nav-api-keys"><span class="ico">⌘</span>API keys</a><a class="disabled" aria-disabled="true"><span class="ico">▣</span>Billing · coming soon</a></nav><div class="side-bottom"><div class="profile"><div class="avatar" id="avatar">?</div><div><strong id="user-name">Loading</strong><small id="user-email"></small></div><button id="logout" title="Sign out" aria-label="Sign out">↗</button></div></div></aside>
+<div class="mobile-head"><a class="brand" href="./index.html" style="padding:0"><span class="mark">⌁</span>ZetuWatch</a><button class="btn" id="mobile-logout">Sign out</button></div><nav class="mobile-nav" aria-label="Workspace navigation"><a href="#monitors">Monitors</a><a href="#incidents">Incidents</a><a href="#status-pages">Status pages</a><a href="#alerts">Alerts</a><a href="#team">Team</a><a href="#api-keys">API keys</a></nav>
+<div class="shell"><aside class="side"><a class="brand" href="./index.html"><span class="mark">⌁</span>ZetuWatch</a><button class="workspace" id="workspace-switch"><small>WORKSPACE</small><strong id="workspace-name">Loading workspace…</strong></button><div class="nav-label">Workspace</div><nav class="nav"><a class="active" href="./app.html"><span class="ico">◫</span>Overview</a><a href="#monitors" id="nav-monitors"><span class="ico">⌁</span>Monitors</a><a href="#incidents" id="nav-incidents"><span class="ico">◷</span>Incidents</a><a href="#status-pages" id="nav-status-pages"><span class="ico">▤</span>Status pages</a><a class="disabled" aria-disabled="true"><span class="ico">⌁</span>Analytics · coming soon</a><a href="#alerts" id="nav-alerts"><span class="ico">◎</span>Alerts</a><div class="nav-label" style="margin-top:20px">Manage</div><a href="#team" id="nav-team"><span class="ico">♧</span>Team</a><a href="#api-keys" id="nav-api-keys"><span class="ico">⌘</span>API keys</a><a class="disabled" aria-disabled="true"><span class="ico">▣</span>Billing · coming soon</a></nav><div class="side-bottom"><div class="profile"><div class="avatar" id="avatar">?</div><div><strong id="user-name">Loading</strong><small id="user-email"></small></div><button id="logout" title="Sign out" aria-label="Sign out">↗</button></div></div></aside>
 <main class="main"><header class="top"><span class="crumb">Workspace / <strong>Overview</strong></span><div class="top-actions"><button class="btn" id="top-help">Help</button><button class="btn primary" id="top-add">Add monitor +</button></div></header><section class="content">
 <div id="notice" class="notice hidden" role="status" aria-live="polite"></div>
 <div class="heading"><div><h1 id="greeting">Workspace overview</h1><p>A clear view of the services you have configured.</p></div><button class="btn primary" id="add-monitor">Add monitor +</button></div>
 <div class="stats"><div class="stat"><small>Configured monitors</small><strong id="stat-total">—</strong><div class="foot">In this workspace</div></div><div class="stat"><small>Checks recorded</small><strong>—</strong><div class="foot">Scheduled checks are not enabled yet</div></div><div class="stat"><small>Open incidents</small><strong id="stat-incidents">0</strong><div class="foot">Confirmed, unresolved incidents</div></div></div>
-<section class="setup" id="onboarding"><div class="setup-head"><div><h2>Get your workspace ready</h2><p>A few steps to prepare your monitoring workspace.</p></div><span class="setup-progress" id="setup-progress">1 of 5 complete</span></div><div class="setup-grid"><div class="setup-item"><span class="num">01</span><div><strong>Verify your email</strong><small>Your account is verified.</small></div><span class="state">Complete</span></div><div class="setup-item pending" id="setup-monitor"><span class="num">02</span><div><strong>Add your first monitor</strong><small id="setup-monitor-copy">Choose a website or API to configure.</small></div><button class="btn" id="setup-add">Set up</button></div><div class="setup-item pending"><span class="num">03</span><div><strong>Configure alert channels</strong><small>Email and webhook routing.</small></div><span class="state">Coming soon</span></div><div class="setup-item pending"><span class="num">04</span><div><strong>Invite your team</strong><small>Bring collaborators into your workspace.</small></div><span class="state">Coming soon</span></div><div class="setup-item pending" id="setup-status-page"><span class="num">05</span><div><strong>Publish a status page</strong><small id="setup-status-page-copy">Share service health with customers.</small></div><a class="btn" id="setup-status-page-action" href="#status-pages">Set up</a></div></div></section><section class="panel" id="monitors"><div class="panel-head"><h2>Monitors</h2><span id="monitor-count">Loading…</span></div><div id="monitor-empty" class="empty hidden"><div class="empty-mark">⌁</div><h3>Start with your first website</h3><p>Add a website or API endpoint to configure what you want ZetuWatch to watch. Checks will begin when the secure scheduled runner is enabled.</p><button class="btn primary" id="empty-add">Add your first monitor</button></div><table id="monitor-table" class="hidden"><thead><tr><th>Monitor</th><th>Type</th><th>Interval</th><th>State</th><th></th></tr></thead><tbody id="monitor-rows"></tbody></table></section>
+<section class="setup" id="onboarding"><div class="setup-head"><div><h2>Get your workspace ready</h2><p>A few steps to prepare your monitoring workspace.</p></div><span class="setup-progress" id="setup-progress">1 of 5 complete</span></div><div class="setup-grid"><div class="setup-item"><span class="num">01</span><div><strong>Verify your email</strong><small>Your account is verified.</small></div><span class="state">Complete</span></div><div class="setup-item pending" id="setup-monitor"><span class="num">02</span><div><strong>Add your first monitor</strong><small id="setup-monitor-copy">Choose a website or API to configure.</small></div><button class="btn" id="setup-add">Set up</button></div><div class="setup-item pending" id="setup-alerts"><span class="num">03</span><div><strong>Configure alert channels</strong><small id="setup-alerts-copy">Subscribe your verified email to incident alerts.</small></div><a class="btn" id="setup-alerts-action" href="#alerts">Set up</a></div><div class="setup-item pending"><span class="num">04</span><div><strong>Invite your team</strong><small>Bring collaborators into your workspace.</small></div><span class="state">Coming soon</span></div><div class="setup-item pending" id="setup-status-page"><span class="num">05</span><div><strong>Publish a status page</strong><small id="setup-status-page-copy">Share service health with customers.</small></div><a class="btn" id="setup-status-page-action" href="#status-pages">Set up</a></div></div></section><section class="panel" id="monitors"><div class="panel-head"><h2>Monitors</h2><span id="monitor-count">Loading…</span></div><div id="monitor-empty" class="empty hidden"><div class="empty-mark">⌁</div><h3>Start with your first website</h3><p>Add a website or API endpoint to configure what you want ZetuWatch to watch. Checks will begin when the secure scheduled runner is enabled.</p><button class="btn primary" id="empty-add">Add your first monitor</button></div><table id="monitor-table" class="hidden"><thead><tr><th>Monitor</th><th>Type</th><th>Interval</th><th>State</th><th></th></tr></thead><tbody id="monitor-rows"></tbody></table></section>
 <section class="panel hidden" id="monitor-detail" style="margin-top:22px" aria-labelledby="monitor-detail-title">
   <div class="panel-head" style="align-items:flex-start;gap:14px;flex-wrap:wrap">
     <div style="min-width:0">
@@ -32,6 +32,38 @@
   <div style="overflow-x:auto"><table id="check-table" class="hidden"><thead><tr><th>Checked at</th><th>Result</th><th>HTTP status</th><th>Latency</th><th>Error category</th></tr></thead><tbody id="check-rows"></tbody></table></div>
 </section>
 <section class="panel" id="incidents" style="margin-top:22px"><div class="panel-head"><div><h2>Incidents</h2><span>Confirmed service interruptions and their timelines</span></div><span id="incident-count">Loading…</span></div><div id="incident-empty" class="empty hidden"><div class="empty-mark">◷</div><h3>No confirmed incidents</h3><p>There are no incident records in this workspace. Live checks are not enabled yet, so this list will only change when the secure monitoring runner is active.</p></div><div id="incident-table-wrap" style="overflow-x:auto"><table id="incident-table" class="hidden"><thead><tr><th>Monitor</th><th>Started</th><th>Status</th><th>Resolved</th><th></th></tr></thead><tbody id="incident-rows"></tbody></table></div><div id="incident-detail" class="hidden" style="padding:18px 19px"><button class="btn" id="incident-back" type="button">← All incidents</button><div id="incident-summary" style="padding:18px 0 12px"></div><h3 style="font-size:13px;margin:8px 0 6px">Timeline</h3><div id="incident-events"></div><div id="incident-actions" class="hidden" style="border-top:1px solid var(--line);margin-top:12px;padding-top:16px"><div id="incident-action-message" class="notice hidden" role="status" aria-live="polite"></div><form id="incident-status-form" class="incident-status-grid"><div class="field" style="margin:0"><label for="incident-next-status">Update status</label><select id="incident-next-status"></select></div><div class="field" style="margin:0"><label for="incident-status-visibility">Visibility</label><select id="incident-status-visibility"><option value="internal">Internal note</option><option value="public">Public update · not published yet</option></select></div><div class="field" style="margin:0"><label for="incident-status-message">Update message · optional</label><input id="incident-status-message" maxlength="500" placeholder="Share what changed"></div><button class="btn primary" type="submit">Save status</button></form><form id="incident-update-form" style="margin-top:14px"><div class="field"><label for="incident-update-message">Add a timeline update</label><textarea id="incident-update-message" maxlength="500" rows="3" required placeholder="Describe the investigation or customer impact"></textarea></div><div class="row" style="align-items:end"><div class="field" style="margin:0"><label for="incident-update-visibility">Visibility</label><select id="incident-update-visibility"><option value="internal">Internal note</option><option value="public">Public update · not published yet</option></select></div><button class="btn" type="submit">Post update</button></div></form></div></div></section>
+
+<section class="panel" id="alerts" style="margin-top:22px">
+  <div class="panel-head">
+    <div><h2>Alert channels</h2><span>Verified email destinations for workspace incident notifications</span></div>
+    <span id="alert-channel-count">Loading…</span>
+  </div>
+  <div style="padding:18px 19px">
+    <div id="alerts-message" class="notice hidden" role="status" aria-live="polite"></div>
+    <p style="font-size:12px;color:var(--muted);line-height:1.6;margin:0 0 14px">The first notification channel supports each member's own verified account email. Workspace owners and administrators can manage all channels; members can manage their own. Delivery requires the workspace operator to configure the Resend sender and API key.</p>
+    <form id="alert-channel-form" style="margin-bottom:12px">
+      <button class="btn primary" id="alert-channel-submit" type="submit">Add my verified email</button>
+    </form>
+    <div id="alert-channel-existing" class="notice hidden" role="status">Your verified email is already connected. You can enable, disable or remove it below.</div>
+    <div style="overflow-x:auto">
+      <table>
+        <thead><tr><th>Channel</th><th>Destination</th><th>Verification</th><th>Status</th><th>Added</th><th></th></tr></thead>
+        <tbody id="alert-channel-rows"><tr><td colspan="6">Loading alert channels…</td></tr></tbody>
+      </table>
+    </div>
+    <div class="panel-head" style="padding:20px 0 10px;margin-top:12px">
+      <div><h3 style="font-size:13px;margin:0">Delivery history</h3><span>Latest queued and sent incident notifications</span></div>
+      <button class="btn" id="alert-delivery-refresh" type="button">Refresh</button>
+    </div>
+    <div style="overflow-x:auto">
+      <table>
+        <thead><tr><th>Event</th><th>Monitor</th><th>Recipient</th><th>Status</th><th>Attempts</th><th>Updated</th><th>Details</th></tr></thead>
+        <tbody id="alert-delivery-rows"><tr><td colspan="7">Loading delivery history…</td></tr></tbody>
+      </table>
+    </div>
+    <p style="font-size:11px;color:var(--muted);line-height:1.6;margin:14px 0 0">Disabling or removing a channel cancels queued deliveries. A message already accepted by the email provider cannot be recalled. Webhook destinations are not available in this release.</p>
+  </div>
+</section>
 <section class="panel" id="team" style="margin-top:22px"><div class="panel-head"><div><h2>Workspace team</h2><span>Manage access to this workspace</span></div><span id="team-count">Loading…</span></div><div style="padding:18px 19px"><div id="team-message" class="notice hidden" role="status" aria-live="polite"></div><form id="invite-form" class="row" style="align-items:end;margin-bottom:18px;grid-template-columns:minmax(0,1fr) 180px auto"><div class="field" style="margin:0"><label for="invite-email">Invite by email</label><input id="invite-email" type="email" required maxlength="254" placeholder="teammate@example.com"></div><div class="field" style="margin:0"><label for="invite-role">Workspace role</label><select id="invite-role"><option value="member">Member</option><option value="viewer">Viewer</option><option value="admin">Admin</option></select></div><button class="btn primary" id="invite-submit" type="submit">Send invitation</button></form><div style="overflow-x:auto"><table><thead><tr><th>Member</th><th>Email</th><th>Role</th><th>Joined</th><th></th></tr></thead><tbody id="team-rows"><tr><td colspan="5">Loading members…</td></tr></tbody></table></div><div id="pending-invitations" style="margin-top:22px"><h3 style="font-size:13px;margin:0 0 10px">Pending invitations</h3><div id="invitation-rows" style="font-size:12px;color:var(--muted)">Loading invitations…</div></div></div></section><section class="panel" id="api-keys" style="margin-top:22px">
 <div class="panel-head"><div><h2>API keys</h2><span>Read-only access for workspace integrations</span></div><span id="api-key-count">Loading…</span></div>
 <div style="padding:18px 19px">
@@ -56,11 +88,11 @@
 <div class="wizard-actions"><button class="btn" type="button" id="wizard-back">Back</button><div class="wizard-actions-right"><button class="btn" type="button" id="cancel">Cancel</button><button class="btn primary" type="button" id="wizard-next">Continue</button><button class="btn primary hidden" type="submit" id="save">Save monitor</button></div></div>
 </form></div>
 <script>
-const API=(document.querySelector('meta[name="api-base"]')?.content||"/api").replace(/\/$/,"");let user=null,orgs=[],orgId=null,monitors=[],incidents=[],editingMonitorId=null,selectedIncidentId=null,selectedMonitorId=null,selectedMonitorEnabled=true;
+const API=(document.querySelector('meta[name="api-base"]')?.content||"/api").replace(/\/$/,"");let user=null,orgs=[],orgId=null,monitors=[],incidents=[],notificationChannels=[],notificationDeliveries=[],teamMemberCount=0,editingMonitorId=null,selectedIncidentId=null,selectedMonitorId=null,selectedMonitorEnabled=true;
 const $=id=>document.getElementById(id);
 function showNotice(text,error=false){$("notice").textContent=text;$("notice").classList.remove("hidden","error");if(error)$("notice").classList.add("error")}
 async function request(path,options={}){const r=await fetch(API+path,{credentials:"include",...options,headers:{"content-type":"application/json",...(options.headers||{})}});const d=await r.json().catch(()=>({}));if(r.status===401){location.href="./auth.html";throw new Error("Please sign in again.")}if(!r.ok)throw new Error(d.message||d.error||"Request failed");return d}
-async function load(){try{const me=await request("/auth/me");user=me.user;orgs=me.organizations||[];if(!orgs.length)throw new Error("No workspace is connected to this account.");orgId=orgs[0].id;$("workspace-name").textContent=orgs[0].name;$("user-name").textContent=user.name||"Account";$("user-email").textContent=user.email;$("avatar").textContent=(user.name||user.email||"?").slice(0,1).toUpperCase();$("greeting").textContent="Good to see you, "+(user.name||"there");await loadMonitors();await loadIncidents();await loadTeam();await loadApiKeys();await loadStatusPages()}catch(e){showNotice(e.message,true)}}
+async function load(){try{const me=await request("/auth/me");user=me.user;orgs=me.organizations||[];if(!orgs.length)throw new Error("No workspace is connected to this account.");orgId=orgs[0].id;$("workspace-name").textContent=orgs[0].name;$("user-name").textContent=user.name||"Account";$("user-email").textContent=user.email;$("avatar").textContent=(user.name||user.email||"?").slice(0,1).toUpperCase();$("greeting").textContent="Good to see you, "+(user.name||"there");await loadMonitors();await loadIncidents();await loadTeam();await loadApiKeys();await loadStatusPages();await loadAlerts()}catch(e){showNotice(e.message,true)}}
 async function loadMonitors(){
   const data=await request("/v1/monitors?organizationId="+encodeURIComponent(orgId));
   monitors=data.monitors||[];
@@ -213,6 +245,7 @@ async function loadTeam(){
   for(const [value,label] of options){const option=document.createElement("option");option.value=value;option.textContent=label;$("invite-role").appendChild(option)}
   const result=await request("/v1/organizations/"+encodeURIComponent(orgId)+"/members");
   const members=result.members||[];
+  teamMemberCount=members.length;
   $("team-count").textContent=members.length+" members";
   $("team-rows").innerHTML="";
   for(const member of members){
@@ -235,6 +268,7 @@ async function loadTeam(){
   if(canManage){
     try{const pending=await request("/v1/organizations/"+encodeURIComponent(orgId)+"/invitations");const rows=pending.invitations||[];$("invitation-rows").innerHTML="";if(!rows.length){$("invitation-rows").textContent="No pending invitations."}else for(const item of rows){const line=document.createElement("div");line.style.padding="9px 0";line.style.borderBottom="1px solid var(--line)";line.textContent=item.email+" · "+item.role+" · expires "+new Date(item.expires_at.replace(" ","T")+"Z").toLocaleDateString();$("invitation-rows").appendChild(line)}}catch(e){$("invitation-rows").textContent="Pending invitations could not be loaded."}
   }
+  updateOnboarding();
 }
 
 function apiKeyMessage(text,error=false){const node=$("api-key-message");node.textContent=text;node.classList.remove("hidden","error");if(error)node.classList.add("error")}
@@ -506,7 +540,111 @@ $("api-key-copy").addEventListener("click",async()=>{
   }catch(error){apiKeyMessage(error.message||"Could not copy the API key.",true)}
 });
 
-function updateOnboarding(){const hasMonitor=monitors.length>0;const hasPublishedStatusPage=statusPages.some(page=>Number(page.isPublished)===1);$("setup-status-page").classList.toggle("pending",!hasPublishedStatusPage);$("setup-status-page-copy").textContent=hasPublishedStatusPage?"A public status page is published.":"Create and publish a customer-facing page.";$("setup-status-page-action").textContent=hasPublishedStatusPage?"View pages":"Set up";$("setup-progress").textContent=(1+(hasMonitor?1:0)+(hasPublishedStatusPage?1:0))+" of 5 complete";$("setup-monitor").classList.toggle("pending",!hasMonitor);$("setup-monitor-copy").textContent=hasMonitor?monitors.length+" monitor(s) configured.":"Choose a website or API to configure.";$("setup-add").textContent=hasMonitor?"Add another":"Set up";if(hasMonitor){$("setup-monitor").querySelector(".btn").textContent="Add another"}else{$("setup-monitor").querySelector(".btn").textContent="Set up"}}let wizardStep=0;
+
+function alertsMessage(text,error=false){
+  const node=$("alerts-message");
+  node.textContent=text;
+  node.classList.remove("hidden","error");
+  if(error)node.classList.add("error");
+}
+async function loadAlerts(){
+  const role=orgs.find(org=>org.id===orgId)?.role||"viewer";
+  const canWrite=role!=="viewer";
+  const canManageAll=role==="owner"||role==="admin";
+  $("alert-channel-form").classList.toggle("hidden",!canWrite);
+  const [channelResult,deliveryResult]=await Promise.all([
+    request("/v1/organizations/"+encodeURIComponent(orgId)+"/notification-channels"),
+    request("/v1/organizations/"+encodeURIComponent(orgId)+"/notification-deliveries")
+  ]);
+  notificationChannels=channelResult.channels||[];
+  notificationDeliveries=deliveryResult.deliveries||[];
+  const ownChannel=notificationChannels.some(channel=>channel.createdBy===user.id);
+  $("alert-channel-existing").classList.toggle("hidden",!ownChannel);
+  $("alert-channel-submit").disabled=ownChannel;
+  $("alert-channel-submit").textContent=ownChannel?"Email already added":"Add my verified email";
+  $("alert-channel-count").textContent=notificationChannels.length+" channel(s)";
+  $("alert-channel-rows").innerHTML="";
+  if(!notificationChannels.length){
+    const row=document.createElement("tr"),cell=document.createElement("td");
+    cell.colSpan=6;cell.textContent="No email alert channels are configured.";
+    row.appendChild(cell);$("alert-channel-rows").appendChild(row);
+  }
+  for(const channel of notificationChannels){
+    const row=document.createElement("tr");
+    const type=document.createElement("td");type.textContent="Email";
+    const destination=document.createElement("td");destination.textContent=channel.destination||"";
+    const verified=document.createElement("td");verified.textContent=channel.verifiedAt?"Verified":"Not verified";
+    const state=document.createElement("td");state.textContent=Number(channel.isEnabled)===1?"Enabled":"Disabled";
+    const added=document.createElement("td");added.textContent=formatIncidentDate(channel.createdAt);
+    const actions=document.createElement("td");
+    if(canManageAll||channel.createdBy===user.id){
+      const toggle=document.createElement("button");
+      toggle.className="btn";toggle.textContent=Number(channel.isEnabled)===1?"Disable":"Enable";
+      toggle.addEventListener("click",()=>setEmailChannelEnabled(channel.id,Number(channel.isEnabled)!==1));
+      const remove=document.createElement("button");
+      remove.className="btn";remove.style.marginLeft="6px";remove.textContent="Remove";
+      remove.addEventListener("click",()=>removeEmailChannel(channel.id,channel.destination));
+      actions.append(toggle,remove);
+    }else actions.textContent="Managed by workspace admin";
+    row.append(type,destination,verified,state,added,actions);
+    $("alert-channel-rows").appendChild(row);
+  }
+  $("alert-delivery-rows").innerHTML="";
+  if(!notificationDeliveries.length){
+    const row=document.createElement("tr"),cell=document.createElement("td");
+    cell.colSpan=7;cell.textContent="No notification deliveries have been recorded yet.";
+    row.appendChild(cell);$("alert-delivery-rows").appendChild(row);
+  }
+  for(const delivery of notificationDeliveries){
+    const row=document.createElement("tr");
+    const event=document.createElement("td");event.textContent=String(delivery.eventType||"notification").replace(/^incident\./,"").replace(/_/g," ");
+    const monitor=document.createElement("td");monitor.textContent=delivery.monitorName||"Monitor removed";
+    const recipient=document.createElement("td");recipient.textContent=delivery.recipientEmail||"Unavailable";
+    const status=document.createElement("td");status.textContent=String(delivery.status||"unknown").replace(/_/g," ");
+    const attempts=document.createElement("td");attempts.textContent=String(delivery.attemptCount??0);
+    const updated=document.createElement("td");updated.textContent=formatIncidentDate(delivery.deliveredAt||delivery.nextAttemptAt||delivery.createdAt);
+    const details=document.createElement("td");details.textContent=delivery.lastErrorCode||"—";
+    row.append(event,monitor,recipient,status,attempts,updated,details);
+    $("alert-delivery-rows").appendChild(row);
+  }
+  updateOnboarding();
+}
+async function setEmailChannelEnabled(channelId,enabled){
+  try{
+    await request("/v1/organizations/"+encodeURIComponent(orgId)+"/notification-channels/"+encodeURIComponent(channelId),{
+      method:"PATCH",body:JSON.stringify({enabled})
+    });
+    alertsMessage(enabled?"Email alerts enabled.":"Email alerts disabled.");
+    await loadAlerts();
+  }catch(error){alertsMessage(error.message,true)}
+}
+async function removeEmailChannel(channelId,destination){
+  if(!confirm("Remove email alerts for "+destination+"? Pending deliveries will be cancelled."))return;
+  try{
+    await request("/v1/organizations/"+encodeURIComponent(orgId)+"/notification-channels/"+encodeURIComponent(channelId),{method:"DELETE"});
+    alertsMessage("Email alert channel removed.");
+    await loadAlerts();
+  }catch(error){alertsMessage(error.message,true)}
+}
+$("alert-channel-form").addEventListener("submit",async event=>{
+  event.preventDefault();
+  const button=$("alert-channel-submit");button.disabled=true;
+  try{
+    await request("/v1/organizations/"+encodeURIComponent(orgId)+"/notification-channels",{
+      method:"POST",body:JSON.stringify({channelType:"email"})
+    });
+    alertsMessage("Your verified account email is now subscribed to workspace incident alerts.");
+    await loadAlerts();
+  }catch(error){alertsMessage(error.message,true)}
+  finally{button.disabled=false}
+});
+$("alert-delivery-refresh").addEventListener("click",async()=>{
+  const button=$("alert-delivery-refresh");button.disabled=true;
+  try{await loadAlerts()}catch(error){alertsMessage(error.message,true)}
+  finally{button.disabled=false}
+});
+
+function updateOnboarding(){const hasMonitor=monitors.length>0;const hasAlertChannel=notificationChannels.some(channel=>Number(channel.isEnabled)===1);const hasTeam=teamMemberCount>1;const hasPublishedStatusPage=statusPages.some(page=>Number(page.isPublished)===1);$("setup-alerts").classList.toggle("pending",!hasAlertChannel);$("setup-alerts-copy").textContent=hasAlertChannel?"Your verified email is subscribed to incident alerts.":"Subscribe your verified email to incident alerts.";$("setup-alerts-action").textContent=hasAlertChannel?"Manage alerts":"Set up";$("setup-status-page").classList.toggle("pending",!hasPublishedStatusPage);$("setup-status-page-copy").textContent=hasPublishedStatusPage?"A public status page is published.":"Create and publish a customer-facing page.";$("setup-status-page-action").textContent=hasPublishedStatusPage?"View pages":"Set up";$("setup-progress").textContent=(1+(hasMonitor?1:0)+(hasAlertChannel?1:0)+(hasTeam?1:0)+(hasPublishedStatusPage?1:0))+" of 5 complete";$("setup-monitor").classList.toggle("pending",!hasMonitor);$("setup-monitor-copy").textContent=hasMonitor?monitors.length+" monitor(s) configured.":"Choose a website or API to configure.";$("setup-add").textContent=hasMonitor?"Add another":"Set up";if(hasMonitor){$("setup-monitor").querySelector(".btn").textContent="Add another"}else{$("setup-monitor").querySelector(".btn").textContent="Set up"}}
 function renderWizard(){
   document.querySelectorAll("[data-wizard]").forEach(panel=>panel.classList.toggle("hidden",Number(panel.dataset.wizard)!==wizardStep));
   document.querySelectorAll("[data-progress]").forEach(step=>{const n=Number(step.dataset.progress);step.classList.toggle("active",n===wizardStep);step.classList.toggle("done",n<wizardStep)});
