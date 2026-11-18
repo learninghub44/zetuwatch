@@ -72,3 +72,6 @@ Until those gates pass, scheduled monitoring stays disabled and public status pa
 ## DNS query cancellation
 
 The agent creates an isolated Node `dns/promises.Resolver` for each hostname, limits the resolver to one attempt per query, and uses one shared deadline for the A/AAAA pair. If that deadline expires, it calls `resolver.cancel()` before returning `DNS_TIMEOUT`; a timed-out target therefore cannot leave DNS queries running after the probe slot has been released. This uses the documented Node resolver timeout, retry and cancellation APIs: https://nodejs.org/api/dns.html#class-dnspromisesresolver.
+
+
+The total deadline is recomputed after every DNS resolution. If DNS consumes the remaining budget, no HTTP socket is opened; otherwise the transport receives only the remaining time, not the stale pre-DNS budget.

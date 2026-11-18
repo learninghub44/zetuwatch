@@ -271,3 +271,10 @@ No Cloudflare resources were created and no deployment was attempted. This is fe
 - Replaced the uncancelled DNS Promise timeout wrapper with a per-hostname Node resolver, one-attempt query policy and explicit cancellation when the shared A/AAAA deadline expires.
 - Added tests for timeout cancellation, A-only/AAAA-only answers, resolver failures, mixed public/private answers, empty answers and invalid bounds.
 - This is a security hardening slice only. The agent remains separate from the scheduler; full PR CI, real DNS/TLS tests, durable replay storage, per-tenant quotas and Worker-to-agent integration remain open.
+
+
+### Probe-agent total deadline enforcement (2026-11-18)
+
+- Recomputed the remaining total probe budget after DNS resolution and before every outbound socket.
+- Skip the connection when DNS consumes the remaining budget; pass only the post-DNS remainder to the transport.
+- Added deterministic tests proving a slow DNS adapter cannot extend the overall probe deadline. Full PR CI and live network/TLS verification remain pending.

@@ -83,6 +83,53 @@ test("does not follow redirects unless explicitly allowed", async () => {
   assert.equal(result.redirectCount, 0);
 });
 
+test("recomputes the total deadline after DNS before opening the HTTP connection", async () => {
+  let elapsed = 0;
+  let requestTimeout;
+  const result = await runProbe({
+    targetUrl: "https://monitor.example.com/health",
+    timeoutMs: 1_000
+  }, {
+    now: () => elapsed,
+    resolver: async () => {
+      elapsed += 400;
+      return [publicAddress];
+    },
+    requester: async (_url, _address, options) => {
+      requestTimeout = options.timeoutMs;
+      elapsed += options.timeoutMs;
+      return { statusCode: 200, location: null };
+    }
+  });
+
+  assert.equal(requestTimeout, 600);
+  assert.equal(result.isUp, true);
+  assert.equal(result.responseTimeMs, 1_000);
+});
+
+test("does not open a socket when DNS consumes the remaining total probe budget", async () => {
+  let elapsed = 0;
+  let requests = 0;
+  const result = await runProbe({
+    targetUrl: "https://monitor.example.com/health",
+    timeoutMs: 1_000
+  }, {
+    now: () => elapsed,
+    resolver: async () => {
+      elapsed += 950;
+      return [publicAddress];
+    },
+    requester: async () => {
+      requests += 1;
+      return { statusCode: 200, location: null };
+    }
+  });
+
+  assert.equal(result.isUp, false);
+  assert.equal(result.errorCode, "TIMEOUT");
+  assert.equal(requests, 0);
+});
+
 test("rejects methods, custom headers, and non-default ports", () => {
   assert.throws(() => normalizeProbeInput({ targetUrl: "https://monitor.example.com/", method: "POST" }), /PROBE_METHOD_NOT_ALLOWED/);
   assert.throws(() => normalizeProbeInput({ targetUrl: "https://monitor.example.com/", headers: { authorization: "secret" } }), /PROBE_JOB_INVALID/);

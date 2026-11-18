@@ -75,7 +75,7 @@ export async function runProbe(input, adapters = {}) {
     if (visited.has(currentUrl.href)) return failure(startedAt, now, "REDIRECT_LOOP", null, redirectCount);
     visited.add(currentUrl.href);
     const remainingMs = job.timeoutMs - (now() - startedAt);
-    if (remainingMs <= 0) return failure(startedAt, now, "TIMEOUT", null, redirectCount);
+    if (remainingMs < 100) return failure(startedAt, now, "TIMEOUT", null, redirectCount);
 
     let pinnedAddress;
     try {
@@ -88,11 +88,14 @@ export async function runProbe(input, adapters = {}) {
       return failure(startedAt, now, errorCode(error), null, redirectCount);
     }
 
+    const requestRemainingMs = job.timeoutMs - (now() - startedAt);
+    if (requestRemainingMs < 100) return failure(startedAt, now, "TIMEOUT", null, redirectCount);
+
     let response;
     try {
       response = await requester(currentUrl, pinnedAddress, {
         method: job.method,
-        timeoutMs: Math.max(100, Math.min(MAX_TIMEOUT_MS, remainingMs)),
+        timeoutMs: Math.min(MAX_TIMEOUT_MS, requestRemainingMs),
         maxResponseBytes: MAX_RESPONSE_BYTES
       });
     } catch (error) {
