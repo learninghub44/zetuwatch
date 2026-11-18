@@ -25,6 +25,8 @@ ALTER TABLE notification_deliveries
 ALTER TABLE notification_deliveries
   ADD COLUMN recipient_email TEXT;
 ALTER TABLE notification_deliveries
+  ADD COLUMN channel_created_by TEXT;
+ALTER TABLE notification_deliveries
   ADD COLUMN lease_token TEXT;
 ALTER TABLE notification_deliveries
   ADD COLUMN lease_until TEXT;
@@ -38,3 +40,5 @@ CREATE INDEX IF NOT EXISTS idx_notification_deliveries_due
   ON notification_deliveries(status, next_attempt_at, lease_until, created_at);
 CREATE INDEX IF NOT EXISTS idx_notification_deliveries_org_time
   ON notification_deliveries(organization_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_notification_deliveries_channel_creator
+  ON notification_deliveries(organization_id, channel_created_by, created_at DESC);
