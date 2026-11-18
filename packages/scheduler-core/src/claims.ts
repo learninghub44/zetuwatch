@@ -158,9 +158,9 @@ function enqueueNotificationDeliveries(
   return db.prepare(`
     INSERT OR IGNORE INTO notification_deliveries
       (id, organization_id, incident_id, channel_id, provider, status,
-       attempt_count, next_attempt_at, event_id, event_type, recipient_email, updated_at)
+       attempt_count, next_attempt_at, event_id, event_type, recipient_email, channel_created_by, updated_at)
     SELECT ? || ':' || c.id, m.organization_id, i.id, c.id, 'resend', 'queued',
-      0, ?, e.id, e.event_type, c.destination, ?
+      0, ?, e.id, e.event_type, c.destination, c.created_by, ?
     FROM incident_events e
     JOIN incidents i ON i.id = e.incident_id
     JOIN monitors m ON m.id = i.monitor_id
