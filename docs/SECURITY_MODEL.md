@@ -88,3 +88,15 @@ The URL policy, fail-closed HTTP probe, pure IP classifier and bounded DNS resol
 - The public renderer uses `textContent`/DOM nodes for all database-backed strings. It does not interpolate page content into HTML or execute scripts from stored values.
 
 This is a public information surface, not a live service-health assertion. Do not remove the explicit unknown-state notice until the secure outbound runner and real measurements are enabled and independently verified.
+
+
+## Email notification boundary
+
+- An email channel can target only the creating user's own verified account address. The channel is tied to a current verified workspace member; arbitrary recipient addresses are rejected.
+- Owners/admins can manage all workspace channels. Members can manage only their own channel; viewers are read-only. Read-only API keys cannot access channel or delivery-log routes.
+- Email templates HTML-escape organization, monitor, incident and timeline text. They contain no monitor target URL, response body, customer headers or stored credentials. Provider errors are reduced to fixed error codes; response bodies and API credentials are not logged.
+- Incident event enqueue is idempotent per immutable event/channel through a unique database index. Delivery claims are bounded (maximum 10, default 5) and use expiring leases. Settlement and context loading require the lease to remain active, so an expired worker cannot overwrite a later claim.
+- Resend receives a stable event/channel idempotency key on every retry. Its documented idempotency retention is 24 hours; the local retry schedule ends in under eight hours. The provider's concurrent-idempotency 409 response is retried; a payload/idempotency conflict is terminal.
+- Transient network, timeout, rate-limit and provider 5xx failures use bounded retries. Retry-After is parsed as delta-seconds or an HTTP date and capped at six hours. Six total attempts are allowed.
+- Disabling/removing a channel cancels queued deliveries. It cannot recall a request already accepted by the provider; this limitation is disclosed in the UI.
+- The dispatcher skips sending when Resend credentials or sender configuration are missing. No real provider delivery has been verified. Never add provider secrets to source control, client code, logs or API responses.
