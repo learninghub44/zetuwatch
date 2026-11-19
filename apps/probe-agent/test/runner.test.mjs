@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { runProbe, normalizeProbeInput } from "../src/runner.mjs";
 import { assertPublicDnsAnswers, isPublicIpAddress } from "../../../packages/monitoring-core/src/ip-address.mjs";
+import { validateMonitorUrl } from "../../../packages/monitoring-core/src/url-safety.mjs";
 
 const publicAddress = "93.184.216.34";
 
@@ -156,4 +157,18 @@ test("shared IP policy allows public unicast and rejects special-use IPv4/IPv6",
     "2001:db8::1", "2002::1", "::ffff:8.8.8.8"
   ]) assert.equal(isPublicIpAddress(address), false, address);
   assert.throws(() => assertPublicDnsAnswers(Array(17).fill(publicAddress)), /DNS_TOO_MANY_ADDRESSES/);
+});
+
+test("rejects shortened, integer-only, octal and hexadecimal IPv4 URL spellings", () => {
+  for (const target of [
+    "http://127.1/health",
+    "http://2130706433/health",
+    "http://0x7f000001/health",
+    "http://0177.0.0.1/health",
+    "http://0x08080808/health"
+  ]) {
+    assert.throws(() => validateMonitorUrl(target), /IP_NOT_ALLOWED/);
+  }
+  assert.equal(validateMonitorUrl("https://8.8.8.8/health").hostname, "8.8.8.8");
+  assert.equal(validateMonitorUrl("https://8.8.8.8./health").hostname, "8.8.8.8");
 });
