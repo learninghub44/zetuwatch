@@ -172,3 +172,13 @@ test("rejects shortened, integer-only, octal and hexadecimal IPv4 URL spellings"
   assert.equal(validateMonitorUrl("https://8.8.8.8/health").hostname, "8.8.8.8");
   assert.equal(validateMonitorUrl("https://8.8.8.8./health").hostname, "8.8.8.8");
 });
+
+test("rejects tabs and newlines before WHATWG URL normalization", () => {
+  for (const target of [
+    "http://\\t0x08080808/health",
+    "http://0x08080808\\n/health",
+    "http://\\n127.1/health"
+  ]) {
+    assert.throws(() => validateMonitorUrl(target), /INVALID_URL/);
+  }
+});
