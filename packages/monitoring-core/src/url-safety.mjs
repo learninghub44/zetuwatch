@@ -23,6 +23,9 @@ function rawAuthorityHost(input) {
 export function validateMonitorUrl(input) {
   if (typeof input !== "string" || input.length === 0) throw new Error("INVALID_URL");
   if (input.length > 2048) throw new Error("URL_TOO_LONG");
+  // WHATWG URL parsing strips ASCII tabs/newlines before parsing. Reject
+  // control characters first so raw-host validation sees the original input.
+  if (/[\u0000-\u001f\u007f]/.test(input)) throw new Error("INVALID_URL");
 
   const rawHost = rawAuthorityHost(input).toLowerCase().replace(/\.$/, "");
   let url;
