@@ -14,7 +14,7 @@ ZetuWatch uses Cloudflare Workers and D1 for the customer API and control plane.
 1. The control plane sends a bounded job containing targetUrl, GET or HEAD, expected status, timeout and redirect limit. Additional fields are rejected.
 2. The Worker client requires an HTTPS endpoint at the exact /v1/probe path, omits credentials, disables redirects and signs the exact JSON body.
 3. The signature is HMAC-SHA-256 over the version, Unix timestamp, nonce and SHA-256 body digest. The agent compares signatures in constant time, accepts only a 60-second clock window and rejects a nonce reused during its five-minute replay window.
-4. The agent validates the URL again. It rejects credentials, unsupported protocols, non-default ports, blocked/local suffixes, malformed numeric hosts and non-public IP literals. Only GET and HEAD are accepted.
+4. The agent validates the URL again. It rejects credentials, unsupported protocols, non-default ports, blocked/local suffixes, non-canonical numeric IPv4 spellings (including shortened, integer-only, octal and hexadecimal forms), and non-public IP literals. Only GET and HEAD are accepted.
 5. For a hostname, the agent resolves A and AAAA records. Only an empty answer for one address family is tolerated; other resolver errors fail closed. The combined set is capped at 16 and rejected if any address is non-public.
 6. The agent chooses a validated address and passes it to Node HTTP(S) through a custom lookup callback. The callback returns that address instead of performing a second DNS lookup. HTTPS retains the original hostname as SNI and leaves certificate verification enabled. Connection pooling is disabled so a later job cannot reuse a socket established under a different validation decision.
 7. Redirects are manual. Each next URL is parsed and revalidated, then independently resolved and pinned. HTTPS-to-HTTP downgrade, private destinations, non-default ports, loops and excess hops are rejected.
@@ -53,7 +53,7 @@ The nonce replay cache is currently in process memory. Run one agent instance on
 
 ## Tests and verified limits
 
-Run npm run test:probe-agent. The suite covers IP classification, mixed DNS answer rejection, address pinning, redirect re-resolution, private/downgrade/loop rejection, response bounds, TLS SNI and certificate-verification options, HMAC compatibility, stale timestamps, replay rejection, malformed jobs and response validation.
+Run npm run test:probe-agent. The suite covers IP classification, mixed DNS answer rejection, address pinning, redirect re-resolution, private/downgrade/loop rejection, non-canonical numeric host spellings, response bounds, TLS SNI and certificate-verification options, HMAC compatibility, stale timestamps, replay rejection, malformed jobs and response validation.
 
 These tests use injected DNS answers and a local HTTP server. They do not perform live public DNS resolution or a trusted-certificate TLS handshake. The TLS test verifies the Node request options (original SNI hostname and rejectUnauthorized enabled), not a production certificate chain. The Worker client is tested with an injected fetcher; it has not been connected to the production scheduler or a deployed agent.
 
@@ -68,10 +68,8 @@ These tests use injected DNS answers and a local HTTP server. They do not perfor
 
 Until those gates pass, scheduled monitoring stays disabled and public status pages must continue to report health as unknown.
 
-
 ## DNS query cancellation
 
-The agent creates an isolated Node `dns/promises.Resolver` for each hostname, limits the resolver to one attempt per query, and uses one shared deadline for the A/AAAA pair. If that deadline expires, it calls `resolver.cancel()` before returning `DNS_TIMEOUT`; a timed-out target therefore cannot leave DNS queries running after the probe slot has been released. This uses the documented Node resolver timeout, retry and cancellation APIs: https://nodejs.org/api/dns.html#class-dnspromisesresolver.
-
+The agent creates an isolated Node \`dns/promises.Resolver\` for each hostname, limits the resolver to one attempt per query, and uses one shared deadline for the A/AAAA pair. If that deadline expires, it calls \`resolver.cancel()\` before returning \`DNS_TIMEOUT\`; a timed-out target therefore cannot leave DNS queries running after the probe slot has been released. This uses the documented Node resolver timeout, retry and cancellation APIs: https://nodejs.org/api/dns.html#class-dnspromisesresolver.
 
 The total deadline is recomputed after every DNS resolution. If DNS consumes the remaining budget, no HTTP socket is opened; otherwise the transport receives only the remaining time, not the stale pre-DNS budget.
