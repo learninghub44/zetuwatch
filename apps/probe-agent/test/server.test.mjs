@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { createProbeHandler, signProbeRequest } from "../src/server.mjs";
+import { createProbeHandler, createRateLimiter, signProbeRequest } from "../src/server.mjs";
 
 const secret = "test-only-shared-secret-with-at-least-32-bytes";
 const job = { targetUrl: "https://monitor.example.com/health", method: "GET", expectedStatus: 200, timeoutMs: 2_000, maxRedirects: 0 };
@@ -28,6 +28,22 @@ async function send(port, options = {}) {
 
 test("requires a sufficiently strong shared secret", () => {
   assert.throws(() => createProbeHandler({ secret: "short" }), /PROBE_SHARED_SECRET_REQUIRED/);
+});
+
+test("bounds source-IP rate-limit state and fails closed until expired buckets can be reclaimed", () => {
+  let currentTime = 1_000;
+  const allow = createRateLimiter({ now: () => currentTime, maxBuckets: 2 });
+
+  assert.equal(allow("198.51.100.10"), true);
+  assert.equal(allow("198.51.100.11"), true);
+  assert.equal(allow("198.51.100.12"), false);
+  // Existing live buckets retain their own rate-limit state.
+  assert.equal(allow("198.51.100.10"), true);
+
+  currentTime += 60_000;
+  // Expired buckets are reclaimed before a new source IP is admitted.
+  assert.equal(allow("198.51.100.12"), true);
+  assert.throws(() => createRateLimiter({ maxBuckets: 0 }), /RATE_LIMITER_CONFIG_INVALID/);
 });
 
 test("accepts a signed bounded job and returns only the normalized result", async () => {
