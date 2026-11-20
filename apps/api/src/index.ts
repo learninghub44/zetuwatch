@@ -1,6 +1,7 @@
 import { validateMonitorUrl } from "../../../packages/monitoring-core/src/url-safety";
 import { hashPassword, verifyPassword } from "../../../packages/auth-core/src/password";
 import { canDeleteMonitors, canWriteMonitors, canAssignRole, canInviteRole, canRemoveMember, isOrganizationRole } from "../../../packages/auth-core/src/authorization";
+import { dispatchNotificationBatch } from "../../../packages/notifications-core/src/dispatch";
 
 interface Env {
   DB: D1Database;
@@ -92,6 +93,29 @@ function originAllowed(request: Request, env: Env): boolean {
 }
 function htmlEscape(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function enqueueNotificationDeliveries(env: Env, eventId: string, eventType: string, now: string): D1PreparedStatement {
+  return env.DB.prepare(`
+    INSERT OR IGNORE INTO notification_deliveries
+      (id, organization_id, incident_id, channel_id, provider, status,
+       attempt_count, next_attempt_at, event_id, event_type, recipient_email, channel_created_by, updated_at)
+    SELECT ? || ':' || c.id, m.organization_id, i.id, c.id, 'resend', 'queued',
+      0, ?, e.id, e.event_type, c.destination, c.created_by, ?
+    FROM incident_events e
+    JOIN incidents i ON i.id = e.incident_id
+    JOIN monitors m ON m.id = i.monitor_id
+    JOIN notification_channels c ON c.organization_id = m.organization_id
+    JOIN users u ON u.id = c.created_by
+      AND u.email_verified_at IS NOT NULL
+      AND lower(u.email) = lower(c.destination)
+    JOIN organization_members om
+      ON om.organization_id = m.organization_id AND om.user_id = u.id
+    WHERE e.id = ? AND e.event_type = ?
+      AND (e.event_type NOT IN ('incident.update', 'incident.status_changed') OR e.visibility = 'public')
+      AND c.channel_type = 'email' AND c.is_enabled = 1
+      AND c.verified_at IS NOT NULL
+  `).bind(eventId, now, now, eventId, eventType);
 }
 
 export default {
@@ -564,6 +588,115 @@ export default {
       return json({ error: "METHOD_NOT_ALLOWED" }, 405);
     }
 
+    // Email notification channels are bound to the signed-in user's own verified address.
+    const notificationChannelsCollectionMatch = url.pathname.match(/^\/v1\/organizations\/([0-9a-f-]{36})\/notification-channels$/i);
+    const notificationChannelItemMatch = url.pathname.match(/^\/v1\/organizations\/([0-9a-f-]{36})\/notification-channels\/([0-9a-f-]{36})$/i);
+    const notificationDeliveriesMatch = url.pathname.match(/^\/v1\/organizations\/([0-9a-f-]{36})\/notification-deliveries$/i);
+    if (notificationChannelsCollectionMatch || notificationChannelItemMatch || notificationDeliveriesMatch) {
+      const user = await currentUser(request, env);
+      if (!user) return json({ error: "UNAUTHENTICATED" }, 401);
+      if (user.authMethod === "api_key") return json({ error: "FORBIDDEN" }, 403);
+      const organizationId = (notificationChannelsCollectionMatch || notificationChannelItemMatch || notificationDeliveriesMatch)![1];
+      const channelId = notificationChannelItemMatch?.[2];
+      const membership = await env.DB.prepare("SELECT role FROM organization_members WHERE organization_id = ? AND user_id = ?")
+        .bind(organizationId, user.id).first<{ role: string }>();
+      if (!membership) return json({ error: "FORBIDDEN" }, 403);
+      const canManageAllChannels = membership.role === "owner" || membership.role === "admin";
+
+      if (notificationChannelsCollectionMatch && request.method === "GET") {
+        const rows = await env.DB.prepare(`
+          SELECT id, channel_type AS channelType, destination,
+            is_enabled AS isEnabled, created_by AS createdBy,
+            verified_at AS verifiedAt, created_at AS createdAt
+          FROM notification_channels
+          WHERE organization_id = ? AND (? = 1 OR created_by = ?)
+          ORDER BY created_at DESC, id ASC
+          LIMIT 50
+        `).bind(organizationId, canManageAllChannels ? 1 : 0, user.id).all();
+        return json({ channels: rows.results });
+      }
+
+      if (notificationChannelsCollectionMatch && request.method === "POST") {
+        if (!canWriteMonitors(membership.role)) return json({ error: "FORBIDDEN" }, 403);
+        if (!(await rateLimit(request, env, "notification-channel-create", 10))) return json({ error: "RATE_LIMITED" }, 429);
+        const body = await request.json().catch(() => null) as Record<string, unknown> | null;
+        const channelType = cleanText(body?.channelType, 16) || "email";
+        const suppliedEmail = body?.email === undefined ? user.email : cleanText(body.email, 254).toLowerCase();
+        if (channelType !== "email") return json({ error: "WEBHOOK_CHANNEL_NOT_AVAILABLE", message: "Webhook delivery will be enabled after the SSRF-safe outbound transport is complete." }, 409);
+        if (!emailPattern.test(user.email) || suppliedEmail.toLowerCase() !== user.email.toLowerCase() || !user.email_verified_at) {
+          return json({ error: "EMAIL_MUST_MATCH_VERIFIED_ACCOUNT" }, 400);
+        }
+        const newChannelId = id();
+        const verifiedAt = new Date().toISOString();
+        try {
+          await env.DB.batch([
+            env.DB.prepare("INSERT INTO notification_channels (id, organization_id, channel_type, destination, is_enabled, created_by, verified_at, updated_at) VALUES (?, ?, 'email', ?, 1, ?, ?, ?)")
+              .bind(newChannelId, organizationId, user.email, user.id, verifiedAt, verifiedAt),
+            env.DB.prepare("INSERT INTO audit_logs (id, organization_id, actor_user_id, action, resource_type, resource_id, metadata_json) VALUES (?, ?, ?, 'notification.email_channel_created', 'notification_channel', ?, ?)")
+              .bind(id(), organizationId, user.id, newChannelId, JSON.stringify({ channelType: "email" }))
+          ]);
+        } catch {
+          return json({ error: "EMAIL_CHANNEL_ALREADY_EXISTS" }, 409);
+        }
+        return json({ message: "Verified email alert channel added.", channel: {
+          id: newChannelId, channelType: "email", destination: user.email,
+          isEnabled: true, verifiedAt, createdAt: verifiedAt
+        } }, 201);
+      }
+
+      if (notificationDeliveriesMatch && request.method === "GET") {
+        const rows = await env.DB.prepare(`
+          SELECT d.id, d.event_type AS eventType, d.recipient_email AS recipientEmail,
+            d.status, d.attempt_count AS attemptCount, d.last_error_code AS lastErrorCode,
+            d.created_at AS createdAt, d.delivered_at AS deliveredAt,
+            d.next_attempt_at AS nextAttemptAt, m.name AS monitorName
+          FROM notification_deliveries d
+          LEFT JOIN incidents i ON i.id = d.incident_id
+          LEFT JOIN monitors m ON m.id = i.monitor_id
+          WHERE d.organization_id = ? AND (? = 1 OR d.channel_created_by = ?)
+          ORDER BY d.created_at DESC, d.id DESC
+          LIMIT 100
+        `).bind(organizationId, canManageAllChannels ? 1 : 0, user.id).all();
+        return json({ deliveries: rows.results });
+      }
+
+      if (notificationChannelItemMatch && channelId && (request.method === "PATCH" || request.method === "DELETE")) {
+        if (!(await rateLimit(request, env, "notification-channel-update", 30))) return json({ error: "RATE_LIMITED" }, 429);
+        const channel = await env.DB.prepare("SELECT id, created_by AS createdBy, is_enabled AS isEnabled FROM notification_channels WHERE id = ? AND organization_id = ? AND channel_type = 'email'")
+          .bind(channelId, organizationId).first<{ id: string; createdBy: string | null; isEnabled: number }>();
+        if (!channel) return json({ error: "NOT_FOUND" }, 404);
+        if (!canManageAllChannels && channel.createdBy !== user.id) return json({ error: "FORBIDDEN" }, 403);
+
+        if (request.method === "PATCH") {
+          const body = await request.json().catch(() => null) as Record<string, unknown> | null;
+          if (typeof body?.enabled !== "boolean") return json({ error: "INVALID_CHANNEL_STATE" }, 400);
+          const enabled = body.enabled ? 1 : 0;
+          const now = new Date().toISOString();
+          const results = await env.DB.batch([
+            env.DB.prepare("UPDATE notification_channels SET is_enabled = ?, updated_at = ? WHERE id = ? AND organization_id = ? AND is_enabled <> ?")
+              .bind(enabled, now, channelId, organizationId, enabled),
+            env.DB.prepare("INSERT INTO audit_logs (id, organization_id, actor_user_id, action, resource_type, resource_id, metadata_json) SELECT ?, ?, ?, ?, 'notification_channel', ?, ? WHERE changes() = 1")
+              .bind(id(), organizationId, user.id, enabled ? "notification.email_channel_enabled" : "notification.email_channel_disabled", channelId, JSON.stringify({ enabled: Boolean(enabled) })),
+            env.DB.prepare("UPDATE notification_deliveries SET status = 'failed', next_attempt_at = NULL, last_error_code = 'CHANNEL_DISABLED', lease_token = NULL, lease_until = NULL, updated_at = ? WHERE channel_id = ? AND status = 'queued' AND ? = 0")
+              .bind(now, channelId, enabled)
+          ]);
+          return json({ message: enabled ? "Email alerts enabled." : "Email alerts disabled.", changed: (results[0]?.meta?.changes ?? 0) === 1 });
+        }
+
+        const now = new Date().toISOString();
+        await env.DB.batch([
+          env.DB.prepare("UPDATE notification_deliveries SET status = 'failed', next_attempt_at = NULL, last_error_code = 'CHANNEL_REMOVED', lease_token = NULL, lease_until = NULL, updated_at = ? WHERE channel_id = ? AND status = 'queued'")
+            .bind(now, channelId),
+          env.DB.prepare("DELETE FROM notification_channels WHERE id = ? AND organization_id = ?")
+            .bind(channelId, organizationId),
+          env.DB.prepare("INSERT INTO audit_logs (id, organization_id, actor_user_id, action, resource_type, resource_id) SELECT ?, ?, ?, 'notification.email_channel_removed', 'notification_channel', ? WHERE changes() = 1")
+            .bind(id(), organizationId, user.id, channelId)
+        ]);
+        return json({ message: "Email alert channel removed. Pending deliveries were cancelled." });
+      }
+      return json({ error: "METHOD_NOT_ALLOWED" }, 405);
+    }
+
     // Team management: all routes are scoped through a verified organization membership.
     const teamMatch = url.pathname.match(/^\/v1\/organizations\/([0-9a-f-]{36})\/(members|invitations)(?:\/([0-9a-f-]{36}))?$/i);
     if (teamMatch) {
@@ -935,15 +1068,17 @@ export default {
         }
         const message = suppliedMessage || ("Status changed from " + incident.status + " to " + nextStatus + ".");
         const changedAt = new Date().toISOString();
+        const statusEventId = id();
         const results = await env.DB.batch([
           env.DB.prepare("UPDATE incidents SET status = ?, resolved_at = CASE WHEN ? = 'resolved' THEN ? ELSE NULL END WHERE id = ? AND status = ? AND resolved_at IS NULL")
             .bind(nextStatus, nextStatus, changedAt, incidentId, incident.status),
           env.DB.prepare("INSERT INTO incident_events (id, incident_id, event_type, message, created_at, actor_user_id, visibility) SELECT ?, ?, 'incident.status_changed', ?, ?, ?, ? WHERE changes() = 1")
-            .bind(id(), incidentId, message, changedAt, user.id, visibility),
+            .bind(statusEventId, incidentId, message, changedAt, user.id, visibility),
           env.DB.prepare("INSERT INTO audit_logs (id, organization_id, actor_user_id, action, resource_type, resource_id, metadata_json) SELECT ?, ?, ?, 'incident.status_changed', 'incident', ?, ? WHERE changes() = 1")
             .bind(id(), incident.organizationId, user.id, incidentId, JSON.stringify({
               from: incident.status, to: nextStatus, visibility
-            }))
+            })),
+          enqueueNotificationDeliveries(env, statusEventId, "incident.status_changed", changedAt)
         ]);
         if ((results[0] as D1Result).meta?.changes !== 1) {
           return json({ error: "INCIDENT_CHANGED" }, 409);
@@ -975,7 +1110,8 @@ export default {
           env.DB.prepare("INSERT INTO incident_events (id, incident_id, event_type, message, created_at, actor_user_id, visibility) SELECT ?, ?, 'incident.update', ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM incidents WHERE id = ? AND resolved_at IS NULL)")
             .bind(eventId, incidentId, message, createdAt, user.id, visibility, incidentId),
           env.DB.prepare("INSERT INTO audit_logs (id, organization_id, actor_user_id, action, resource_type, resource_id, metadata_json) SELECT ?, ?, ?, 'incident.update_added', 'incident', ?, ? WHERE changes() = 1")
-            .bind(id(), incident.organizationId, user.id, incidentId, JSON.stringify({ visibility }))
+            .bind(id(), incident.organizationId, user.id, incidentId, JSON.stringify({ visibility })),
+          enqueueNotificationDeliveries(env, eventId, "incident.update", createdAt)
         ]);
         if ((results[0] as D1Result).meta?.changes !== 1) {
           return json({ error: "INCIDENT_ALREADY_RESOLVED" }, 409);
@@ -1005,5 +1141,22 @@ export default {
       headers.append("vary", "Origin");
     }
     return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+  },
+  async scheduled(controller: ScheduledController, env: Env, _ctx: ExecutionContext): Promise<void> {
+    if (controller.cron !== "*/1 * * * *") return;
+    const startedAt = new Date();
+    const summary = await dispatchNotificationBatch(env, {
+      now: startedAt,
+      limit: 5
+    });
+    const schedulerLagMs = Math.max(0, startedAt.getTime() - controller.scheduledTime);
+    if (summary.skipped) {
+      console.warn("notification_dispatch_skipped", {
+        reason: "NOTIFICATION_CONFIGURATION_MISSING",
+        schedulerLagMs
+      });
+    } else if (summary.claimed > 0) {
+      console.info("notification_dispatch_completed", { ...summary, schedulerLagMs });
+    }
   }
 };

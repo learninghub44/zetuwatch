@@ -27,7 +27,7 @@ The product is built in vertical slices. A slice is complete only when UI, API, 
 - [ ] Bounded scheduled runner / Cron Trigger integration (load, lag and retry behavior remain untested; real execution is blocked on hardened DNS-pinned egress)
 - [ ] HTTP/HTTPS checks, history and latency
 - [ ] Incident confirmation, deduplication and recovery (D1-backed finalization confirms, deduplicates, monitors, resolves and reopens incidents; tenant-scoped incident list/detail APIs now return the timeline to workspace members. Member/admin/owner incident status transitions, internal/public customer-authored timeline notes, actor attribution, audit writes and responsive controls are implemented; seven D1-backed Worker API integration tests were added. Public updates are stored but not published, browser E2E/accessibility and notifications remain. Monitor deletion now soft-deletes and retains check, incident and timeline rows; retention and hard-purge workflows remain.)
-- [ ] Verified email alerts and delivery history
+- [ ] Verified email alerts and delivery history: channel management, durable outbox, bounded retries, delivery-log API and responsive Alerts UI are implemented on `feat/email-alert-outbox`; full CI, browser acceptance and live Resend delivery remain
 
 ## Phase 3 — complete customer experience
 - [ ] Public marketing website, docs and pricing
@@ -263,3 +263,36 @@ No Cloudflare resources were created and no deployment was attempted. This is fe
 - GitHub Actions [CI run #182](https://github.com/learninghub44/zetuwatch/actions/runs/43568666409) completed successfully on head commit `612533f31ca69f058e07211b40ed7c643949a974` after a regression fix for monitor-deletion trigger side effects. Verified: TypeScript typecheck, inline browser JavaScript syntax across five HTML files, SQLite validation (7 migrations, 16 previously required tables; status-page tables were exercised by the new D1 integration tests), and Vitest (13 files, 129 tests).
 - Browser E2E, responsive/keyboard/screen-reader acceptance, custom domains, subscriptions and public-page cache behavior remain future work. Status pages are implemented and CI-verified but not launch-complete.
 - Follow-up main commit `a3bcb10bd7033d0ef8a93dd0d09020d8dbb25d59` adds `status_pages` and `status_page_monitors` to the migration validator's required-table set (18 total). The post-merge main-branch CI result for that validator change has not yet been observed.
+
+
+## Email notification implementation update (2026-11-18)
+
+- Added migration `0008_notification_outbox.sql` for verified member-owned email channels, delivery event identity, lease ownership, due-work indexes and a unique event/channel idempotency constraint.
+- Added channel APIs that accept only the current verified account email; arbitrary recipients and webhook URLs are rejected. Owners/admins can manage workspace channels, while members manage only their own. Read-only API keys cannot manage notification channels or read delivery logs.
+- Added a tenant-scoped delivery-log endpoint and responsive Alerts screen for channel enable/disable/removal and the latest 100 delivery records. The onboarding checklist now reflects whether a verified email channel is enabled.
+- Incident timeline events are enqueued in the same D1 batch as scheduler/customer incident writes. The scheduled handler dispatches a maximum of five email deliveries per invocation.
+- Added a D1 outbox with bounded claims, 90-second leases, six-attempt retry policy, bounded `Retry-After` handling, stable Resend idempotency keys and provider message IDs.
+- Reviewed Cloudflare Cron Trigger guidance: scheduled handlers receive the configured cron expression and scheduled timestamp; Cron Triggers use UTC. The current `*/1 * * * *` handler only dispatches email notifications. It does not execute monitor targets.
+- Reviewed Resend's idempotency guidance: keys are retained for 24 hours, and `concurrent_idempotent_requests` is safe to retry. The dispatcher uses one stable key per incident event/channel and now retries this specific 409 response. The configured retry schedule totals under eight hours.
+- Corrected three notification route regular expressions that had an extra escape and prevented the channel/delivery routes from matching. Corrected escaped digit/whitespace patterns in outbox timestamp, token and Retry-After validation.
+- Hardened settlement so an expired lease cannot be settled by a stale worker; context loading also refuses an expired claim. Added tests for expired/reclaimed leases, timestamp/token validation, delta-seconds Retry-After, provider concurrent-idempotency retries and tenant-scoped delivery logs.
+- CI and D1 integration verification for this feature branch are pending. No live Resend request has been made; provider fetch is mocked in tests. The Resend API key and verified sender domain must be configured by the operator before real email can be delivered.
+- Email notifications are not launch-complete until the full feature-branch CI passes, browser acceptance is completed and a controlled real-provider delivery/unsubscribe exercise is verified. Webhook alerts, SMS and monitor probes remain separate work.
+
+
+### Email notification hardening follow-up (2026-11-18)
+
+- Delivery rows now retain the channel creator identifier independently of the nullable channel foreign key. Removing a channel cancels queued work but preserves the creator's delivery history; owners/admins retain workspace-wide visibility.
+- Migration validation now requires `channel_created_by` and its organization/time index.
+- Email subjects strip control characters, plain text is normalized, and links are constructed from HTTPS origins (localhost HTTP only for development); URL credentials and unsafe protocols are rejected.
+- Dispatch uses the actual Cron invocation time for leases and records scheduler lag without recipient data. Missing provider, sender or app URL configuration leaves queued work unclaimed.
+- Added regression coverage for delivery history after channel removal, safe application links, subject control characters, missing configuration and delayed Cron delivery.
+- These changes remain open in PR #6. Full GitHub Actions CI and browser acceptance have not been observed; do not mark notifications complete.
+
+
+### Email notification privacy hardening (2026-11-18)
+
+- Excluded internal customer-authored incident notes and status changes from outbox enqueue; public updates remain eligible and system-generated lifecycle events continue to alert.
+- Added a second visibility check when dispatching, so a previously queued internal event is marked ineligible without contacting Resend.
+- Added a D1 Worker integration regression test for internal status changes, internal/public notes, legacy queued rows and delivered email content.
+- Full feature-branch CI verification is pending; do not mark email notifications launch-complete until it passes and the controlled provider/browser checks are completed.

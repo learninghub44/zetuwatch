@@ -149,6 +149,34 @@ export async function releaseMonitorClaim(
   return (result.meta?.changes ?? 0) === 1;
 }
 
+function enqueueNotificationDeliveries(
+  db: D1Database,
+  eventId: string,
+  eventType: string,
+  now: string
+): D1PreparedStatement {
+  return db.prepare(`
+    INSERT OR IGNORE INTO notification_deliveries
+      (id, organization_id, incident_id, channel_id, provider, status,
+       attempt_count, next_attempt_at, event_id, event_type, recipient_email, channel_created_by, updated_at)
+    SELECT ? || ':' || c.id, m.organization_id, i.id, c.id, 'resend', 'queued',
+      0, ?, e.id, e.event_type, c.destination, c.created_by, ?
+    FROM incident_events e
+    JOIN incidents i ON i.id = e.incident_id
+    JOIN monitors m ON m.id = i.monitor_id
+    JOIN notification_channels c ON c.organization_id = m.organization_id
+    JOIN users u ON u.id = c.created_by
+      AND u.email_verified_at IS NOT NULL
+      AND lower(u.email) = lower(c.destination)
+    JOIN organization_members om
+      ON om.organization_id = m.organization_id AND om.user_id = u.id
+    WHERE e.id = ? AND e.event_type = ?
+      AND (e.event_type NOT IN ('incident.update', 'incident.status_changed') OR e.visibility = 'public')
+      AND c.channel_type = 'email' AND c.is_enabled = 1
+      AND c.verified_at IS NOT NULL
+  `).bind(eventId, now, now, eventId, eventType);
+}
+
 /**
  * Persist a check and its incident transition in one D1 batch. Failure and
  * recovery thresholds are consecutive-check policies, not timing guarantees.
@@ -293,6 +321,7 @@ export async function finalizeMonitorCheck(
       input.monitorId
     ),
     db.prepare(appendOpenedEventSql).bind(openedEventId, incidentId, checkedAt.sql),
+    enqueueNotificationDeliveries(db, openedEventId, "incident.opened", checkedAt.iso),
     db.prepare(markMonitoringSql).bind(
       input.monitorId,
       input.isUp ? 1 : 0,
@@ -305,6 +334,7 @@ export async function finalizeMonitorCheck(
       checkedAt.sql,
       input.monitorId
     ),
+    enqueueNotificationDeliveries(db, monitoringEventId, "incident.monitoring", checkedAt.iso),
     db.prepare(resolveIncidentSql).bind(
       checkedAt.sql,
       input.monitorId,
@@ -318,12 +348,14 @@ export async function finalizeMonitorCheck(
       input.monitorId,
       checkedAt.sql
     ),
+    enqueueNotificationDeliveries(db, resolvedEventId, "incident.resolved", checkedAt.iso),
     db.prepare(reopenIncidentSql).bind(input.monitorId, input.isUp ? 1 : 0),
     db.prepare(appendReopenedEventSql).bind(
       reopenedEventId,
       checkedAt.sql,
       input.monitorId
-    )
+    ),
+    enqueueNotificationDeliveries(db, reopenedEventId, "incident.reopened", checkedAt.iso)
   ]);
 
   return (results[0]?.meta?.changes ?? 0) === 1 &&
