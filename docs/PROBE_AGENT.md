@@ -28,7 +28,7 @@ ZetuWatch uses Cloudflare Workers and D1 for the customer API and control plane.
 - Response body: 64 KiB maximum.
 - Response headers: 16 KiB maximum.
 - Agent request body: 16 KiB maximum.
-- Agent request rate: 300 requests per source IP per minute.
+- Agent request rate: 300 requests per source IP per minute; source-IP bucket state is capped at 5,000 entries and new IPs fail closed while all buckets are live.
 - Concurrent in-flight agent requests/probes: 20 maximum.
 - Worker-to-agent response: 4 KiB maximum.
 - Only ports 80 for HTTP and 443 for HTTPS are accepted.
@@ -49,7 +49,7 @@ Generate a secret locally with a cryptographically secure generator such as open
 
 Start the service with node apps/probe-agent/src/server.mjs. It requires TLS files and the shared secret at startup. GET /healthz returns only a minimal status value. POST /v1/probe requires the signed request headers.
 
-The nonce replay cache is currently in process memory. Run one agent instance only. Do not add replicas or load balancing until a shared durable nonce store is implemented and tested; otherwise a captured signed request could be replayed against another replica. The source-IP rate limit is an additional abuse control, not a tenant quota. Tenant and plan quotas must be enforced by the Worker scheduler before dispatch.
+The nonce replay cache is currently in process memory. Run one agent instance only. Do not add replicas or load balancing until a shared durable nonce store is implemented and tested; otherwise a captured signed request could be replayed against another replica. The source-IP rate limit is an additional abuse control, not a tenant quota. Its in-memory bucket map is hard-capped at 5,000 entries: expired buckets are reclaimed, and new source IPs are rejected while all slots remain live. Tenant and plan quotas must be enforced by the Worker scheduler before dispatch.
 
 ## Tests and verified limits
 
