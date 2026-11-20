@@ -284,4 +284,4 @@ No Cloudflare resources were created and no deployment was attempted. This is fe
 
 - Replaced the cleanup-only source-IP rate limiter with a hard 5,000-bucket cap. Expired entries are reclaimed before admitting a new IP; if all entries are still live, new IPs are rejected rather than allowing attacker-controlled source cardinality to grow memory without bound.
 - Added an injectable-clock unit test for capacity rejection, expired-bucket reclamation and invalid limiter configuration.
-- No dependency or deployment change. The focused test and full probe-agent/repository CI still require execution on this branch; do not treat this change as CI-verified.
+- No dependency or deployment change. A standalone Node 22.16.0 harness for the limiter logic passed two focused tests; the committed repository test file and full probe-agent/repository CI still require execution on this branch, so do not treat this change as CI-verified.
