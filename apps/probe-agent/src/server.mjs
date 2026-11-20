@@ -10,6 +10,7 @@ const NONCE_TTL_MS = 5 * 60 * 1000;
 const MAX_NONCES = 10_000;
 const RATE_WINDOW_MS = 60_000;
 const RATE_LIMIT = 300;
+const MAX_RATE_BUCKETS = 5_000;
 const MAX_ACTIVE_PROBES = 20;
 
 function sendJson(response, status, body) {
@@ -68,22 +69,37 @@ function readBody(request, maxBytes) {
   });
 }
 
-function createRateLimiter() {
+export function createRateLimiter(options = {}) {
+  const now = options.now ?? Date.now;
+  const maxBuckets = options.maxBuckets ?? MAX_RATE_BUCKETS;
+  if (typeof now !== "function" || !Number.isInteger(maxBuckets) ||
+      maxBuckets < 1 || maxBuckets > MAX_RATE_BUCKETS) {
+    throw new Error("RATE_LIMITER_CONFIG_INVALID");
+  }
+
   const buckets = new Map();
   return ip => {
-    const now = Date.now();
+    if (typeof ip !== "string" || ip.length === 0 || ip.length > 128) return false;
+    const currentTime = now();
     const current = buckets.get(ip);
-    if (!current || current.startedAt + RATE_WINDOW_MS <= now) {
-      buckets.set(ip, { startedAt: now, count: 1 });
-      if (buckets.size > 5_000) {
-        for (const [key, value] of buckets) {
-          if (value.startedAt + RATE_WINDOW_MS <= now) buckets.delete(key);
-        }
-      }
-      return true;
+
+    if (current && current.startedAt + RATE_WINDOW_MS > currentTime) {
+      current.count += 1;
+      return current.count <= RATE_LIMIT;
     }
-    current.count += 1;
-    return current.count <= RATE_LIMIT;
+
+    // Keep attacker-controlled source-IP cardinality bounded. When the map
+    // is full, discard expired entries; if all slots are still live, reject
+    // new IPs rather than allocating unbounded memory or evicting live limits.
+    if (!current && buckets.size >= maxBuckets) {
+      for (const [key, value] of buckets) {
+        if (value.startedAt + RATE_WINDOW_MS <= currentTime) buckets.delete(key);
+      }
+      if (buckets.size >= maxBuckets) return false;
+    }
+
+    buckets.set(ip, { startedAt: currentTime, count: 1 });
+    return true;
   };
 }
 
