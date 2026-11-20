@@ -278,3 +278,10 @@ No Cloudflare resources were created and no deployment was attempted. This is fe
 - Recomputed the remaining total probe budget after DNS resolution and before every outbound socket.
 - Skip the connection when DNS consumes the remaining budget; pass only the post-DNS remainder to the transport.
 - Added deterministic tests proving a slow DNS adapter cannot extend the overall probe deadline. Full PR CI and live network/TLS verification remain pending.
+
+
+### Probe-agent source-IP rate-limit memory bound (2026-11-20)
+
+- Replaced the cleanup-only source-IP rate limiter with a hard 5,000-bucket cap. Expired entries are reclaimed before admitting a new IP; if all entries are still live, new IPs are rejected rather than allowing attacker-controlled source cardinality to grow memory without bound.
+- Added an injectable-clock unit test for capacity rejection, expired-bucket reclamation and invalid limiter configuration.
+- No dependency or deployment change. The focused test and full probe-agent/repository CI still require execution on this branch; do not treat this change as CI-verified.
