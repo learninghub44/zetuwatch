@@ -69,6 +69,28 @@ function readBody(request, maxBytes) {
   });
 }
 
+// Date.now() can move backwards after a clock correction. Clamp it so
+// entries inserted into a Map always have non-decreasing expiry timestamps.
+function createNonDecreasingClock(now) {
+  let last = -1;
+  return () => {
+    const value = now();
+    if (!Number.isSafeInteger(value) || value < 0) throw new Error("CLOCK_INVALID");
+    last = Math.max(last, value);
+    return last;
+  };
+}
+
+// Expirations are inserted in Map order and never extended in place. With a
+// non-decreasing clock and one fixed TTL per map, expired entries form a prefix.
+// Pruning therefore costs O(expired entries), not O(cache size) on every request.
+function pruneExpiredPrefix(entries, currentTime, readExpiry) {
+  for (const [key, value] of entries) {
+    if (readExpiry(value) > currentTime) break;
+    entries.delete(key);
+  }
+}
+
 export function createRateLimiter(options = {}) {
   const now = options.now ?? Date.now;
   const maxBuckets = options.maxBuckets ?? MAX_RATE_BUCKETS;
@@ -77,28 +99,26 @@ export function createRateLimiter(options = {}) {
     throw new Error("RATE_LIMITER_CONFIG_INVALID");
   }
 
+  const clock = createNonDecreasingClock(now);
   const buckets = new Map();
   return ip => {
     if (typeof ip !== "string" || ip.length === 0 || ip.length > 128) return false;
-    const currentTime = now();
-    const current = buckets.get(ip);
+    let currentTime;
+    try { currentTime = clock(); } catch { return false; }
 
-    if (current && current.startedAt + RATE_WINDOW_MS > currentTime) {
+    pruneExpiredPrefix(buckets, currentTime, bucket => bucket.expiresAt);
+    const current = buckets.get(ip);
+    if (current) {
       current.count += 1;
       return current.count <= RATE_LIMIT;
     }
 
-    // Keep attacker-controlled source-IP cardinality bounded. When the map
-    // is full, discard expired entries; if all slots are still live, reject
-    // new IPs rather than allocating unbounded memory or evicting live limits.
-    if (!current && buckets.size >= maxBuckets) {
-      for (const [key, value] of buckets) {
-        if (value.startedAt + RATE_WINDOW_MS <= currentTime) buckets.delete(key);
-      }
-      if (buckets.size >= maxBuckets) return false;
-    }
-
-    buckets.set(ip, { startedAt: currentTime, count: 1 });
+    // Keep attacker-controlled source-IP cardinality bounded. If every slot
+    // still has a live window, reject new IPs rather than evicting a live limit.
+    if (buckets.size >= maxBuckets) return false;
+    const expiresAt = currentTime + RATE_WINDOW_MS;
+    if (!Number.isSafeInteger(expiresAt)) return false;
+    buckets.set(ip, { expiresAt, count: 1 });
     return true;
   };
 }
@@ -111,7 +131,8 @@ export function createProbeHandler(options = {}) {
   const probe = options.probe ?? runProbe;
   const now = options.now ?? (() => Date.now());
   const nonces = new Map();
-  const allowRate = createRateLimiter();
+  const clock = createNonDecreasingClock(now);
+  const allowRate = createRateLimiter({ now });
   let active = 0;
 
   return async (request, response) => {
@@ -154,8 +175,9 @@ export function createProbeHandler(options = {}) {
       const timestampText = request.headers["x-zw-timestamp"];
       const nonce = request.headers["x-zw-nonce"];
       const signature = request.headers["x-zw-signature"];
+      const currentTime = clock();
       const timestamp = typeof timestampText === "string" && /^\d{10}$/.test(timestampText) ? Number(timestampText) : NaN;
-      const currentSeconds = Math.floor(now() / 1000);
+      const currentSeconds = Math.floor(currentTime / 1000);
       if (!Number.isSafeInteger(timestamp) || Math.abs(currentSeconds - timestamp) > MAX_CLOCK_SKEW_SECONDS ||
           typeof nonce !== "string" || !/^[A-Za-z0-9_-]{16,64}$/.test(nonce) ||
           !validSignature(secret, timestampText, nonce, body, signature)) {
@@ -163,9 +185,7 @@ export function createProbeHandler(options = {}) {
         return;
       }
 
-      for (const [key, expiresAt] of nonces) {
-        if (expiresAt <= now()) nonces.delete(key);
-      }
+      pruneExpiredPrefix(nonces, currentTime, expiresAt => expiresAt);
       if (nonces.has(nonce)) {
         sendJson(response, 409, { error: "REPLAY_REJECTED" });
         return;
@@ -174,7 +194,12 @@ export function createProbeHandler(options = {}) {
         sendJson(response, 503, { error: "REPLAY_GUARD_FULL" });
         return;
       }
-      nonces.set(nonce, now() + NONCE_TTL_MS);
+      const nonceExpiresAt = currentTime + NONCE_TTL_MS;
+      if (!Number.isSafeInteger(nonceExpiresAt)) {
+        sendJson(response, 503, { error: "REPLAY_GUARD_UNAVAILABLE" });
+        return;
+      }
+      nonces.set(nonce, nonceExpiresAt);
 
       let job;
       try { job = normalizeProbeInput(JSON.parse(body)); }
