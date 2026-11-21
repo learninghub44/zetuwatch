@@ -22,7 +22,8 @@ The product is built in vertical slices. A slice is complete only when UI, API, 
 
 ## Phase 2 — first working monitoring loop
 - [ ] Basic tenant-scoped monitor create/list/read/update/delete API and responsive setup screen implemented; 18 D1-backed API tests now cover monitor/team boundaries, member/viewer permissions, invitation/owner concurrency, tenant-scoped incident reads, soft deletion, persisted check-history reads and idempotent pause/resume controls, while the full route matrix and browser acceptance remain
-- [ ] Safe URL/egress policy: syntactic validation, dependency-free IPv4/IPv6 classification, mixed-answer rejection and a bounded Cloudflare DoH A/AAAA resolver are implemented as unit-testable components; the resolver is not connected to monitor execution, and validated-address pinning, redirect-hop checks and rebinding defense remain unimplemented
+- [ ] Safe URL/egress policy: shared IPv4/IPv6 classification, Node A/AAAA resolution, mixed-answer rejection, custom lookup address pinning, TLS SNI/verification defaults, per-hop redirect validation, downgrade/loop rejection, GET/HEAD-only requests, scheme-default ports, 2.5s DNS bound, 10s total probe bound, 64 KiB response cap, 16 KiB header/body caps and an HMAC-signed Worker client are implemented on feat/secure-probe-agent; 23 Node tests and isolated declaration-resolution checks passed locally, but branch CI, trusted-certificate TLS handshake, live DNS behavior, scheduler integration, tenant dispatch quotas, durable multi-instance replay protection and production egress verification remain
+- [ ] Probe-agent deployment and Worker integration: agent and signed client are implemented but not connected to the scheduler; single-instance in-memory replay protection, operator-managed TLS/secret configuration and a production-like Worker-to-agent-to-D1 test remain launch blockers
 - [x] Atomic due-work claim leases and D1-backed check finalization primitive (bounded batches, lease expiry/reclaim, token ownership and check-history persistence are integration-tested; no Cron execution or real probes are enabled)
 - [ ] Bounded scheduled runner / Cron Trigger integration (load, lag and retry behavior remain untested; real execution is blocked on hardened DNS-pinned egress)
 - [ ] HTTP/HTTPS checks, history and latency
@@ -263,3 +264,24 @@ No Cloudflare resources were created and no deployment was attempted. This is fe
 - GitHub Actions [CI run #182](https://github.com/learninghub44/zetuwatch/actions/runs/43568666409) completed successfully on head commit `612533f31ca69f058e07211b40ed7c643949a974` after a regression fix for monitor-deletion trigger side effects. Verified: TypeScript typecheck, inline browser JavaScript syntax across five HTML files, SQLite validation (7 migrations, 16 previously required tables; status-page tables were exercised by the new D1 integration tests), and Vitest (13 files, 129 tests).
 - Browser E2E, responsive/keyboard/screen-reader acceptance, custom domains, subscriptions and public-page cache behavior remain future work. Status pages are implemented and CI-verified but not launch-complete.
 - Follow-up main commit `a3bcb10bd7033d0ef8a93dd0d09020d8dbb25d59` adds `status_pages` and `status_page_monitors` to the migration validator's required-table set (18 total). The post-merge main-branch CI result for that validator change has not yet been observed.
+
+
+### Probe-agent DNS resource-bound hardening (2026-11-18)
+
+- Replaced the uncancelled DNS Promise timeout wrapper with a per-hostname Node resolver, one-attempt query policy and explicit cancellation when the shared A/AAAA deadline expires.
+- Added tests for timeout cancellation, A-only/AAAA-only answers, resolver failures, mixed public/private answers, empty answers and invalid bounds.
+- This is a security hardening slice only. The agent remains separate from the scheduler; full PR CI, real DNS/TLS tests, durable replay storage, per-tenant quotas and Worker-to-agent integration remain open.
+
+
+### Probe-agent total deadline enforcement (2026-11-18)
+
+- Recomputed the remaining total probe budget after DNS resolution and before every outbound socket.
+- Skip the connection when DNS consumes the remaining budget; pass only the post-DNS remainder to the transport.
+- Added deterministic tests proving a slow DNS adapter cannot extend the overall probe deadline. Full PR CI and live network/TLS verification remain pending.
+
+
+### Probe-agent source-IP rate-limit memory bound (2026-11-20)
+
+- Replaced the cleanup-only source-IP rate limiter with a hard 5,000-bucket cap. Expired entries are reclaimed before admitting a new IP; if all entries are still live, new IPs are rejected rather than allowing attacker-controlled source cardinality to grow memory without bound.
+- Added an injectable-clock unit test for capacity rejection, expired-bucket reclamation and invalid limiter configuration.
+- No dependency or deployment change. A standalone Node 22.16.0 harness for the limiter logic passed two focused tests; the committed repository test file and full probe-agent/repository CI still require execution on this branch, so do not treat this change as CI-verified.

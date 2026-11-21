@@ -11,48 +11,46 @@
 
 ## Current implementation boundary
 
-The monitoring-core URL validator currently provides a syntactic first gate:
+The URL and IP policy is shared as dependency-free ESM between the Worker and the standalone Node probe agent. The TypeScript entrypoints re-export that implementation so the two runtimes do not carry separate address-classification rules.
+
+The URL gate:
 - permits only HTTP and HTTPS;
 - rejects embedded URL credentials;
-- restricts ports to 80 and 443;
-- rejects localhost, internal/test suffixes and single-label hostnames;
+- permits only the scheme's default port (80 for HTTP, 443 for HTTPS);
+- rejects localhost, internal/test/example suffixes and single-label hostnames;
 - rejects non-public IPv4 literals, including private, loopback, link-local, carrier-grade NAT, benchmarking, documentation, multicast and reserved ranges;
-- rejects all IPv6 URL literals until a pinned IPv6 transport is implemented;
+- rejects IPv6 URL literals; IPv6 DNS answers are classified and can be selected/pinned by the agent;
 - caps URL length.
 
-A dependency-free address classifier parses canonical IPv4 and IPv6 records and permits only conservative global-unicast ranges. Its DNS answer-set helper rejects empty, malformed, oversized or mixed public/private A/AAAA sets rather than selecting only the first apparently safe record. IPv6 DNS answers are classified even though IPv6 monitor destinations remain disabled.
+The dedicated agent in apps/probe-agent uses Node's built-in DNS and HTTP(S) modules. It resolves A and AAAA records, tolerates only ENODATA for an absent address family, caps the combined answer set at 16 and rejects the entire set if any address is non-public. DNS resolution is bounded to 2.5 seconds.
 
-A DNS adapter now queries Cloudflare's documented DNS-over-HTTPS JSON endpoint for A and AAAA records in parallel. It bounds each response to 16 KiB and each query to at most five seconds, rejects redirects and non-success DNS responses, and validates the combined answer set. This adapter is not yet called by monitor execution and does not pin the resolved address to a socket.
+For each hop, the transport selects one validated address and supplies it through Node's custom lookup callback. The connection therefore uses that exact address instead of performing a second hostname lookup. HTTPS keeps the original hostname for SNI and leaves certificate verification enabled. Connection pooling is disabled. Redirects are manual; each next hop is parsed, revalidated, independently resolved and pinned. HTTPS downgrade, private destinations, disallowed ports, loops and excess hops are rejected.
 
-The HTTP probe currently:
-- permits GET and HEAD only;
-- disables automatic redirects;
-- sets a bounded timeout;
-- measures time to response headers and cancels the response body;
-- does not accept arbitrary customer headers or credentials.
+The probe accepts GET and HEAD only and no caller-supplied headers or body. A total deadline of at most 10 seconds covers DNS and redirects. Response bodies are discarded and capped at 64 KiB; response headers are capped at 16 KiB. The signed Worker client requires the configured HTTPS agent endpoint, disables redirects, omits credentials and caps the normalized response at 4 KiB.
 
-This is not a production SSRF boundary. Cloudflare Workers ordinary fetch() does not expose a DNS answer that application code can validate and pin to the exact outbound socket. The new resolver is a separate policy component; it is not yet connected to the probe transport. The project has not demonstrated a complete DNS-resolution, address-pinning, TLS hostname-verification and redirect-validation flow on the target runtime.
+Worker-to-agent requests use HMAC-SHA-256 over a version, timestamp, nonce and body digest. The agent uses constant-time signature comparison, a 60-second clock window, five-minute in-memory nonce replay protection, a 16 KiB request-body limit, a 300-request-per-source-IP-per-minute limit and a 20-request concurrency bound.
 
-Do not expose monitor execution in production until one of these approaches is implemented and independently tested:
+This is a tested egress implementation slice, not a launched monitoring service. The Worker client is not yet integrated into the scheduler, no probe is dispatched for a customer monitor, and executionEnabled remains false. The agent has not been deployed or tested against a production DNS resolver or a trusted public TLS certificate chain. The nonce cache is process-local, so the current service must run as a single instance; multi-instance operation requires a shared durable replay store.
 
-1. A dedicated egress/probe service that resolves all A/AAAA records, rejects the destination if any answer is non-public, pins the validated address to the actual connection while preserving TLS SNI/Host verification, validates every redirect hop, and enforces connection/read/total timeouts and response-size limits; or
-2. A Cloudflare-supported outbound networking primitive that provides equivalent address validation and connection pinning, verified against current platform documentation and tests.
+Do not enable scheduled execution until the signed client is integrated with the bounded scheduler, tenant quotas are enforced before dispatch, the agent is deployed with an operator-managed TLS certificate and secret, and a production-like Worker-to-agent-to-D1 test verifies DNS pinning, certificate failures, redirects, timeouts, response limits and persistence.
 
-The egress service must not become an unauthenticated general-purpose proxy. It should accept only authenticated, signed, bounded monitor jobs from the scheduler, enforce per-tenant and global quotas, and return a small normalized result.
+The agent must not become an unauthenticated general-purpose proxy. It accepts only signed, bounded monitor jobs and returns a small normalized result. It has no arbitrary headers, cookies, request body, custom ports, proxy support or caller-selected network route.
 
 ## Required egress test matrix
 
 - IPv4 loopback, RFC1918, link-local, carrier-grade NAT, documentation, benchmarking, multicast and reserved ranges.
 - IPv6 loopback, unique-local, link-local, IPv4-mapped IPv6, multicast and documentation ranges.
 - IPv4-in-IPv6 and unusual numeric host representations.
-- DNS answers containing a mixture of public and private addresses.
-- DNS rebinding between validation and connect.
-- Redirect chains to private, loopback, metadata and non-standard-port destinations.
-- Redirect loops and excessive hop counts.
-- Slow headers, slow body, oversized body, connection errors and abort behavior.
-- Attempts to access cloud metadata endpoints and internal service names.
+- DNS A/AAAA answers containing a mixture of public and private addresses; absent-family ENODATA versus resolver failures.
+- DNS rebinding between validation and connect, proving the custom lookup uses the selected address.
+- Redirect chains to private, loopback, metadata, non-default-port and blocked-host destinations.
+- Redirect loops, HTTPS downgrade and excessive hop counts.
+- Slow DNS, slow headers, slow body, oversized headers/body, connection errors and abort behavior.
+- TLS SNI uses the original hostname; trusted-certificate success, hostname mismatch and expired-certificate failures.
+- Signed request tampering, stale timestamps, nonce replay, malformed jobs, body bounds, concurrency and rate limits.
+- Worker client rejects insecure endpoints, redirects, oversized responses and malformed result shapes.
 
-The pure IP classifier, mixed-answer-set policy and DNS-over-HTTPS adapter have unit coverage. The adapter's timeout, response-size and fail-closed behavior are tested with injected responses; live resolver behavior and DNS rebinding between validation and connection remain unverified. Redirect transport, HTTP response limits and abuse controls remain unimplemented.
+The Node probe-agent suite currently covers IP classification, mixed-answer rejection, injected DNS answers, pinned lookup behavior against a local HTTP server, redirect-hop validation, response-size bounds, TLS request-option defaults, HMAC compatibility, replay/stale request rejection and response validation. It does not yet perform live public DNS or a trusted-certificate TLS handshake. The Worker client is tested with an injected fetcher. The suite must pass in GitHub Actions before this implementation is treated as verified by CI.
 
 ## Operational requirements before public launch
 
@@ -65,8 +63,9 @@ The pure IP classifier, mixed-answer-set policy and DNS-over-HTTPS adapter have 
 
 ## Current status
 
-The URL policy, fail-closed HTTP probe, pure IP classifier and bounded DNS resolver component have unit tests. No DNS-pinned transport or complete production-grade egress layer exists yet. Treat outbound monitor execution as blocked for public production use until that gap is closed.
+The URL/IP policy, Node DNS resolver, pinned HTTP(S) transport, manual redirect handling, signed Worker client and bounded agent HTTP server are implemented on the feature branch. Local Node tests and an isolated TypeScript declaration-resolution check passed during development. The CI workflow now runs the Node suite on feature branches, but a successful GitHub Actions run for this branch is still required.
 
+No scheduler integration, live monitor execution, production agent deployment or production-like end-to-end verification exists yet. The process-local replay cache also limits the current agent to one instance. Keep monitor execution disabled and public status-page health unknown until the remaining integration and operational launch gates pass.
 
 ## Workspace API key boundary
 
@@ -88,3 +87,6 @@ The URL policy, fail-closed HTTP probe, pure IP classifier and bounded DNS resol
 - The public renderer uses `textContent`/DOM nodes for all database-backed strings. It does not interpolate page content into HTML or execute scripts from stored values.
 
 This is a public information surface, not a live service-health assertion. Do not remove the explicit unknown-state notice until the secure outbound runner and real measurements are enabled and independently verified.
+
+
+- The standalone probe agent uses a per-hostname Node DNS resolver with a shared A/AAAA deadline and cancels outstanding DNS queries on timeout. This keeps timed-out resolver work within the same bounded probe lifetime instead of allowing abandoned DNS requests to accumulate after an active slot is released.
