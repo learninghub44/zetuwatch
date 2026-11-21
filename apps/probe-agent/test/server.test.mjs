@@ -62,6 +62,11 @@ test("keeps rate-limit expiry order stable when the wall clock moves backwards",
   assert.equal(allow("198.51.100.22"), true);
 });
 
+test("fails closed when the rate-limit clock returns an invalid value", () => {
+  const allow = createRateLimiter({ now: () => Number.NaN, maxBuckets: 2 });
+  assert.equal(allow("198.51.100.30"), false);
+});
+
 test("prunes expired replay nonces in insertion order after a clock rollback", async () => {
   const initialTime = 1_700_000_000_000;
   let currentTime = initialTime;
