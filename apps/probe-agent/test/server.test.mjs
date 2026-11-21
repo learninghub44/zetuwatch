@@ -46,6 +46,50 @@ test("bounds source-IP rate-limit state and fails closed until expired buckets c
   assert.throws(() => createRateLimiter({ maxBuckets: 0 }), /RATE_LIMITER_CONFIG_INVALID/);
 });
 
+test("keeps rate-limit expiry order stable when the wall clock moves backwards", () => {
+  let currentTime = 1_000;
+  const allow = createRateLimiter({ now: () => currentTime, maxBuckets: 2 });
+
+  assert.equal(allow("198.51.100.20"), true);
+  currentTime = 0;
+  assert.equal(allow("198.51.100.21"), true);
+
+  // The clock is clamped to the last observed value, so neither live bucket
+  // expires early and a full cache continues to fail closed.
+  currentTime = 60_000;
+  assert.equal(allow("198.51.100.22"), false);
+  currentTime = 61_000;
+  assert.equal(allow("198.51.100.22"), true);
+});
+
+test("prunes expired replay nonces in insertion order after a clock rollback", async () => {
+  const initialTime = 1_700_000_000_000;
+  let currentTime = initialTime;
+  const handler = createProbeHandler({
+    secret,
+    now: () => currentTime,
+    probe: async () => ({ isUp: true, statusCode: 200, responseTimeMs: 1, errorCode: null, redirectCount: 0 })
+  });
+  const server = createServer((request, response) => { void handler(request, response); });
+  const port = await listen(server);
+  try {
+    const nonceA = "nonce-clock-a-0123456789012345";
+    const nonceB = "nonce-clock-b-0123456789012345";
+    assert.equal((await send(port, { nonce: nonceA, timestamp: String(initialTime / 1000) })).status, 200);
+
+    currentTime = initialTime - 60_000;
+    // A timestamp at the edge of the accepted skew is valid, but its cache
+    // expiry is based on the non-decreasing clock, not the rolled-back clock.
+    assert.equal((await send(port, { nonce: nonceB, timestamp: String(currentTime / 1000) })).status, 200);
+
+    currentTime = initialTime + 240_000;
+    assert.equal((await send(port, { nonce: nonceA, timestamp: String(currentTime / 1000) })).status, 409);
+
+    currentTime = initialTime + 300_000;
+    assert.equal((await send(port, { nonce: nonceA, timestamp: String(currentTime / 1000) })).status, 200);
+  } finally { await close(server); }
+});
+
 test("accepts a signed bounded job and returns only the normalized result", async () => {
   let called = 0;
   const handler = createProbeHandler({ secret, probe: async received => {
