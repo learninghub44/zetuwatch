@@ -247,6 +247,50 @@ describe("Worker API tenant isolation", () => {
     expect(states.get(unknownId)).toBe("unknown");
     expect(states.get(pausedId)).toBe("paused");
 
+    const detailResponse = await apiWithEnv(
+      `/v1/monitors/${awaitingId}`,
+      { token: identity.sessionToken },
+      configured
+    );
+    const detailBody = await detailResponse.json() as {
+      executionEnabled: boolean;
+      monitor: { state: string };
+    };
+    expect(detailResponse.status).toBe(200);
+    expect(detailBody.executionEnabled).toBe(true);
+    expect(detailBody.monitor.state).toBe("awaiting_first_check");
+
+    const historyResponse = await apiWithEnv(
+      `/v1/monitors/${awaitingId}/checks`,
+      { token: identity.sessionToken },
+      configured
+    );
+    const historyBody = await historyResponse.json() as { executionEnabled: boolean; checks: unknown[] };
+    expect(historyBody.executionEnabled).toBe(true);
+    expect(historyBody.checks).toEqual([]);
+
+    const createResponse = await apiWithEnv("/v1/monitors", {
+      token: identity.sessionToken,
+      method: "POST",
+      body: {
+        organizationId: identity.organizationId,
+        name: "Configured runner monitor",
+        targetUrl: "https://status.example.com/health",
+        monitorType: "http",
+        method: "GET",
+        expectedStatus: 200,
+        intervalSeconds: 300,
+        timeoutMs: 10000
+      }
+    }, configured);
+    const createBody = await createResponse.json() as {
+      executionEnabled: boolean;
+      monitor: { state: string };
+    };
+    expect(createResponse.status).toBe(201);
+    expect(createBody.executionEnabled).toBe(true);
+    expect(createBody.monitor.state).toBe("awaiting_first_check");
+
     const disabled = await apiWithEnv(
       `/v1/monitors?organizationId=${identity.organizationId}`,
       { token: identity.sessionToken },
