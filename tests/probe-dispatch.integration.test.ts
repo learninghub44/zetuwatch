@@ -144,6 +144,35 @@ describe("bounded scheduled probe dispatch", () => {
     expect(rows.results.map(row => row.count).sort()).toEqual([2, 2]);
   });
 
+  it("enforces the workspace in-flight quota across overlapping claim invocations", async () => {
+    const organizationId = await createOrganization("Overlapping workspace claims");
+    const monitorIds = await Promise.all(Array.from({ length: 3 }, (_, index) =>
+      createMonitor(organizationId, "overlap-" + index)
+    ));
+
+    const [first, second] = await Promise.all([
+      claimDueMonitors(env.DB, {
+        now: BASE_NOW,
+        limit: 10,
+        perOrganizationLimit: 2,
+        token: "overlap-claim-invocation-0001"
+      }),
+      claimDueMonitors(env.DB, {
+        now: BASE_NOW,
+        limit: 10,
+        perOrganizationLimit: 2,
+        token: "overlap-claim-invocation-0002"
+      })
+    ]);
+
+    expect(first.length + second.length).toBe(2);
+    const active = await env.DB.prepare(`SELECT COUNT(*) AS count FROM monitors
+      WHERE id IN (${monitorIds.map(() => "?").join(",")})
+        AND check_lease_token IS NOT NULL AND check_lease_until > ?`)
+      .bind(...monitorIds, BASE_NOW.toISOString()).first<{ count: number }>();
+    expect(active?.count).toBe(2);
+  });
+
   it("defers agent outages without recording a false customer failure", async () => {
     const organizationId = await createOrganization("Agent outage");
     const monitorId = await createMonitor(organizationId);
