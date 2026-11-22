@@ -1,6 +1,7 @@
 import { validateMonitorUrl } from "../../../packages/monitoring-core/src/url-safety";
 import { hashPassword, verifyPassword } from "../../../packages/auth-core/src/password";
 import { canDeleteMonitors, canWriteMonitors, canAssignRole, canInviteRole, canRemoveMember, isOrganizationRole } from "../../../packages/auth-core/src/authorization";
+import { dispatchDueMonitors } from "../../../packages/scheduler-core/src/dispatch";
 
 interface Env {
   DB: D1Database;
@@ -8,6 +9,9 @@ interface Env {
   PUBLIC_APP_URL: string;
   RESEND_API_KEY?: string;
   EMAIL_FROM?: string;
+  PROBES_ENABLED?: string;
+  PROBE_AGENT_URL?: string;
+  PROBE_SHARED_SECRET?: string;
 }
 
 type UserRow = { id: string; email: string; display_name: string | null; email_verified_at: string | null; authMethod?: "api_key"; apiKeyOrganizationId?: string; apiKeyScopes?: string[] };
@@ -1005,5 +1009,23 @@ export default {
       headers.append("vary", "Origin");
     }
     return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+  },
+  async scheduled(controller: ScheduledController, env: Env, _ctx: ExecutionContext): Promise<void> {
+    // No Cron Trigger is configured yet. This handler is intentionally dormant
+    // until an operator configures the trigger and all three probe bindings.
+    if (controller.cron !== "*/1 * * * *") return;
+    const summary = await dispatchDueMonitors(env);
+    if (summary.skipped) {
+      console.info("monitor_dispatch_skipped", { reason: summary.reason });
+      return;
+    }
+    console.info("monitor_dispatch_completed", {
+      claimed: summary.claimed,
+      finalized: summary.finalized,
+      deferred: summary.deferred,
+      stale: summary.stale,
+      dispatchErrors: summary.dispatchErrors,
+      schedulerLagMs: Math.max(0, Date.now() - controller.scheduledTime)
+    });
   }
 };

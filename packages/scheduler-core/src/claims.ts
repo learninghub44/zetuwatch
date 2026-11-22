@@ -1,5 +1,7 @@
 export const DEFAULT_CLAIM_LIMIT = 10;
 export const MAX_CLAIM_LIMIT = 25;
+export const DEFAULT_PER_ORGANIZATION_CLAIM_LIMIT = 2;
+export const MAX_PER_ORGANIZATION_CLAIM_LIMIT = 10;
 export const DEFAULT_LEASE_MS = 120_000;
 export const MIN_LEASE_MS = 30_000;
 export const MAX_LEASE_MS = 300_000;
@@ -25,6 +27,7 @@ export interface ClaimOptions {
   now?: Date | string;
   leaseMs?: number;
   limit?: number;
+  perOrganizationLimit?: number;
   token?: string;
 }
 
@@ -57,11 +60,13 @@ function validateClaimOptions(options: ClaimOptions): {
   now: ReturnType<typeof timestamp>;
   leaseMs: number;
   limit: number;
+  perOrganizationLimit: number;
   token: string;
 } {
   const now = timestamp(options.now ?? new Date(), "NOW");
   const leaseMs = options.leaseMs ?? DEFAULT_LEASE_MS;
   const limit = options.limit ?? DEFAULT_CLAIM_LIMIT;
+  const perOrganizationLimit = options.perOrganizationLimit ?? DEFAULT_PER_ORGANIZATION_CLAIM_LIMIT;
   const token = options.token ?? crypto.randomUUID();
 
   if (!Number.isInteger(leaseMs) || leaseMs < MIN_LEASE_MS || leaseMs > MAX_LEASE_MS) {
@@ -70,10 +75,13 @@ function validateClaimOptions(options: ClaimOptions): {
   if (!Number.isInteger(limit) || limit < 1 || limit > MAX_CLAIM_LIMIT) {
     throw new Error("SCHEDULER_LIMIT_INVALID");
   }
+  if (!Number.isInteger(perOrganizationLimit) || perOrganizationLimit < 1 || perOrganizationLimit > MAX_PER_ORGANIZATION_CLAIM_LIMIT) {
+    throw new Error("SCHEDULER_ORGANIZATION_LIMIT_INVALID");
+  }
   if (typeof token !== "string" || token.length < 16 || token.length > 128 || /\s/.test(token)) {
     throw new Error("SCHEDULER_TOKEN_INVALID");
   }
-  return { now, leaseMs, limit, token };
+  return { now, leaseMs, limit, perOrganizationLimit, token };
 }
 
 /**
@@ -82,25 +90,33 @@ function validateClaimOptions(options: ClaimOptions): {
  * D1 batch executes statements sequentially in one transaction. The update
  * selects due rows and installs a unique lease token before the following
  * select reads them, so overlapping scheduler invocations cannot claim the
- * same monitor. The due timestamp is deliberately unchanged until a check is
- * durably finalized; abandoned work becomes eligible again at lease expiry.
+ * same monitor. The workspace limit also counts unexpired leases from other
+ * invocations, so overlapping Cron runs cannot exceed the per-workspace cap.
+ * The due timestamp is unchanged until a check is durably finalized; abandoned
+ * work becomes eligible again at lease expiry.
  */
 export async function claimDueMonitors(
   db: D1Database,
   options: ClaimOptions = {}
 ): Promise<ClaimedMonitor[]> {
-  const { now, leaseMs, limit, token } = validateClaimOptions(options);
+  const { now, leaseMs, limit, perOrganizationLimit, token } = validateClaimOptions(options);
   const leaseUntil = new Date(now.milliseconds + leaseMs).toISOString();
 
   const claimSql = [
     "UPDATE monitors",
     "SET check_lease_token = ?, check_lease_until = ?, last_claimed_at = ?",
     "WHERE id IN (",
-    "  SELECT id FROM monitors",
-    "  WHERE is_enabled = 1",
-    "    AND deleted_at IS NULL",
-    "    AND next_check_at <= ?",
-    "    AND (check_lease_until IS NULL OR check_lease_until <= ?)",
+    "  SELECT id FROM (",
+    "    SELECT due.id, due.organization_id, due.next_check_at,",
+    "      ROW_NUMBER() OVER (PARTITION BY due.organization_id ORDER BY due.next_check_at ASC, due.id ASC) AS organization_rank,",
+    "      (SELECT COUNT(*) FROM monitors AS active WHERE active.organization_id = due.organization_id AND active.is_enabled = 1 AND active.deleted_at IS NULL AND active.check_lease_token IS NOT NULL AND active.check_lease_until > ?) AS active_lease_count",
+    "    FROM monitors AS due",
+    "    WHERE due.is_enabled = 1",
+    "      AND due.deleted_at IS NULL",
+    "      AND due.next_check_at <= ?",
+    "      AND (due.check_lease_until IS NULL OR due.check_lease_until <= ?)",
+    "  ) AS ranked_due_monitors",
+    "  WHERE organization_rank <= ? - active_lease_count",
     "  ORDER BY next_check_at ASC, id ASC",
     "  LIMIT ?",
     ")",
@@ -129,7 +145,7 @@ export async function claimDueMonitors(
   ].join("\n");
 
   const results = await db.batch([
-    db.prepare(claimSql).bind(token, leaseUntil, now.iso, now.sql, now.iso, limit, now.sql, now.iso),
+    db.prepare(claimSql).bind(token, leaseUntil, now.iso, now.iso, now.sql, now.iso, perOrganizationLimit, limit, now.sql, now.iso),
     db.prepare(selectSql).bind(token, leaseUntil)
   ]);
 
@@ -146,6 +162,27 @@ export async function releaseMonitorClaim(
   const result = await db.prepare(
     "UPDATE monitors SET check_lease_token = NULL, check_lease_until = NULL WHERE id = ? AND check_lease_token = ?"
   ).bind(monitorId, leaseToken).run();
+  return (result.meta?.changes ?? 0) === 1;
+}
+
+/**
+ * Release a transiently failed dispatch and defer it briefly without recording
+ * a customer-target failure. The lease token prevents an old invocation from
+ * moving the schedule after another worker has reclaimed the monitor.
+ */
+export async function deferMonitorClaim(
+  db: D1Database,
+  monitorId: string,
+  leaseToken: string,
+  retryAt: Date | string
+): Promise<boolean> {
+  if (!monitorId || typeof leaseToken !== "string" || leaseToken.length < 16 || leaseToken.length > 128) {
+    throw new Error("SCHEDULER_CLAIM_INVALID");
+  }
+  const retry = timestamp(retryAt, "RETRY_AT");
+  const result = await db.prepare(
+    "UPDATE monitors SET check_lease_token = NULL, check_lease_until = NULL, next_check_at = CASE WHEN next_check_at <= ? THEN ? ELSE next_check_at END WHERE id = ? AND check_lease_token = ? AND deleted_at IS NULL"
+  ).bind(retry.sql, retry.sql, monitorId, leaseToken).run();
   return (result.meta?.changes ?? 0) === 1;
 }
 

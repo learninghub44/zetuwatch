@@ -225,6 +225,10 @@ describe("D1 monitor scheduler claims", () => {
       leaseMs: 29_999,
       token: "scheduler-invalid-lease-token"
     })).rejects.toThrow("SCHEDULER_LEASE_INVALID");
+    await expect(claimDueMonitors(env.DB, {
+      perOrganizationLimit: 11,
+      token: "scheduler-invalid-org-limit-token"
+    })).rejects.toThrow("SCHEDULER_ORGANIZATION_LIMIT_INVALID");
 
     await expect(finalizeMonitorCheck(env.DB, {
       monitorId: crypto.randomUUID(),

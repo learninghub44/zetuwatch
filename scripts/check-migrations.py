@@ -27,6 +27,19 @@ def main() -> None:
     if missing:
         raise SystemExit(f"Missing tables: {', '.join(sorted(missing))}")
 
+    monitor_indexes = {row[1] for row in db.execute("PRAGMA index_list(monitors)")}
+    if "idx_monitors_org_active_leases" not in monitor_indexes:
+        raise SystemExit("Missing idx_monitors_org_active_leases")
+
+    lease_query_plan = list(db.execute(
+        """EXPLAIN QUERY PLAN SELECT COUNT(*) FROM monitors
+           WHERE organization_id = ? AND is_enabled = 1 AND deleted_at IS NULL
+             AND check_lease_token IS NOT NULL AND check_lease_until > ?""",
+        ("migration-check", "2026-11-22T06:30:00.000Z"),
+    ))
+    if not any("idx_monitors_org_active_leases" in row[3] for row in lease_query_plan):
+        raise SystemExit("Workspace active-lease query does not use idx_monitors_org_active_leases")
+
     user_columns = {row[1] for row in db.execute("PRAGMA table_info(users)")}
     for column in ("password_hash", "email_verified_at", "updated_at"):
         if column not in user_columns:
