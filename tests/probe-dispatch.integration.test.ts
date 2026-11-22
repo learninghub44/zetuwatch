@@ -159,6 +159,32 @@ describe("bounded scheduled probe dispatch", () => {
     expect(afterRetry.some(item => item.id === monitorId)).toBe(true);
   });
 
+  it("persists an actual failed HTTP response as a check result", async () => {
+    const organizationId = await createOrganization("Real failed response");
+    const monitorId = await createMonitor(organizationId);
+    const summary = await dispatchDueMonitors(dispatchEnv, {
+      now: BASE_NOW,
+      clock: () => new Date(BASE_NOW),
+      probe: async () => ({
+        isUp: false,
+        statusCode: 503,
+        responseTimeMs: 83,
+        errorCode: "HTTP_STATUS_MISMATCH",
+        redirectCount: 0
+      })
+    });
+
+    expect(summary).toMatchObject({ claimed: 1, finalized: 1, deferred: 0 });
+    const check = await env.DB.prepare("SELECT is_up, status_code, response_time_ms, error_code FROM monitor_checks WHERE monitor_id = ?")
+      .bind(monitorId).first<{ is_up: number; status_code: number; response_time_ms: number; error_code: string }>();
+    expect(check).toEqual({
+      is_up: 0,
+      status_code: 503,
+      response_time_ms: 83,
+      error_code: "HTTP_STATUS_MISMATCH"
+    });
+  });
+
   it("rejects malformed agent results and defers instead of persisting them", async () => {
     const organizationId = await createOrganization("Malformed agent result");
     const monitorId = await createMonitor(organizationId);
