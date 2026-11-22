@@ -183,7 +183,7 @@ No Cloudflare resources were created and no deployment was attempted. This is fe
 - Added six isolated-D1 integration tests for due/disabled/future selection, batch bounds, overlapping claims, lease expiry/reclaim, stale token rejection, failure persistence and recovery of the failure streak.
 - GitHub Actions [CI run #112](https://github.com/learninghub44/zetuwatch/actions/runs/42767560283) completed successfully on commit `8a682c85b4fdeafb8e55efc5d5de531b4de76a44`.
 - Verified: TypeScript typecheck; SQLite migration validation (3 migrations, 16 required tables); Vitest (11 files, 95 tests), including six D1-backed scheduler integration tests.
-- This is the durable claim/finalization layer only. No Cron Trigger is configured, no probe is executed and no live measurement is written. Scheduled execution remains disabled until the DNS-pinned HTTP/HTTPS transport and complete SSRF/redirect/abuse controls are implemented and verified.
+- This durable claim/finalization layer is now connected to the DNS-pinned probe agent and shared scheduled handler. The one-minute Cron Trigger is declared, but customer probes remain disabled unless the operator explicitly configures `PROBES_ENABLED`, the HTTPS agent endpoint and shared secret. Live Worker-to-agent-to-D1 execution and full CI remain unverified.
 
 
 ## Incident lifecycle implementation and CI verification (2026-11-10)
