@@ -105,7 +105,7 @@ async function loadMonitors(){
   const canDelete=role==="owner"||role==="admin";
   $("stat-total").textContent=monitors.length;
   updateOnboarding();
-  $("monitor-count").textContent=monitors.length+" configured · "+(executionEnabled?"checks enabled":"checks disabled");
+  $("monitor-count").textContent=monitors.length+" configured · "+(executionEnabled?"probe dispatch configured":"probe dispatch disabled");
   $("monitor-empty").classList.toggle("hidden",monitors.length>0);
   $("monitor-table").classList.toggle("hidden",monitors.length===0);
   $("monitor-rows").innerHTML="";
@@ -191,12 +191,12 @@ async function openMonitor(monitorId){
       :!executionEnabled
         ?"Scheduled probes are disabled. This view only reads records already stored by the monitoring service."
         :checks.length===0
-          ?"Scheduled probes are enabled. This monitor is waiting for its first scheduled check."
+          ?"Probe dispatch is configured. This monitor is waiting for its first recorded check."
           :monitorState==="recovering"
             ?"Checks are passing again; the incident remains in recovery monitoring until the recovery threshold is met."
             :monitorState==="down"
               ?"An incident is open for this monitor. The history below shows its actual recorded checks."
-              :"Scheduled probes are enabled. The history below shows actual recorded checks.";
+              :"Probe dispatch is configured. The history below shows only actual recorded checks.";
     $("monitor-detail-title").textContent=monitor.name||"Monitor details";
     $("monitor-detail-target").textContent=monitor.target_url||"";
     $("monitor-detail-meta").innerHTML="";
@@ -210,7 +210,7 @@ async function openMonitor(monitorId){
     addMeta("Request",String(monitor.method||"GET")+" · expects "+String(monitor.expected_status||200));
     addMeta("Interval",Math.round(Number(monitor.interval_seconds||300)/60)+" minutes");
     addMeta("Configured state",selectedMonitorEnabled?"Enabled":"Paused");
-    addMeta("Execution",executionEnabled?"Scheduled checks enabled":"Scheduled checks disabled");
+    addMeta("Execution",executionEnabled?"Probe dispatch configured":"Probe dispatch disabled");
     addMeta("Last check",monitor.last_checked_at?formatCheckDate(monitor.last_checked_at):"Not yet checked");
     addMeta("Latest state",String(monitorState).replace(/_/g," "));
     $("check-count").textContent=checks.length+" stored "+(checks.length===1?"check":"checks");
@@ -724,7 +724,7 @@ $("monitor-form").addEventListener("submit",async e=>{
       closeModal();showNotice(executionEnabled?"Monitor updated. The scheduler will use the saved settings on the next due check.":"Monitor updated. Probe execution is disabled; the target has not been contacted.");
     }else{
       await request("/v1/monitors",{method:"POST",body:JSON.stringify(payload)});
-      closeModal();showNotice(executionEnabled?"Monitor saved. The first check will run when it becomes due.":"Monitor saved. Scheduled probes are disabled; the target has not been contacted.");
+      closeModal();showNotice(executionEnabled?"Monitor saved. It will be eligible for the next scheduled probe.":"Monitor saved. Scheduled probes are disabled; the target has not been contacted.");
     }
     await loadMonitors();
     if(selectedMonitorId)await openMonitor(selectedMonitorId);
