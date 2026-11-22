@@ -321,3 +321,9 @@ No Cloudflare resources were created and no deployment was attempted. This is fe
 - Recovery-monitoring, incident resolution and incident reopening transitions require the check row inserted by the same finalization batch. Expired or superseded results therefore cannot change incident state or enqueue lifecycle notifications.
 - Added D1 integration coverage for expired successful and failed results against an existing recovery incident; both must leave the lease, check history, incident state and timeline unchanged.
 - The exact SQL sequence was independently exercised against SQLite for both stale-success and stale-failure paths. The full Cloudflare Vitest/Worker CI run for the updated branch remains pending.
+
+## Customer monitor execution-state accuracy (2026-11-22)
+
+- Centralized the probe configuration gate and exposed it to the customer API. `executionEnabled` is true only when the operator explicitly enables probes and supplies a valid HTTPS agent endpoint plus a 32-byte shared secret; this reports configuration, not agent reachability or successful target health.
+- Monitor list/detail APIs now derive paused, execution-disabled, awaiting-first-check, healthy, suspect, down and recovering states from persisted check rows and unresolved incidents. The UI displays these states and no longer tells customers that probes are disabled when the operator has configured the runner.
+- Added a D1-backed API integration test covering six monitor states and enabled, disabled and invalid probe configuration. Full GitHub Actions verification remains pending.
