@@ -291,6 +291,7 @@ No Cloudflare resources were created and no deployment was attempted. This is fe
 
 - Added a D1 scheduler dispatcher that checks configuration before claiming work, claims at most 10 monitors per tick by default (hard dispatch maximum 15) and at most two per workspace, and executes no more than five probes concurrently by default to stay below Cloudflare Workers' six simultaneous outbound-connection limit.
 - Added per-workspace fairness to the atomic claim query with a window-function rank and a count of unexpired leases across overlapping invocations. Each workspace is capped at two in-flight probes by default; the global claim helper maximum remains 25 and the dispatcher hard maximum is 15.
+- Added migration `0008_scheduler_workspace_quota_index.sql` and a query-plan assertion in `scripts/check-migrations.py`; SQLite uses the covering index for per-workspace active-lease counts instead of scanning the monitor table.
 - The dispatcher uses a 180-second lease. With at most five concurrent requests, a 15-job batch requires at most three 35-second Worker request waves (105 seconds) plus D1 finalization overhead, leaving a bounded recovery margin.
 - Added token-checked retry deferral for probe-agent/network/configuration failures. These infrastructure failures do not create false target-down checks; valid agent results alone enter check history and the existing incident state machine.
 - Extended the signed client/agent deadline consistently to the monitor API's 30-second maximum, with a 35-second Worker request bound.
