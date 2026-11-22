@@ -265,7 +265,7 @@ export async function finalizeMonitorCheck(
     "    consecutive_successes = CASE WHEN ? = 1 THEN consecutive_successes + 1 ELSE 0 END,",
     "    check_lease_token = NULL,",
     "    check_lease_until = NULL",
-    "WHERE id = ? AND check_lease_token = ? AND deleted_at IS NULL"
+    "WHERE id = ? AND check_lease_token = ? AND check_lease_until > ? AND deleted_at IS NULL"
   ].join("\n");
   const insertCheckSql = [
     "INSERT INTO monitor_checks",
@@ -293,7 +293,8 @@ export async function finalizeMonitorCheck(
     "  AND status IN ('investigating', 'identified')",
     "  AND ? = 1",
     "  AND (SELECT consecutive_successes FROM monitors WHERE id = ?) >= 1",
-    "  AND (SELECT consecutive_successes FROM monitors WHERE id = ?) < ?"
+    "  AND (SELECT consecutive_successes FROM monitors WHERE id = ?) < ?",
+    "  AND EXISTS (SELECT 1 FROM monitor_checks WHERE id = ? AND monitor_id = ?)"
   ].join("\n");
   const appendMonitoringEventSql = [
     "INSERT INTO incident_events (id, incident_id, event_type, message, created_at)",
@@ -306,7 +307,8 @@ export async function finalizeMonitorCheck(
     "SET status = 'resolved', resolved_at = ?",
     "WHERE monitor_id = ? AND resolved_at IS NULL AND status = 'monitoring'",
     "  AND ? = 1",
-    "  AND (SELECT consecutive_successes FROM monitors WHERE id = ?) >= ?"
+    "  AND (SELECT consecutive_successes FROM monitors WHERE id = ?) >= ?",
+    "  AND EXISTS (SELECT 1 FROM monitor_checks WHERE id = ? AND monitor_id = ?)"
   ].join("\n");
   const appendResolvedEventSql = [
     "INSERT INTO incident_events (id, incident_id, event_type, message, created_at)",
@@ -317,7 +319,8 @@ export async function finalizeMonitorCheck(
   const reopenIncidentSql = [
     "UPDATE incidents",
     "SET status = 'investigating'",
-    "WHERE monitor_id = ? AND resolved_at IS NULL AND status = 'monitoring' AND ? = 0"
+    "WHERE monitor_id = ? AND resolved_at IS NULL AND status = 'monitoring' AND ? = 0",
+    "  AND EXISTS (SELECT 1 FROM monitor_checks WHERE id = ? AND monitor_id = ?)"
   ].join("\n");
   const appendReopenedEventSql = [
     "INSERT INTO incident_events (id, incident_id, event_type, message, created_at)",
@@ -333,7 +336,8 @@ export async function finalizeMonitorCheck(
       input.isUp ? 1 : 0,
       input.isUp ? 1 : 0,
       input.monitorId,
-      input.leaseToken
+      input.leaseToken,
+      checkedAt.iso
     ),
     db.prepare(insertCheckSql).bind(
       checkId,
@@ -358,7 +362,9 @@ export async function finalizeMonitorCheck(
       input.isUp ? 1 : 0,
       input.monitorId,
       input.monitorId,
-      recoveryThreshold
+      recoveryThreshold,
+      checkId,
+      input.monitorId
     ),
     db.prepare(appendMonitoringEventSql).bind(
       monitoringEventId,
@@ -371,7 +377,9 @@ export async function finalizeMonitorCheck(
       input.monitorId,
       input.isUp ? 1 : 0,
       input.monitorId,
-      recoveryThreshold
+      recoveryThreshold,
+      checkId,
+      input.monitorId
     ),
     db.prepare(appendResolvedEventSql).bind(
       resolvedEventId,
@@ -380,7 +388,7 @@ export async function finalizeMonitorCheck(
       checkedAt.sql
     ),
     enqueueNotificationDeliveries(db, resolvedEventId, "incident.resolved", checkedAt.iso),
-    db.prepare(reopenIncidentSql).bind(input.monitorId, input.isUp ? 1 : 0),
+    db.prepare(reopenIncidentSql).bind(input.monitorId, input.isUp ? 1 : 0, checkId, input.monitorId),
     db.prepare(appendReopenedEventSql).bind(
       reopenedEventId,
       checkedAt.sql,
