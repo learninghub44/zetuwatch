@@ -124,3 +124,5 @@ All provider calls are intercepted with an injected/mock fetch. These tests do n
 
 
 Additional notification regression cases verify that delivery history remains visible to the channel creator after channel removal (the channel foreign key becomes null), application links reject unsafe protocols and embedded credentials, subject CR/LF control characters are removed, and dispatch does not claim queued work when provider/sender/application configuration is absent.
+
+The combined one-minute scheduled handler is covered by a D1 integration test that fires the Cron event without probe bindings and verifies no monitor lease or check is created. Email delivery is skipped when provider/sender configuration is absent.

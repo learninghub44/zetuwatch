@@ -7,7 +7,7 @@ ZetuWatch uses Cloudflare Workers and D1 for the customer API and control plane.
 - The shared URL and IP policy lives in packages/monitoring-core as dependency-free ESM. The existing TypeScript entrypoints re-export that exact implementation so the Worker and agent do not maintain separate address-classification rules.
 - The agent lives in apps/probe-agent and uses only Node.js built-in modules. It does not use an HTTP proxy, browser cookies, customer-supplied request headers or a third-party networking package.
 - The Worker-compatible signed client lives in packages/probe-client. It uses Web Crypto and fetch to call only the configured HTTPS agent endpoint.
-- A bounded D1 scheduler dispatcher now claims due monitors fairly (default 10 per tick, at most 2 per workspace), runs at most five requests concurrently and finalizes only validated agent results under the original lease token. It is present on the secure-probe feature branch but remains disabled by default: no Cron Trigger is configured and `PROBES_ENABLED` must be explicitly set to `true` alongside the HTTPS agent URL and secret.
+- A bounded D1 scheduler dispatcher now claims due monitors fairly (default 10 per tick, at most 2 per workspace), runs at most five requests concurrently and finalizes only validated agent results under the original lease token. It remains disabled by default: the shared one-minute Cron Trigger dispatches email notifications first, while monitor probes require `PROBES_ENABLED=true` plus the HTTPS agent URL and secret.
 - No customer target is probed by the current repository configuration, and customer-facing `executionEnabled` remains false.
 
 ## Request and trust boundary
@@ -46,7 +46,7 @@ Configure these environment variables outside source control:
 - PROBE_PORT: optional listener port; defaults to 8788.
 - PROBE_HOST: optional bind address; defaults to 0.0.0.0.
 
-The Worker requires `PROBES_ENABLED=true`, `PROBE_AGENT_URL=https://<agent-host>/v1/probe` and `PROBE_SHARED_SECRET` in its environment/secret store before it will claim any monitor. The repository does not set these values or configure a Cron Trigger. Never place the shared secret in Wrangler vars or source control.
+The Worker requires `PROBES_ENABLED=true`, `PROBE_AGENT_URL=https://<agent-host>/v1/probe` and `PROBE_SHARED_SECRET` in its environment/secret store before it will claim any monitor. The repository does not set these probe values; the Cron Trigger only schedules the shared handler and probe dispatch remains skipped without them. Never place the shared secret in Wrangler vars or source control.
 
 Generate a secret locally with a cryptographically secure generator such as openssl rand -hex 32, then place it in the host's secret manager and the Worker secret store. Never put the value in wrangler.toml, a checked-in .env file, CI logs or this repository.
 
@@ -62,7 +62,7 @@ These tests use injected DNS answers and a local HTTP server. They do not perfor
 
 ## Scheduler dispatch implementation (feature branch; not launch-verified)
 
-- The Worker scheduled handler calls the D1 dispatcher only for the exact `*/1 * * * *` event and only when `PROBES_ENABLED=true` plus a valid HTTPS agent endpoint and 32-byte shared secret are present. `wrangler.toml` intentionally has no Cron Trigger, so no scheduled event is configured by this repository yet.
+- The Worker scheduled handler calls the D1 dispatcher only for the exact `*/1 * * * *` event and only when `PROBES_ENABLED=true` plus a valid HTTPS agent endpoint and 32-byte shared secret are present. `wrangler.toml` declares a one-minute Cron Trigger for the shared notification/probe handler. It dispatches email first and probes only when the probe bindings are explicitly configured.
 - Migration `0008_scheduler_workspace_quota_index.sql` adds a covering index for the workspace active-lease count; the migration validator checks that SQLite selects it for the quota query.
 - Due-work claims use a window-function rank and count unexpired leases across all invocations, so overlapping Cron runs cannot exceed two in-flight monitors per workspace by default. The global dispatch default is 10 with a hard maximum of 15. The dispatcher runs at most five jobs concurrently by default, leaving one of Cloudflare Workers' six simultaneous outbound-connection slots available (see [Cloudflare Workers limits](https://developers.cloudflare.com/workers/platform/limits/)). The dispatcher uses a 180-second lease; the 15-job ceiling keeps three 30-second probe waves plus request overhead within that lease.
 - Only a normalized, schema-validated signed-agent result can be persisted through `finalizeMonitorCheck`. A stale lease cannot write a result. Agent/network/auth/invalid-response failures are deferred for 30 seconds under the original lease token and do not create false customer downtime.
@@ -76,7 +76,7 @@ These tests use injected DNS answers and a local HTTP server. They do not perfor
 - Verify DNS behavior and outbound network restrictions in the intended host environment.
 - Add a durable, shared replay store before multi-instance agent operation.
 - Deploy the agent and configure its URL/TLS/secret only after explicit deployment authorization.
-- Connect automatic incident transitions to the notification outbox and complete a production-like Worker-to-agent-to-D1 end-to-end test before enabling Cron.
+- Automatic incident lifecycle transitions now enqueue email deliveries in the same D1 batch; complete full CI and a production-like Worker-to-agent-to-D1/notification end-to-end test before enabling customer probes.
 
 Until those gates pass, scheduled monitoring stays disabled and public status pages must continue to report health as unknown.
 

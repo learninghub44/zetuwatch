@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import worker from "../apps/api/src/index";
 import { describe, expect, it } from "vitest";
 import { claimDueMonitors } from "../packages/scheduler-core/src/claims";
 import { dispatchDueMonitors, type ProbeDispatchEnv } from "../packages/scheduler-core/src/dispatch";
@@ -265,4 +266,22 @@ describe("bounded scheduled probe dispatch", () => {
       .bind(monitorId).first<{ check_lease_token: string | null }>();
     expect(monitor?.check_lease_token).toBe(replacementToken);
   });
+
+  it("keeps the scheduled monitor runner disabled when the Cron Trigger fires without probe bindings", async () => {
+    const organizationId = await createOrganization("Cron remains gated");
+    const monitorId = await createMonitor(organizationId);
+
+    await worker.scheduled(
+      { cron: "*/1 * * * *", scheduledTime: BASE_NOW.getTime() } as ScheduledController,
+      { DB: env.DB, PUBLIC_APP_URL: "http://localhost:8787" } as never,
+      {} as ExecutionContext
+    );
+
+    expect(await checkCount(monitorId)).toBe(0);
+    const monitor = await env.DB.prepare("SELECT check_lease_token FROM monitors WHERE id = ?")
+      .bind(monitorId).first<{ check_lease_token: string | null }>();
+    expect(monitor?.check_lease_token).toBeNull();
+  });
+
+
 });

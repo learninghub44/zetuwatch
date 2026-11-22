@@ -296,7 +296,7 @@ No Cloudflare resources were created and no deployment was attempted. This is fe
 - Added token-checked retry deferral for probe-agent/network/configuration failures. These infrastructure failures do not create false target-down checks; valid agent results alone enter check history and the existing incident state machine.
 - Extended the signed client/agent deadline consistently to the monitor API's 30-second maximum, with a 35-second Worker request bound.
 - Added nine D1 integration tests for disabled and invalid configuration, workspace fairness across overlapping invocations, bounded concurrency/batch limits, real failed-result persistence, infrastructure retry deferral, malformed responses and stale lease ownership. Added Node tests for the 30-second upper bound.
-- The scheduled handler is implemented but no Cron Trigger is configured in `wrangler.toml`. `PROBES_ENABLED`, `PROBE_AGENT_URL` and `PROBE_SHARED_SECRET` are not set. No customer probes can run from the current repository configuration.
+- A one-minute Cron Trigger is declared in `wrangler.toml` for the shared notification/monitor handler. It dispatches at most five email deliveries first; the monitor dispatcher runs only when `PROBES_ENABLED=true` and valid HTTPS agent URL/shared-secret bindings are present. Those probe bindings are not set in the repository, so no customer probes run by default.
 - These new tests have not yet run in GitHub Actions. The latest branch is not CI-verified; the monitoring loop and production launch gates remain unchecked.
 
 
