@@ -1,7 +1,7 @@
 import { validateMonitorUrl } from "../../../packages/monitoring-core/src/url-safety";
 import { hashPassword, verifyPassword } from "../../../packages/auth-core/src/password";
 import { canDeleteMonitors, canWriteMonitors, canAssignRole, canInviteRole, canRemoveMember, isOrganizationRole } from "../../../packages/auth-core/src/authorization";
-import { dispatchDueMonitors } from "../../../packages/scheduler-core/src/dispatch";
+import { dispatchDueMonitors, isProbeExecutionEnabled } from "../../../packages/scheduler-core/src/dispatch";
 import { dispatchNotificationBatch } from "../../../packages/notifications-core/src/dispatch";
 
 interface Env {
@@ -16,6 +16,22 @@ interface Env {
 }
 
 type UserRow = { id: string; email: string; display_name: string | null; email_verified_at: string | null; authMethod?: "api_key"; apiKeyOrganizationId?: string; apiKeyScopes?: string[] };
+type MonitorStateRow = {
+  is_enabled: number;
+  last_checked_at?: string | null;
+  consecutive_failures?: number;
+  last_check_is_up?: number | null;
+  open_incident_status?: string | null;
+};
+function getMonitorState(monitor: MonitorStateRow, executionEnabled: boolean): string {
+  if (Number(monitor.is_enabled) !== 1) return "paused";
+  if (!executionEnabled) return "execution_disabled";
+  if (!monitor.last_checked_at) return "awaiting_first_check";
+  if (monitor.open_incident_status) return monitor.open_incident_status === "monitoring" ? "recovering" : "down";
+  if (Number(monitor.consecutive_failures ?? 0) > 0 || Number(monitor.last_check_is_up) === 0) return "suspect";
+  if (Number(monitor.last_check_is_up) === 1) return "healthy";
+  return "unknown";
+}
 const encoder = new TextEncoder();
 const json = (data: unknown, status = 200, headers: HeadersInit = {}): Response =>
   Response.json(data, { status, headers: { "cache-control": "no-store", ...headers } });
@@ -836,10 +852,21 @@ export default {
       const membership = await env.DB.prepare("SELECT role FROM organization_members WHERE organization_id = ? AND user_id = ?")
         .bind(organizationId, user.id).first<{ role: string }>();
       if (!membership) return json({ error: "FORBIDDEN" }, 403);
-      const result = await env.DB.prepare(`SELECT id, name, monitor_type, target_url, method, expected_status,
-        interval_seconds, timeout_ms, is_enabled, consecutive_failures, last_checked_at, next_check_at, created_at, updated_at
-        FROM monitors WHERE organization_id = ? AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 100`).bind(organizationId).all();
-      return json({ monitors: result.results, executionEnabled: false, note: "Scheduled checks are not enabled yet; monitors are saved but have not been probed." });
+      const executionEnabled = isProbeExecutionEnabled(env);
+      const result = await env.DB.prepare(`SELECT m.id, m.name, m.monitor_type, m.target_url, m.method, m.expected_status,
+        m.interval_seconds, m.timeout_ms, m.is_enabled, m.consecutive_failures, m.last_checked_at, m.next_check_at, m.created_at, m.updated_at,
+        (SELECT c.is_up FROM monitor_checks c WHERE c.monitor_id = m.id ORDER BY c.checked_at DESC, c.id DESC LIMIT 1) AS last_check_is_up,
+        (SELECT i.status FROM incidents i WHERE i.monitor_id = m.id AND i.resolved_at IS NULL ORDER BY i.started_at DESC, i.id DESC LIMIT 1) AS open_incident_status
+        FROM monitors m WHERE m.organization_id = ? AND m.deleted_at IS NULL ORDER BY m.created_at DESC LIMIT 100`).bind(organizationId).all();
+      const monitors = result.results.map(row => ({
+        ...row,
+        state: getMonitorState(row as MonitorStateRow, executionEnabled)
+      }));
+      return json({
+        monitors,
+        executionEnabled,
+        ...(executionEnabled ? {} : { note: "Scheduled probes are disabled; monitors are saved but have not been probed." })
+      });
     }
 
     if (request.method === "POST" && url.pathname === "/v1/monitors") {
@@ -878,7 +905,15 @@ export default {
         env.DB.prepare("INSERT INTO audit_logs (id, organization_id, actor_user_id, action, resource_type, resource_id) VALUES (?, ?, ?, 'monitor.created', 'monitor', ?)")
           .bind(id(), organizationId, user.id, monitorId)
       ]);
-      return json({ monitor: { id: monitorId, organizationId, name, monitorType, targetUrl: target, method, expectedStatus, intervalSeconds, timeoutMs, state: "awaiting_first_check" }, executionEnabled: false }, 201);
+      const executionEnabled = isProbeExecutionEnabled(env);
+      return json({
+        monitor: {
+          id: monitorId, organizationId, name, monitorType, targetUrl: target, method, expectedStatus,
+          intervalSeconds, timeoutMs, state: executionEnabled ? "awaiting_first_check" : "execution_disabled"
+        },
+        executionEnabled,
+        ...(executionEnabled ? {} : { note: "Scheduled probes are disabled; the target has not been contacted." })
+      }, 201);
     }
 
     const monitorMatch = url.pathname.match(/^\/v1\/monitors\/([0-9a-f-]{36})(\/checks|\/pause|\/resume)?$/i);
@@ -886,8 +921,18 @@ export default {
       const user = await currentUser(request, env);
       if (!user) return json({ error: "UNAUTHENTICATED" }, 401);
       const monitorId = monitorMatch[1];
-      const monitor = await env.DB.prepare("SELECT id, organization_id, name, target_url, monitor_type, method, expected_status, interval_seconds, timeout_ms, is_enabled FROM monitors WHERE id = ? AND deleted_at IS NULL")
-        .bind(monitorId).first<{ id: string; organization_id: string; name: string; target_url: string; monitor_type: string; method: string; expected_status: number; interval_seconds: number; timeout_ms: number; is_enabled: number }>();
+      const monitor = await env.DB.prepare(`SELECT m.id, m.organization_id, m.name, m.target_url, m.monitor_type, m.method,
+        m.expected_status, m.interval_seconds, m.timeout_ms, m.is_enabled, m.last_checked_at, m.next_check_at,
+        m.consecutive_failures,
+        (SELECT c.is_up FROM monitor_checks c WHERE c.monitor_id = m.id ORDER BY c.checked_at DESC, c.id DESC LIMIT 1) AS last_check_is_up,
+        (SELECT i.status FROM incidents i WHERE i.monitor_id = m.id AND i.resolved_at IS NULL ORDER BY i.started_at DESC, i.id DESC LIMIT 1) AS open_incident_status
+        FROM monitors m WHERE m.id = ? AND m.deleted_at IS NULL`)
+        .bind(monitorId).first<{
+          id: string; organization_id: string; name: string; target_url: string; monitor_type: string;
+          method: string; expected_status: number; interval_seconds: number; timeout_ms: number;
+          is_enabled: number; last_checked_at: string | null; next_check_at: string | null;
+          consecutive_failures: number; last_check_is_up: number | null; open_incident_status: string | null;
+        }>();
       if (!monitor) return json({ error: "NOT_FOUND" }, 404);
       if (!apiKeyAllows(user, monitor.organization_id, "read")) return json({ error: "FORBIDDEN" }, 403);
       const membership = await env.DB.prepare("SELECT role FROM organization_members WHERE organization_id = ? AND user_id = ?")
@@ -916,21 +961,38 @@ export default {
         if (!current) return json({ error: "NOT_FOUND" }, 404);
         const changed = (results[0]?.meta?.changes ?? 0) === 1;
         const isEnabled = Number(current.is_enabled) === 1;
+        const executionEnabled = isProbeExecutionEnabled(env);
         return json({
           message: isEnabled ? "Monitor resumed." : "Monitor paused.",
           changed,
           monitor: { id: monitorId, isEnabled },
-          executionEnabled: false,
-          note: "Monitor scheduling is not active yet; this action does not run a probe."
+          executionEnabled,
+          note: executionEnabled
+            ? "The scheduler will honor this enabled/paused state on its next pass."
+            : "Probe execution is disabled; this action only changes the saved monitor state."
         });
       }
 
       if (request.method === "GET" && monitorMatch[2] === "/checks") {
         const checks = await env.DB.prepare(`SELECT id, checked_at, is_up, status_code, response_time_ms, error_code
           FROM monitor_checks WHERE monitor_id = ? ORDER BY checked_at DESC LIMIT 100`).bind(monitorId).all();
-        return json({ checks: checks.results, executionEnabled: false });
+        const executionEnabled = isProbeExecutionEnabled(env);
+        return json({
+          checks: checks.results,
+          executionEnabled,
+          ...(executionEnabled ? {} : { note: "Scheduled probes are disabled; no new checks are being recorded." })
+        });
       }
-      if (request.method === "GET") return json({ monitor, state: Number(monitor.is_enabled) === 1 ? "awaiting_first_check" : "paused", executionEnabled: false });
+      if (request.method === "GET") {
+        const executionEnabled = isProbeExecutionEnabled(env);
+        const state = getMonitorState(monitor, executionEnabled);
+        return json({
+          monitor: { ...monitor, state },
+          state,
+          executionEnabled,
+          ...(executionEnabled ? {} : { note: "Scheduled probes are disabled; this view only reads stored monitoring records." })
+        });
+      }
       if (request.method === "PATCH") {
         if (!canWriteMonitors(membership.role)) return json({ error: "FORBIDDEN" }, 403);
         const body = await request.json().catch(() => null) as Record<string, unknown> | null;
@@ -954,7 +1016,7 @@ export default {
           env.DB.prepare("INSERT INTO audit_logs (id, organization_id, actor_user_id, action, resource_type, resource_id) VALUES (?, ?, ?, 'monitor.updated', 'monitor', ?)")
             .bind(id(), monitor.organization_id, user.id, monitorId)
         ]);
-        return json({ message: "Monitor updated.", executionEnabled: false });
+        return json({ message: "Monitor updated.", executionEnabled: isProbeExecutionEnabled(env) });
       }
       if (request.method === "DELETE") {
         if (!canDeleteMonitors(membership.role)) return json({ error: "FORBIDDEN" }, 403);
