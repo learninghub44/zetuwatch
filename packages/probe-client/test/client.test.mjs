@@ -56,6 +56,12 @@ test("supports a 30-second monitor timeout with a bounded Worker request deadlin
     { ...job, timeoutMs: 30_000 },
     { requestTimeoutMs: 35_001, fetcher: async () => { throw new Error("must not fetch"); } }
   ), /PROBE_AGENT_TIMEOUT_INVALID/);
+  await assert.rejects(sendProbeJob(
+    "https://probe.example/v1/probe",
+    secret,
+    { ...job, timeoutMs: 30_001 },
+    { fetcher: async () => { throw new Error("must not fetch"); } }
+  ), /PROBE_TIMEOUT_INVALID/);
 });
 
 test("rejects oversized and malformed agent responses", async () => {
