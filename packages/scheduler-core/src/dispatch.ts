@@ -46,10 +46,11 @@ export interface ProbeDispatchSummary {
 }
 
 const DEFAULT_BATCH_LIMIT = 10;
-const MAX_BATCH_LIMIT = 25;
+const MAX_BATCH_LIMIT = 15;
 const DEFAULT_ORGANIZATION_LIMIT = 2;
 const DEFAULT_CONCURRENCY = 5;
-const MAX_CONCURRENCY = 10;
+// Leave one slot below Cloudflare's six simultaneous outbound-connection limit.
+const MAX_CONCURRENCY = 5;
 const DEFAULT_RETRY_DELAY_MS = 30_000;
 const MIN_RETRY_DELAY_MS = 5_000;
 const MAX_RETRY_DELAY_MS = 300_000;
