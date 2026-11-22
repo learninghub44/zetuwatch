@@ -290,9 +290,9 @@ No Cloudflare resources were created and no deployment was attempted. This is fe
 ## Gated scheduler dispatch implementation (2026-11-22)
 
 - Added a D1 scheduler dispatcher that checks configuration before claiming work, claims at most 10 monitors per tick by default (hard dispatch maximum 15) and at most two per workspace, and executes no more than five probes concurrently by default to stay below Cloudflare Workers' six simultaneous outbound-connection limit.
-- Added per-workspace fairness to the atomic claim query with a window-function rank. The global claim maximum remains 25 and the workspace cap is validated.
+- Added per-workspace fairness to the atomic claim query with a window-function rank and a count of unexpired leases across overlapping invocations. Each workspace is capped at two in-flight probes by default; the global claim helper maximum remains 25 and the dispatcher hard maximum is 15.
 - Added token-checked retry deferral for probe-agent/network/configuration failures. These infrastructure failures do not create false target-down checks; valid agent results alone enter check history and the existing incident state machine.
 - Extended the signed client/agent deadline consistently to the monitor API's 30-second maximum, with a 35-second Worker request bound.
-- Added six D1 integration tests for disabled and invalid configuration, workspace fairness, concurrency, real failed-result persistence, infrastructure retry deferral, malformed responses and stale lease ownership. Added Node tests for the 30-second upper bound.
+- Added nine D1 integration tests for disabled and invalid configuration, workspace fairness across overlapping invocations, bounded concurrency/batch limits, real failed-result persistence, infrastructure retry deferral, malformed responses and stale lease ownership. Added Node tests for the 30-second upper bound.
 - The scheduled handler is implemented but no Cron Trigger is configured in `wrangler.toml`. `PROBES_ENABLED`, `PROBE_AGENT_URL` and `PROBE_SHARED_SECRET` are not set. No customer probes can run from the current repository configuration.
 - These new tests have not yet run in GitHub Actions. The latest branch is not CI-verified; the monitoring loop and production launch gates remain unchecked.
