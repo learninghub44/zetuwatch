@@ -90,8 +90,10 @@ function validateClaimOptions(options: ClaimOptions): {
  * D1 batch executes statements sequentially in one transaction. The update
  * selects due rows and installs a unique lease token before the following
  * select reads them, so overlapping scheduler invocations cannot claim the
- * same monitor. The due timestamp is deliberately unchanged until a check is
- * durably finalized; abandoned work becomes eligible again at lease expiry.
+ * same monitor. The workspace limit also counts unexpired leases from other
+ * invocations, so overlapping Cron runs cannot exceed the per-workspace cap.
+ * The due timestamp is unchanged until a check is durably finalized; abandoned
+ * work becomes eligible again at lease expiry.
  */
 export async function claimDueMonitors(
   db: D1Database,
@@ -105,15 +107,16 @@ export async function claimDueMonitors(
     "SET check_lease_token = ?, check_lease_until = ?, last_claimed_at = ?",
     "WHERE id IN (",
     "  SELECT id FROM (",
-    "    SELECT id, organization_id, next_check_at,",
-    "      ROW_NUMBER() OVER (PARTITION BY organization_id ORDER BY next_check_at ASC, id ASC) AS organization_rank",
-    "    FROM monitors",
-    "    WHERE is_enabled = 1",
-    "      AND deleted_at IS NULL",
-    "      AND next_check_at <= ?",
-    "      AND (check_lease_until IS NULL OR check_lease_until <= ?)",
+    "    SELECT due.id, due.organization_id, due.next_check_at,",
+    "      ROW_NUMBER() OVER (PARTITION BY due.organization_id ORDER BY due.next_check_at ASC, due.id ASC) AS organization_rank,",
+    "      (SELECT COUNT(*) FROM monitors AS active WHERE active.organization_id = due.organization_id AND active.is_enabled = 1 AND active.deleted_at IS NULL AND active.check_lease_token IS NOT NULL AND active.check_lease_until > ?) AS active_lease_count",
+    "    FROM monitors AS due",
+    "    WHERE due.is_enabled = 1",
+    "      AND due.deleted_at IS NULL",
+    "      AND due.next_check_at <= ?",
+    "      AND (due.check_lease_until IS NULL OR due.check_lease_until <= ?)",
     "  ) AS ranked_due_monitors",
-    "  WHERE organization_rank <= ?",
+    "  WHERE organization_rank <= ? - active_lease_count",
     "  ORDER BY next_check_at ASC, id ASC",
     "  LIMIT ?",
     ")",
@@ -142,7 +145,7 @@ export async function claimDueMonitors(
   ].join("\n");
 
   const results = await db.batch([
-    db.prepare(claimSql).bind(token, leaseUntil, now.iso, now.sql, now.iso, perOrganizationLimit, limit, now.sql, now.iso),
+    db.prepare(claimSql).bind(token, leaseUntil, now.iso, now.iso, now.sql, now.iso, perOrganizationLimit, limit, now.sql, now.iso),
     db.prepare(selectSql).bind(token, leaseUntil)
   ]);
 
