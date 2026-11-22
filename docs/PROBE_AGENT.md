@@ -7,7 +7,8 @@ ZetuWatch uses Cloudflare Workers and D1 for the customer API and control plane.
 - The shared URL and IP policy lives in packages/monitoring-core as dependency-free ESM. The existing TypeScript entrypoints re-export that exact implementation so the Worker and agent do not maintain separate address-classification rules.
 - The agent lives in apps/probe-agent and uses only Node.js built-in modules. It does not use an HTTP proxy, browser cookies, customer-supplied request headers or a third-party networking package.
 - The Worker-compatible signed client lives in packages/probe-client. It uses Web Crypto and fetch to call only the configured HTTPS agent endpoint.
-- The agent is not yet called by the scheduler. No customer target is probed by this change, and executionEnabled remains false.
+- A bounded D1 scheduler dispatcher now claims due monitors fairly (default 10 per tick, at most 2 per workspace), runs at most five requests concurrently and finalizes only validated agent results under the original lease token. It is present on the secure-probe feature branch but remains disabled by default: no Cron Trigger is configured and `PROBES_ENABLED` must be explicitly set to `true` alongside the HTTPS agent URL and secret.
+- No customer target is probed by the current repository configuration, and customer-facing `executionEnabled` remains false.
 
 ## Request and trust boundary
 
@@ -23,7 +24,7 @@ ZetuWatch uses Cloudflare Workers and D1 for the customer API and control plane.
 ## Bounds
 
 - DNS A/AAAA resolution: 2.5 seconds.
-- Total probe deadline: at most 10 seconds, including DNS and redirect hops.
+- Total probe deadline: at most 30 seconds, including DNS and redirect hops.
 - Redirects: disabled by default; maximum 3 when explicitly requested.
 - Response body: 64 KiB maximum.
 - Response headers: 16 KiB maximum.
@@ -45,6 +46,8 @@ Configure these environment variables outside source control:
 - PROBE_PORT: optional listener port; defaults to 8788.
 - PROBE_HOST: optional bind address; defaults to 0.0.0.0.
 
+The Worker requires `PROBES_ENABLED=true`, `PROBE_AGENT_URL=https://<agent-host>/v1/probe` and `PROBE_SHARED_SECRET` in its environment/secret store before it will claim any monitor. The repository does not set these values or configure a Cron Trigger. Never place the shared secret in Wrangler vars or source control.
+
 Generate a secret locally with a cryptographically secure generator such as openssl rand -hex 32, then place it in the host's secret manager and the Worker secret store. Never put the value in wrangler.toml, a checked-in .env file, CI logs or this repository.
 
 Start the service with node apps/probe-agent/src/server.mjs. It requires TLS files and the shared secret at startup. GET /healthz returns only a minimal status value. POST /v1/probe requires the signed request headers.
@@ -57,14 +60,24 @@ Run npm run test:probe-agent. The suite covers IP classification, mixed DNS answ
 
 These tests use injected DNS answers and a local HTTP server. They do not perform live public DNS resolution or a trusted-certificate TLS handshake. The TLS test verifies the Node request options (original SNI hostname and rejectUnauthorized enabled), not a production certificate chain. The Worker client is tested with an injected fetcher; it has not been connected to the production scheduler or a deployed agent.
 
+## Scheduler dispatch implementation (feature branch; not launch-verified)
+
+- The Worker scheduled handler calls the D1 dispatcher only for the exact `*/1 * * * *` event and only when `PROBES_ENABLED=true` plus a valid HTTPS agent endpoint and 32-byte shared secret are present. `wrangler.toml` intentionally has no Cron Trigger, so no scheduled event is configured by this repository yet.
+- Due-work claims use a window-function rank to cap each workspace at two monitors per tick by default, with a global batch default of 10 and hard maximum of 25. The dispatcher runs at most five jobs concurrently by default.
+- Only a normalized, schema-validated signed-agent result can be persisted through `finalizeMonitorCheck`. A stale lease cannot write a result. Agent/network/auth/invalid-response failures are deferred for 30 seconds under the original lease token and do not create false customer downtime.
+- Redirects remain disabled for scheduled jobs because monitor-level redirect policy is not yet persisted in the monitor model.
+- D1 integration tests have been added for disabled/config-invalid no-claim behavior, workspace fairness, bounded concurrency, real result persistence, infrastructure retry deferral, malformed results and stale-lease rejection. The feature-branch D1 suite and Node suite have not yet been run in GitHub Actions; do not count these tests as passing.
+
 ## Launch blockers
 
-- Integrate the signed client with the bounded scheduler and persist actual check results only after a valid agent response.
-- Add per-organization dispatch quotas and a durable, shared replay store before multi-instance operation.
+- Run the full repository CI and probe-agent Node suite for the latest feature branch.
+- Exercise a real HTTPS handshake using a trusted test certificate and verify hostname mismatch/expiry failures.
+- Verify DNS behavior and outbound network restrictions in the intended host environment.
+- Add a durable, shared replay store before multi-instance agent operation.
 - Exercise a real HTTPS handshake using a trusted test certificate and verify hostname mismatch/expiry failures.
 - Verify DNS behavior and outbound network restrictions in the intended host environment.
 - Deploy the agent and configure its URL/TLS/secret only after explicit deployment authorization.
-- Complete a production-like Worker-to-agent-to-D1 end-to-end test before enabling Cron.
+- Connect automatic incident transitions to the notification outbox and complete a production-like Worker-to-agent-to-D1 end-to-end test before enabling Cron.
 
 Until those gates pass, scheduled monitoring stays disabled and public status pages must continue to report health as unknown.
 
