@@ -46,12 +46,12 @@ SQLite triggers enforce same-workspace component membership even if a future cod
 
 All monitor endpoints require a verified signed-in session and an organization membership.
 
-- `GET /v1/monitors?organizationId=<id>` — list up to 100 monitors in the selected workspace.
-- `POST /v1/monitors` — create a monitor. Body: `{ organizationId, name, targetUrl, monitorType: "http"|"api", method: "GET"|"HEAD", expectedStatus, intervalSeconds, timeoutMs }`.
-- `GET /v1/monitors/<uuid>` — retrieve a monitor.
-- `GET /v1/monitors/<uuid>/checks` — retrieve up to 100 stored checks, newest first. Each row includes its timestamp, pass/fail result, HTTP status, response time and error category. The response includes `executionEnabled: false`; this read does not trigger a probe.
+- `GET /v1/monitors?organizationId=<id>` — list up to 100 monitors in the selected workspace. Each row includes a state derived from persisted checks and any unresolved incident.
+- `POST /v1/monitors` — create a monitor. Body: `{ organizationId, name, targetUrl, monitorType: "http"|"api", method: "GET"|"HEAD", expectedStatus, intervalSeconds, timeoutMs }`. It stores the configuration and makes the monitor due; it does not synchronously probe the target.
+- `GET /v1/monitors/<uuid>` — retrieve a monitor and its derived state.
+- `GET /v1/monitors/<uuid>/checks` — retrieve up to 100 stored checks, newest first. Each row includes its timestamp, pass/fail result, HTTP status, response time and error category. The response includes the current `executionEnabled` configuration signal; this read never triggers a probe.
 - `PATCH /v1/monitors/<uuid>` — update name, target URL, method, expected status, interval or timeout.
-- `POST /v1/monitors/<uuid>/pause` and `POST /v1/monitors/<uuid>/resume` — pause or resume future scheduling. Owners/admins/members may manage monitor state; viewers are read-only. Actions are idempotent, clear any active lease, and resume makes the monitor due. Both return `executionEnabled: false`; neither sends a probe while the secure runner is disabled.
+- `POST /v1/monitors/<uuid>/pause` and `POST /v1/monitors/<uuid>/resume` — pause or resume future scheduling. Owners/admins/members may manage monitor state; viewers are read-only. Actions are idempotent, clear any active lease, and resume makes the monitor due. Both return the current `executionEnabled` configuration signal; neither sends a probe synchronously.
 - `DELETE /v1/monitors/<uuid>` — owner/admin only; soft-deletes and disables the monitor, removes it from monitor list/detail APIs, and retains check, incident and timeline rows. There is no hard-delete endpoint yet.
 
 Viewers can read. Members/admins/owners can create and update. Only owners/admins can delete. Every query is scoped through the monitor's organization membership; never trust an organization ID supplied by a client without checking membership.
@@ -83,11 +83,11 @@ Timeline visibility is `internal` by default or `public` when explicitly selecte
 
 ## Monitor detail and check history
 
-The workspace monitor list provides a **View** action that opens a detail panel. It loads the tenant-authorized monitor record and persisted check history, and renders stored values using text-only DOM nodes. An empty history is explicitly shown as no checks recorded; the UI does not invent status, uptime or latency values. Refreshing history only reads the API and never sends a request to the monitored target.
+The workspace monitor list provides a **View** action that opens a detail panel. It loads the tenant-authorized monitor record and persisted check history, and renders stored values using text-only DOM nodes. State labels are derived from the latest persisted check and unresolved incident: paused, execution disabled, awaiting first check, healthy, suspect, down or recovering. An empty history is explicitly shown as no checks recorded; the UI does not invent status, uptime or latency values. Refreshing history only reads the API and never sends a request to the monitored target.
 
 ## Monitor execution status
 
-The current API deliberately returns `executionEnabled: false`. Creating a monitor stores its configuration but does not run a network request or schedule a check. Pausing and resuming only changes its persisted enabled state and due time; it does not activate execution. The current URL validator is preliminary and does not provide DNS resolution/pinning or DNS-rebinding protection. Do not enable scheduled probes until the egress security architecture is implemented and reviewed.
+The API returns `executionEnabled: true` only when the operator explicitly sets `PROBES_ENABLED=true`, supplies a valid HTTPS `PROBE_AGENT_URL` ending in `/v1/probe`, and provides a `PROBE_SHARED_SECRET` of at least 32 bytes. Otherwise it returns false and a disabled-state note. This is a configuration signal, not proof that the external agent is reachable or that a target has passed a check. Monitor state is never inferred from configuration alone: before the first persisted result it remains awaiting first check; later states are derived from check history and unresolved incident status. Creating/updating/resuming a monitor changes its due time but does not synchronously send a probe. The one-minute Cron handler dispatches only when the operator gate and agent configuration are valid. The DNS-pinned probe agent and bounded D1 dispatcher are implemented on the integration branch, but full CI, live DNS/TLS verification, agent deployment and production-like Worker-to-agent-to-D1 verification remain launch gates. Keep `PROBES_ENABLED` unset until those gates pass.
 
 ## Error responses
 
