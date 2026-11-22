@@ -37,6 +37,27 @@ test("rejects insecure agent endpoints and arbitrary request fields", async () =
   await assert.rejects(sendProbeJob("https://probe.example/v1/probe", secret, { ...job, headers: { authorization: "secret" } }), /PROBE_JOB_INVALID/);
 });
 
+test("supports a 30-second monitor timeout with a bounded Worker request deadline", async () => {
+  const result = await sendProbeJob(
+    "https://probe.example/v1/probe",
+    secret,
+    { ...job, timeoutMs: 30_000 },
+    {
+      requestTimeoutMs: 35_000,
+      fetcher: async () => new Response(JSON.stringify({
+        result: { isUp: true, statusCode: 200, responseTimeMs: 25, errorCode: null, redirectCount: 0 }
+      }), { status: 200, headers: { "content-type": "application/json" } })
+    }
+  );
+  assert.equal(result.isUp, true);
+  await assert.rejects(sendProbeJob(
+    "https://probe.example/v1/probe",
+    secret,
+    { ...job, timeoutMs: 30_000 },
+    { requestTimeoutMs: 35_001, fetcher: async () => { throw new Error("must not fetch"); } }
+  ), /PROBE_AGENT_TIMEOUT_INVALID/);
+});
+
 test("rejects oversized and malformed agent responses", async () => {
   await assert.rejects(sendProbeJob("https://probe.example/v1/probe", secret, job, {
     fetcher: async () => new Response("x".repeat(5 * 1024), { status: 200, headers: { "content-type": "application/json" } })
