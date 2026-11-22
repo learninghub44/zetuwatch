@@ -83,7 +83,7 @@ Timeline visibility is `internal` by default or `public` when explicitly selecte
 
 ## Monitor detail and check history
 
-The workspace monitor list provides a **View** action that opens a detail panel. It loads the tenant-authorized monitor record and persisted check history, and renders stored values using text-only DOM nodes. State labels are derived from the latest persisted check and unresolved incident: paused, execution disabled, awaiting first check, healthy, suspect, down or recovering. An empty history is explicitly shown as no checks recorded; the UI does not invent status, uptime or latency values. Refreshing history only reads the API and never sends a request to the monitored target.
+The workspace monitor list provides a **View** action that opens a detail panel. It loads the tenant-authorized monitor record and persisted check history, and renders stored values using text-only DOM nodes. State labels are derived from the latest persisted check and unresolved incident: paused, execution disabled, awaiting first check, healthy, suspect, down or recovering. An unresolved incident remains down/recovering even if probe dispatch is later disabled; other enabled monitors show execution disabled rather than a stale healthy state. An empty history is explicitly shown as no checks recorded; the UI does not invent status, uptime or latency values. Refreshing history only reads the API and never sends a request to the monitored target.
 
 ## Monitor execution status
 
