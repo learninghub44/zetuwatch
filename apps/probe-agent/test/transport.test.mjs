@@ -43,6 +43,26 @@ test("aborts a response once the bounded body limit is exceeded", async () => {
   } finally { await close(server); }
 });
 
+test("accepts the 30-second transport ceiling and rejects larger timeouts", async () => {
+  const server = createServer((_request, response) => {
+    response.writeHead(200, { "content-length": "2" });
+    response.end("ok");
+  });
+  const port = await listen(server);
+  try {
+    const result = await requestPinned(
+      new URL(`http://monitor.example:${port}/health`),
+      "127.0.0.1",
+      { timeoutMs: 30_000 }
+    );
+    assert.equal(result.statusCode, 200);
+    await assert.rejects(
+      requestPinned(new URL(`http://monitor.example:${port}/health`), "127.0.0.1", { timeoutMs: 30_001 }),
+      /PROBE_TIMEOUT_INVALID/
+    );
+  } finally { await close(server); }
+});
+
 test("uses the original hostname for TLS SNI and keeps certificate verification enabled", () => {
   const options = buildPinnedRequestOptions(new URL("https://status.example/health"), "93.184.216.34");
   assert.equal(options.hostname, "status.example");
