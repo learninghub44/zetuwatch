@@ -188,14 +188,14 @@ async function openMonitor(monitorId){
     const monitorState=monitor.state||detail.state||"unknown";
     $("monitor-detail-notice").textContent=!selectedMonitorEnabled
       ?"This monitor is paused. Existing history is retained; resuming it will make it eligible for a future scheduled check."
-      :!executionEnabled
-        ?"Scheduled probes are disabled. This view only reads records already stored by the monitoring service."
-        :checks.length===0
-          ?"Probe dispatch is configured. This monitor is waiting for its first recorded check."
-          :monitorState==="recovering"
-            ?"Checks are passing again; the incident remains in recovery monitoring until the recovery threshold is met."
-            :monitorState==="down"
-              ?"An incident is open for this monitor. The history below shows its actual recorded checks."
+      :monitorState==="down"
+        ?"An incident remains open for this monitor. The history below shows its actual recorded checks."
+        :monitorState==="recovering"
+          ?"Checks are passing again; the incident remains in recovery monitoring until the recovery threshold is met."
+          :!executionEnabled
+            ?"Probe dispatch is disabled. This view only reads records already stored by the monitoring service."
+            :checks.length===0
+              ?"Probe dispatch is configured. This monitor is waiting for its first recorded check."
               :"Probe dispatch is configured. The history below shows only actual recorded checks.";
     $("monitor-detail-title").textContent=monitor.name||"Monitor details";
     $("monitor-detail-target").textContent=monitor.target_url||"";
