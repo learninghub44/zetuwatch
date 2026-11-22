@@ -52,7 +52,7 @@ Generate a secret locally with a cryptographically secure generator such as open
 
 Start the service with node apps/probe-agent/src/server.mjs. It requires TLS files and the shared secret at startup. GET /healthz returns only a minimal status value. POST /v1/probe requires the signed request headers.
 
-The nonce replay cache is currently in process memory. Replay-nonce and source-IP rate-limit entries use a non-decreasing clock and insertion-ordered expiry pruning: routine requests do not scan the full bounded maps, and expired entries are removed from the oldest end. If all nonce slots remain live, new signed requests fail closed with 503. Run one agent instance only. Do not add replicas or load balancing until a shared durable nonce store is implemented and tested; otherwise a captured signed request could be replayed against another replica. The source-IP rate limit is an additional abuse control, not a tenant quota. Its in-memory bucket map is hard-capped at 5,000 entries: expired buckets are reclaimed, and new source IPs are rejected while all slots remain live. Tenant and plan quotas must be enforced by the Worker scheduler before dispatch.
+The nonce replay cache is currently in process memory. Replay-nonce and source-IP rate-limit entries use a non-decreasing clock and insertion-ordered expiry pruning: routine requests do not scan the full bounded maps, and expired entries are removed from the oldest end. If all nonce slots remain live, new signed requests fail closed with 503. Run one agent instance only. Do not add replicas or load balancing until a shared durable nonce store is implemented and tested; otherwise a captured signed request could be replayed against another replica. The source-IP rate limit is an additional abuse control, not a tenant quota. Its in-memory bucket map is hard-capped at 5,000 entries: expired buckets are reclaimed, and new source IPs are rejected while all slots remain live. The D1 scheduler enforces a two-in-flight-probe workspace quota across overlapping invocations; plan/usage quotas remain separate launch work.
 
 ## Tests and verified limits
 
@@ -74,8 +74,6 @@ These tests use injected DNS answers and a local HTTP server. They do not perfor
 - Exercise a real HTTPS handshake using a trusted test certificate and verify hostname mismatch/expiry failures.
 - Verify DNS behavior and outbound network restrictions in the intended host environment.
 - Add a durable, shared replay store before multi-instance agent operation.
-- Exercise a real HTTPS handshake using a trusted test certificate and verify hostname mismatch/expiry failures.
-- Verify DNS behavior and outbound network restrictions in the intended host environment.
 - Deploy the agent and configure its URL/TLS/secret only after explicit deployment authorization.
 - Connect automatic incident transitions to the notification outbox and complete a production-like Worker-to-agent-to-D1 end-to-end test before enabling Cron.
 
