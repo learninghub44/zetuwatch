@@ -63,7 +63,7 @@ The product is built in vertical slices. A slice is complete only when UI, API, 
 - [ ] Privacy, terms, retention and deletion workflows published
 - [ ] Billing webhooks tested against duplicate, delayed and invalid events
 - [ ] Accessibility and mobile QA completed
-- [ ] Cloudflare quotas, limits and costs validated against target load
+- [ ] Cloudflare quotas, limits and costs validated against target load, including the 10 ms Workers Free Cron CPU limit versus 30 seconds on Workers Paid for sub-hour schedules; the 10-job probe batch has not yet been measured against either plan
 - [ ] Production deployment and smoke tests completed
 
 Do not mark a phase complete because files or mock screens exist. Verify behavior.
