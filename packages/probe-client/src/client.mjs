@@ -51,7 +51,7 @@ async function readLimitedJson(response) {
   catch { throw new Error("PROBE_AGENT_INVALID_RESPONSE"); }
 }
 
-function validateEndpoint(endpoint) {
+export function validateProbeAgentEndpoint(endpoint) {
   let url;
   try { url = new URL(endpoint); } catch { throw new Error("PROBE_AGENT_ENDPOINT_INVALID"); }
   if (url.protocol !== "https:" || url.username || url.password || url.hash || url.search || url.pathname !== "/v1/probe" || (url.port && url.port !== "443")) {
@@ -69,7 +69,7 @@ export async function signProbePayload(secret, timestamp, nonce, body) {
 }
 
 export async function sendProbeJob(endpoint, secret, input, options = {}) {
-  const target = validateEndpoint(endpoint);
+  const target = validateProbeAgentEndpoint(endpoint);
   const job = normalizeJob(input);
   const fetcher = options.fetcher ?? fetch;
   const now = options.now ?? Date.now;
@@ -78,7 +78,7 @@ export async function sendProbeJob(endpoint, secret, input, options = {}) {
   const body = JSON.stringify(job);
   const signature = await signProbePayload(secret, timestamp, nonce, body);
   const requestTimeoutMs = options.requestTimeoutMs ?? job.timeoutMs + 4_000;
-  if (!Number.isInteger(requestTimeoutMs) || requestTimeoutMs < 1_000 || requestTimeoutMs > 15_000) {
+  if (!Number.isInteger(requestTimeoutMs) || requestTimeoutMs < 1_000 || requestTimeoutMs > 35_000) {
     throw new Error("PROBE_AGENT_TIMEOUT_INVALID");
   }
 
