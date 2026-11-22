@@ -148,6 +148,26 @@ function api(
   }));
 }
 
+function apiWithEnv(
+  path: string,
+  options: { token?: string; method?: string; body?: Record<string, unknown> },
+  overrides: Record<string, unknown>
+): Promise<Response> {
+  const headers = new Headers({ "cf-connecting-ip": crypto.randomUUID() });
+  if (options.token) headers.set("cookie", `zw_session=${options.token}`);
+  if (options.body) headers.set("content-type", "application/json");
+  return exports.default.fetch(new Request(`https://api.zetuwatch.test${path}`, {
+    method: options.method ?? "GET",
+    headers,
+    body: options.body ? JSON.stringify(options.body) : undefined
+  }), {
+    DB: env.DB,
+    APP_ENV: "test",
+    PUBLIC_APP_URL: "https://app.zetuwatch.test",
+    ...overrides
+  } as never, {} as ExecutionContext);
+}
+
 describe("Worker API tenant isolation", () => {
   it("rejects requests without a verified session", async () => {
     const response = await api(`/v1/monitors?organizationId=${crypto.randomUUID()}`);
@@ -167,6 +187,83 @@ describe("Worker API tenant isolation", () => {
 
     expect(response.status).toBe(403);
     expect(await response.json()).toMatchObject({ error: "FORBIDDEN" });
+  });
+
+  it("reports probe execution configuration and derives persisted monitor states", async () => {
+    const identity = await createIdentity("owner");
+    const awaitingId = await createMonitor(identity.organizationId);
+    const suspectId = await createMonitor(identity.organizationId);
+    const downId = await createMonitor(identity.organizationId);
+    const recoveringId = await createMonitor(identity.organizationId);
+    const healthyId = await createMonitor(identity.organizationId);
+    const pausedId = await createMonitor(identity.organizationId);
+
+    const checkedAt = "2026-11-22 07:00:00";
+    await env.DB.batch([
+      env.DB.prepare("UPDATE monitors SET last_checked_at = ?, consecutive_failures = 1 WHERE id = ?")
+        .bind(checkedAt, suspectId),
+      env.DB.prepare("INSERT INTO monitor_checks (id, monitor_id, checked_at, is_up, status_code, response_time_ms, error_code) VALUES (?, ?, ?, 0, 503, 80, 'HTTP_STATUS_MISMATCH')")
+        .bind(crypto.randomUUID(), suspectId, checkedAt),
+      env.DB.prepare("UPDATE monitors SET last_checked_at = ?, consecutive_failures = 2 WHERE id = ?")
+        .bind(checkedAt, downId),
+      env.DB.prepare("UPDATE monitors SET last_checked_at = ?, consecutive_successes = 1 WHERE id = ?")
+        .bind(checkedAt, recoveringId),
+      env.DB.prepare("UPDATE monitors SET last_checked_at = ? WHERE id = ?")
+        .bind(checkedAt, healthyId),
+      env.DB.prepare("INSERT INTO monitor_checks (id, monitor_id, checked_at, is_up, status_code, response_time_ms, error_code) VALUES (?, ?, ?, 1, 200, 25, NULL)")
+        .bind(crypto.randomUUID(), healthyId, checkedAt),
+      env.DB.prepare("UPDATE monitors SET is_enabled = 0 WHERE id = ?").bind(pausedId)
+    ]);
+    const downIncident = await createIncident(downId);
+    const recoveryIncident = await createIncident(recoveringId);
+    await env.DB.batch([
+      env.DB.prepare("UPDATE incidents SET status = 'monitoring' WHERE id = ?").bind(recoveryIncident),
+      env.DB.prepare("UPDATE incidents SET status = 'identified' WHERE id = ?").bind(downIncident)
+    ]);
+
+    const configured = {
+      PROBES_ENABLED: "true",
+      PROBE_AGENT_URL: "https://probe.example.test/v1/probe",
+      PROBE_SHARED_SECRET: "test-only-probe-secret-with-at-least-32-bytes"
+    };
+    const response = await apiWithEnv(
+      `/v1/monitors?organizationId=${identity.organizationId}`,
+      { token: identity.sessionToken },
+      configured
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json() as {
+      executionEnabled: boolean;
+      monitors: Array<{ id: string; state: string }>;
+    };
+    expect(body.executionEnabled).toBe(true);
+    const states = new Map(body.monitors.map(monitor => [monitor.id, monitor.state]));
+    expect(states.get(awaitingId)).toBe("awaiting_first_check");
+    expect(states.get(suspectId)).toBe("suspect");
+    expect(states.get(downId)).toBe("down");
+    expect(states.get(recoveringId)).toBe("recovering");
+    expect(states.get(healthyId)).toBe("healthy");
+    expect(states.get(pausedId)).toBe("paused");
+
+    const disabled = await apiWithEnv(
+      `/v1/monitors?organizationId=${identity.organizationId}`,
+      { token: identity.sessionToken },
+      { ...configured, PROBES_ENABLED: "false" }
+    );
+    const disabledBody = await disabled.json() as {
+      executionEnabled: boolean;
+      monitors: Array<{ id: string; state: string }>;
+    };
+    expect(disabledBody.executionEnabled).toBe(false);
+    expect(new Map(disabledBody.monitors.map(monitor => [monitor.id, monitor.state])).get(awaitingId))
+      .toBe("execution_disabled");
+
+    const invalid = await apiWithEnv(
+      `/v1/monitors?organizationId=${identity.organizationId}`,
+      { token: identity.sessionToken },
+      { ...configured, PROBE_AGENT_URL: "http://probe.example.test/v1/probe" }
+    );
+    expect((await invalid.json() as { executionEnabled: boolean }).executionEnabled).toBe(false);
   });
 
   it("does not expose another tenant's monitor or check history by ID", async () => {
