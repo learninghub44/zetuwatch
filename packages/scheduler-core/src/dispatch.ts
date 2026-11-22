@@ -82,6 +82,27 @@ function emptySummary(reason?: ProbeDispatchSummary["reason"]): ProbeDispatchSum
   };
 }
 
+export function probeDispatchDisabledReason(env: ProbeDispatchEnv): ProbeDispatchSummary["reason"] | undefined {
+  if (env.PROBES_ENABLED !== "true") return "PROBES_DISABLED";
+  const endpoint = env.PROBE_AGENT_URL;
+  const secret = env.PROBE_SHARED_SECRET;
+  if (typeof endpoint !== "string" || typeof secret !== "string" ||
+      new TextEncoder().encode(secret).byteLength < 32) {
+    return "PROBE_AGENT_CONFIGURATION_MISSING";
+  }
+  try {
+    validateProbeAgentEndpoint(endpoint);
+  } catch {
+    return "PROBE_AGENT_CONFIGURATION_INVALID";
+  }
+  return undefined;
+}
+
+/** True only when the operator has explicitly enabled probes and supplied valid agent credentials. */
+export function isProbeExecutionEnabled(env: ProbeDispatchEnv): boolean {
+  return probeDispatchDisabledReason(env) === undefined;
+}
+
 /**
  * Dispatch a bounded, workspace-fair batch to the separately hosted probe
  * agent. Configuration is checked before claiming work. Agent/network failures
@@ -92,19 +113,11 @@ export async function dispatchDueMonitors(
   env: ProbeDispatchEnv,
   options: ProbeDispatchOptions = {}
 ): Promise<ProbeDispatchSummary> {
-  if (env.PROBES_ENABLED !== "true") return emptySummary("PROBES_DISABLED");
+  const disabledReason = probeDispatchDisabledReason(env);
+  if (disabledReason) return emptySummary(disabledReason);
 
-  const endpoint = env.PROBE_AGENT_URL;
-  const secret = env.PROBE_SHARED_SECRET;
-  if (typeof endpoint !== "string" || typeof secret !== "string" ||
-      new TextEncoder().encode(secret).byteLength < 32) {
-    return emptySummary("PROBE_AGENT_CONFIGURATION_MISSING");
-  }
-  try {
-    validateProbeAgentEndpoint(endpoint);
-  } catch {
-    return emptySummary("PROBE_AGENT_CONFIGURATION_INVALID");
-  }
+  const endpoint = env.PROBE_AGENT_URL as string;
+  const secret = env.PROBE_SHARED_SECRET as string;
 
   const now = toDate(options.now);
   const limit = options.limit ?? DEFAULT_BATCH_LIMIT;
