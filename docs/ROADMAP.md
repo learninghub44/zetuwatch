@@ -314,3 +314,10 @@ No Cloudflare resources were created and no deployment was attempted. This is fe
 - Aligned the Worker-compatible probe client with the scheduler and Node agent's 1,000–30,000 ms monitor timeout range. The previous 10,000 ms client ceiling caused monitors configured above 10 seconds to be rejected before dispatch and repeatedly deferred as infrastructure failures.
 - Added a regression boundary: 30,000 ms is accepted, while 30,001 ms is rejected before any network request. The Worker-to-agent request deadline remains bounded to 35 seconds.
 - The complete GitHub Actions run for the updated integration head is still required; this correction is not marked CI-verified.
+
+## Scheduler lease-expiry finalization hardening (2026-11-22)
+
+- Check finalization now requires both the original lease token and an unexpired lease at the recorded check timestamp. A worker returning after lease expiry cannot persist a check even if no later invocation has reclaimed the row yet.
+- Recovery-monitoring, incident resolution and incident reopening transitions require the check row inserted by the same finalization batch. Expired or superseded results therefore cannot change incident state or enqueue lifecycle notifications.
+- Added D1 integration coverage for expired successful and failed results against an existing recovery incident; both must leave the lease, check history, incident state and timeline unchanged.
+- The exact SQL sequence was independently exercised against SQLite for both stale-success and stale-failure paths. The full Cloudflare Vitest/Worker CI run for the updated branch remains pending.
