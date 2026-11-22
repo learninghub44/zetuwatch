@@ -257,8 +257,10 @@ describe("Worker API tenant isolation", () => {
       monitors: Array<{ id: string; state: string }>;
     };
     expect(disabledBody.executionEnabled).toBe(false);
-    expect(new Map(disabledBody.monitors.map(monitor => [monitor.id, monitor.state])).get(awaitingId))
-      .toBe("execution_disabled");
+    const disabledStates = new Map(disabledBody.monitors.map(monitor => [monitor.id, monitor.state]));
+    expect(disabledStates.get(awaitingId)).toBe("execution_disabled");
+    expect(disabledStates.get(downId)).toBe("down");
+    expect(disabledStates.get(recoveringId)).toBe("recovering");
 
     const invalid = await apiWithEnv(
       `/v1/monitors?organizationId=${identity.organizationId}`,
