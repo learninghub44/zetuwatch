@@ -28,7 +28,9 @@ function getMonitorState(monitor: MonitorStateRow, executionEnabled: boolean): s
   if (!executionEnabled) return "execution_disabled";
   if (!monitor.last_checked_at) return "awaiting_first_check";
   if (monitor.open_incident_status) return monitor.open_incident_status === "monitoring" ? "recovering" : "down";
-  if (Number(monitor.consecutive_failures ?? 0) > 0 || Number(monitor.last_check_is_up) === 0) return "suspect";
+  const lastCheckFailed = monitor.last_check_is_up !== null && monitor.last_check_is_up !== undefined &&
+    Number(monitor.last_check_is_up) === 0;
+  if (Number(monitor.consecutive_failures ?? 0) > 0 || lastCheckFailed) return "suspect";
   if (Number(monitor.last_check_is_up) === 1) return "healthy";
   return "unknown";
 }
