@@ -12,6 +12,7 @@ export interface ProbeResult {
   errorCode: string | null;
   redirectCount: number;
 }
+export function validateProbeAgentEndpoint(endpoint: string): URL;
 export function signProbePayload(secret: string, timestamp: string, nonce: string, body: string): Promise<string>;
 export function sendProbeJob(
   endpoint: string,
