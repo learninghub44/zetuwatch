@@ -289,7 +289,7 @@ No Cloudflare resources were created and no deployment was attempted. This is fe
 
 ## Gated scheduler dispatch implementation (2026-11-22)
 
-- Added a D1 scheduler dispatcher that checks configuration before claiming work, claims at most 10 monitors per tick by default and at most two per workspace, and executes no more than five probes concurrently by default.
+- Added a D1 scheduler dispatcher that checks configuration before claiming work, claims at most 10 monitors per tick by default (hard dispatch maximum 15) and at most two per workspace, and executes no more than five probes concurrently by default to stay below Cloudflare Workers' six simultaneous outbound-connection limit.
 - Added per-workspace fairness to the atomic claim query with a window-function rank. The global claim maximum remains 25 and the workspace cap is validated.
 - Added token-checked retry deferral for probe-agent/network/configuration failures. These infrastructure failures do not create false target-down checks; valid agent results alone enter check history and the existing incident state machine.
 - Extended the signed client/agent deadline consistently to the monitor API's 30-second maximum, with a 35-second Worker request bound.
