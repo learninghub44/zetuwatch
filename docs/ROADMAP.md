@@ -28,7 +28,7 @@ The product is built in vertical slices. A slice is complete only when UI, API, 
 - [ ] Bounded scheduled runner / Cron Trigger integration (bounded dispatch code and D1 tests are added on feat/secure-probe-agent, but Cron is intentionally not configured, CI is pending, and live load/lag/retry plus end-to-end behavior remain unverified)
 - [ ] HTTP/HTTPS checks, history and latency
 - [ ] Incident confirmation, deduplication and recovery (D1-backed finalization confirms, deduplicates, monitors, resolves and reopens incidents; tenant-scoped incident list/detail APIs now return the timeline to workspace members. Member/admin/owner incident status transitions, internal/public customer-authored timeline notes, actor attribution, audit writes and responsive controls are implemented; seven D1-backed Worker API integration tests were added. Public updates are stored but not published, browser E2E/accessibility and notifications remain. Monitor deletion now soft-deletes and retains check, incident and timeline rows; retention and hard-purge workflows remain.)
-- [ ] Verified email alerts and delivery history
+- [ ] Verified email alerts and delivery history (verified-self-email channels, durable outbox, bounded retries, delivery-log API and responsive Alerts UI are implemented in this integration branch; full CI, browser acceptance and live Resend delivery remain)
 
 ## Phase 3 — complete customer experience
 - [ ] Public marketing website, docs and pricing
@@ -298,3 +298,13 @@ No Cloudflare resources were created and no deployment was attempted. This is fe
 - Added nine D1 integration tests for disabled and invalid configuration, workspace fairness across overlapping invocations, bounded concurrency/batch limits, real failed-result persistence, infrastructure retry deferral, malformed responses and stale lease ownership. Added Node tests for the 30-second upper bound.
 - The scheduled handler is implemented but no Cron Trigger is configured in `wrangler.toml`. `PROBES_ENABLED`, `PROBE_AGENT_URL` and `PROBE_SHARED_SECRET` are not set. No customer probes can run from the current repository configuration.
 - These new tests have not yet run in GitHub Actions. The latest branch is not CI-verified; the monitoring loop and production launch gates remain unchecked.
+
+
+## Email notification integration update (2026-11-22)
+
+- Integrated the verified-self-email channel APIs, responsive Alerts UI, D1 outbox, retry/lease dispatcher and delivery history with the DNS-pinned probe-agent branch.
+- Renumbered the notification migration to `0009_notification_outbox.sql`; `0008_scheduler_workspace_quota_index.sql` remains reserved for the scheduler index.
+- Scheduler finalization now enqueues email deliveries in the same D1 batch as immutable incident lifecycle events (opened, monitoring, resolved and reopened). Customer-authored status changes and timeline notes enqueue only when explicitly public; the dispatcher rechecks visibility before sending.
+- The shared one-minute scheduled handler dispatches up to five emails first, then conditionally runs bounded probes. The two batches execute sequentially to stay below the six simultaneous-open-connection limit.
+- The Cron Trigger is declared in `wrangler.toml`, but no external resource has been created. Monitor probes remain disabled unless `PROBES_ENABLED=true` and valid HTTPS agent URL/shared-secret bindings are configured. Resend delivery is skipped without its sender/API configuration.
+- Full CI, browser acceptance, live DNS/TLS verification and controlled Resend delivery remain outstanding. Do not mark email or monitoring launch gates complete.

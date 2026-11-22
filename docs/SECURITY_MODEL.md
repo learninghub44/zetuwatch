@@ -90,3 +90,18 @@ This is a public information surface, not a live service-health assertion. Do no
 
 
 - The standalone probe agent uses a per-hostname Node DNS resolver with a shared A/AAAA deadline and cancels outstanding DNS queries on timeout. This keeps timed-out resolver work within the same bounded probe lifetime instead of allowing abandoned DNS requests to accumulate after an active slot is released.
+
+## Email notification boundary
+
+- An email channel can target only the creating user's own verified account address. The channel is tied to a current verified workspace member; arbitrary recipient addresses are rejected.
+- Owners/admins can manage all workspace channels. Members can manage only their own channel; viewers are read-only. Read-only API keys cannot access channel or delivery-log routes.
+- Email templates HTML-escape organization, monitor, incident and timeline text. They contain no monitor target URL, response body, customer headers or stored credentials. Provider errors are reduced to fixed error codes; response bodies and API credentials are not logged.
+- Incident event enqueue is idempotent per immutable event/channel through a unique database index. Delivery claims are bounded (maximum 10, default 5) and use expiring leases. Settlement and context loading require the lease to remain active, so an expired worker cannot overwrite a later claim.
+- Resend receives a stable event/channel idempotency key on every retry. Its documented idempotency retention is 24 hours; the local retry schedule ends in under eight hours. The provider's concurrent-idempotency 409 response is retried; a payload/idempotency conflict is terminal.
+- Transient network, timeout, rate-limit and provider 5xx failures use bounded retries. Retry-After is parsed as delta-seconds or an HTTP date and capped at six hours. Six total attempts are allowed.
+- Disabling/removing a channel cancels queued deliveries. It cannot recall a request already accepted by the provider; this limitation is disclosed in the UI.
+- The dispatcher skips sending when Resend credentials or sender configuration are missing. No real provider delivery has been verified. Never add provider secrets to source control, client code, logs or API responses.
+- Delivery rows retain a non-secret channel-creator identifier independently of the nullable channel foreign key. Removing a channel preserves the creator's delivery history while they remain in the workspace.
+- Email subjects strip control characters, plain text is normalized, and application links are constructed only from HTTPS origins (localhost HTTP only for development); URL credentials and unsafe protocols are rejected.
+- Customer-authored `incident.update` and `incident.status_changed` events are emailed only when visibility is explicitly public. Internal notes/status transitions are excluded at enqueue and checked again before provider delivery.
+

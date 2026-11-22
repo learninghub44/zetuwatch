@@ -45,6 +45,24 @@ def main() -> None:
         if column not in user_columns:
             raise SystemExit(f"Missing users.{column}")
 
+    channel_columns = {row[1] for row in db.execute("PRAGMA table_info(notification_channels)")}
+    for column in ("created_by", "verified_at", "updated_at"):
+        if column not in channel_columns:
+            raise SystemExit(f"Missing notification_channels.{column}")
+    delivery_columns = {row[1] for row in db.execute("PRAGMA table_info(notification_deliveries)")}
+    for column in ("event_id", "event_type", "recipient_email", "channel_created_by", "lease_token", "lease_until", "updated_at"):
+        if column not in delivery_columns:
+            raise SystemExit(f"Missing notification_deliveries.{column}")
+    required_notification_indexes = {
+        "idx_notification_channels_email_destination", "idx_notification_channels_creator",
+        "idx_notification_deliveries_event_channel", "idx_notification_deliveries_due",
+        "idx_notification_deliveries_org_time", "idx_notification_deliveries_channel_creator",
+    }
+    existing_indexes = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type = 'index'")}
+    missing_notification_indexes = required_notification_indexes - existing_indexes
+    if missing_notification_indexes:
+        raise SystemExit(f"Missing notification indexes: {', '.join(sorted(missing_notification_indexes))}")
+
     db.execute("INSERT INTO users (id, email, password_hash) VALUES ('u1', 'test@example.com', 'hash')")
     db.execute("INSERT INTO organizations (id, name, slug) VALUES ('o1', 'Test', 'test')")
     db.execute("INSERT INTO organization_members (organization_id, user_id, role) VALUES ('o1', 'u1', 'owner')")

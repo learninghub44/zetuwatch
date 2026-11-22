@@ -92,3 +92,23 @@ The current API deliberately returns `executionEnabled: false`. Creating a monit
 ## Error responses
 
 Errors use JSON such as `{ "error": "UNAUTHENTICATED" }`. Common status codes: 400 invalid input, 401 no valid session, 403 insufficient membership/role, 404 missing resource, 405 unsupported method, 429 rate limit, and 503 unconfigured provider. Error messages must not include secrets, full response bodies or internal network details.
+
+
+## Email notification channels and delivery history
+
+All notification-management routes require a verified browser session and workspace membership. Read-only API keys are denied.
+
+- `GET /v1/organizations/<organization-id>/notification-channels` — list up to 50 channels. Owners/admins see all workspace channels; members/viewers see only channels they created.
+- `POST /v1/organizations/<organization-id>/notification-channels` — create an email channel with body `{ "channelType": "email" }`. The destination must be the signed-in user's own verified account email; arbitrary recipients and webhook destinations are rejected. Owners/admins/members may add their own address; viewers cannot.
+- `PATCH /v1/organizations/<organization-id>/notification-channels/<channel-id>` — enable or disable with `{ "enabled": true|false }`. Owners/admins can manage all workspace channels; members can manage their own.
+- `DELETE /v1/organizations/<organization-id>/notification-channels/<channel-id>` — remove a channel. Owners/admins can remove any workspace channel; members can remove their own. Pending deliveries are cancelled.
+- `GET /v1/organizations/<organization-id>/notification-deliveries` — return the latest 100 delivery records. Owners/admins see all workspace deliveries; members/viewers see only deliveries for their own channels. The response includes event type, recipient, monitor name, status, attempt count, sanitized error code and delivery/retry timestamps.
+
+Incident lifecycle events and customer-authored incident updates are inserted into a durable D1 outbox in the same database batch as the timeline event. The one-minute Cron Trigger dispatches at most five queued deliveries per invocation. Claims use 90-second leases; the dispatcher retries transient provider/network failures at 30 seconds, 2 minutes, 10 minutes, 1 hour and 6 hours, then marks the sixth attempt failed. Provider `Retry-After` values are honored up to six hours. A stable event/channel idempotency key is sent to Resend on every attempt.
+
+Configure `RESEND_API_KEY` and `EMAIL_FROM` in the Worker environment and set `PUBLIC_APP_URL` to the public HTTPS application origin. If the provider credentials or sender are absent, the scheduled dispatcher skips sending and leaves queued rows available for a later run. See [EMAIL_NOTIFICATIONS.md](EMAIL_NOTIFICATIONS.md) for setup and operational limitations.
+
+Disabling/removing a channel cancels queued work. It cannot recall an email already accepted by the provider. Delivery records are operational logs, not proof that the recipient's mailbox accepted or displayed a message.
+
+
+Delivery history retains the channel creator identifier independently of the channel row. Removing a channel sets the delivery's channel reference to null but does not erase the delivery record; the original member can still inspect their own retained log while they remain in the workspace. Workspace owners/admins can inspect all retained delivery records.
