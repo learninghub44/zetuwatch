@@ -196,6 +196,7 @@ describe("Worker API tenant isolation", () => {
     const downId = await createMonitor(identity.organizationId);
     const recoveringId = await createMonitor(identity.organizationId);
     const healthyId = await createMonitor(identity.organizationId);
+    const unknownId = await createMonitor(identity.organizationId);
     const pausedId = await createMonitor(identity.organizationId);
 
     const checkedAt = "2026-11-22 07:00:00";
@@ -208,8 +209,8 @@ describe("Worker API tenant isolation", () => {
         .bind(checkedAt, downId),
       env.DB.prepare("UPDATE monitors SET last_checked_at = ?, consecutive_successes = 1 WHERE id = ?")
         .bind(checkedAt, recoveringId),
-      env.DB.prepare("UPDATE monitors SET last_checked_at = ? WHERE id = ?")
-        .bind(checkedAt, healthyId),
+      env.DB.prepare("UPDATE monitors SET last_checked_at = ? WHERE id IN (?, ?)")
+        .bind(checkedAt, healthyId, unknownId),
       env.DB.prepare("INSERT INTO monitor_checks (id, monitor_id, checked_at, is_up, status_code, response_time_ms, error_code) VALUES (?, ?, ?, 1, 200, 25, NULL)")
         .bind(crypto.randomUUID(), healthyId, checkedAt),
       env.DB.prepare("UPDATE monitors SET is_enabled = 0 WHERE id = ?").bind(pausedId)
@@ -243,6 +244,7 @@ describe("Worker API tenant isolation", () => {
     expect(states.get(downId)).toBe("down");
     expect(states.get(recoveringId)).toBe("recovering");
     expect(states.get(healthyId)).toBe("healthy");
+    expect(states.get(unknownId)).toBe("unknown");
     expect(states.get(pausedId)).toBe("paused");
 
     const disabled = await apiWithEnv(
