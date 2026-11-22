@@ -82,13 +82,13 @@
 <h2 id="modal-title">Add a monitor</h2><p>Set up an endpoint in three short steps. No network probe is sent during setup.</p>
 <div class="wizard-progress" aria-label="Monitor setup progress"><div class="wizard-step active" data-progress="0">01 · Target</div><div class="wizard-step" data-progress="1">02 · Behavior</div><div class="wizard-step" data-progress="2">03 · Review</div></div>
 <section class="wizard-panel" data-wizard="0"><div class="field"><label for="monitor-name">Monitor name</label><input id="monitor-name" maxlength="80" required placeholder="Main website"></div><div class="field"><label for="monitor-url">Website or API URL</label><input id="monitor-url" type="url" maxlength="2048" required placeholder="https://example.com"></div><div class="field"><label for="monitor-type">Monitor type</label><select id="monitor-type"><option value="http">Website (HTTP)</option><option value="api">API endpoint</option></select></div></section>
-<section class="wizard-panel hidden" data-wizard="1"><div class="row"><div class="field"><label for="monitor-method">Method</label><select id="monitor-method"><option>GET</option><option>HEAD</option></select></div><div class="field"><label for="monitor-interval">Check interval</label><select id="monitor-interval"><option value="300">5 minutes</option><option value="600">10 minutes</option><option value="900">15 minutes</option><option value="1800">30 minutes</option><option value="3600">60 minutes</option></select></div></div><div class="field"><label for="monitor-status">Expected HTTP status</label><input id="monitor-status" type="number" min="100" max="599" value="200" required></div><div class="notice">These are saved settings only. Scheduled checks are not enabled yet, so ZetuWatch will not send a request to the target during this step.</div></section>
+<section class="wizard-panel hidden" data-wizard="1"><div class="row"><div class="field"><label for="monitor-method">Method</label><select id="monitor-method"><option>GET</option><option>HEAD</option></select></div><div class="field"><label for="monitor-interval">Check interval</label><select id="monitor-interval"><option value="300">5 minutes</option><option value="600">10 minutes</option><option value="900">15 minutes</option><option value="1800">30 minutes</option><option value="3600">60 minutes</option></select></div></div><div class="field"><label for="monitor-status">Expected HTTP status</label><input id="monitor-status" type="number" min="100" max="599" value="200" required></div><div class="notice">Saving does not trigger an immediate probe. When scheduled execution is enabled, the first check runs at the monitor's next due time.</div></section>
 <section class="wizard-panel hidden" data-wizard="2"><p>Review your monitor before saving it to this workspace.</p><div class="review-list"><div class="review-item"><small>MONITOR</small><strong id="review-name">—</strong></div><div class="review-item"><small>TARGET</small><strong id="review-url">—</strong></div><div class="review-item"><small>CHECK BEHAVIOR</small><strong id="review-behavior">—</strong></div></div><div class="notice">Email alerts and a live test are not available yet. Your monitor will be saved as “Awaiting first check” until the secure scheduler is ready.</div></section>
 <div class="notice error hidden" id="form-error" role="alert"></div>
 <div class="wizard-actions"><button class="btn" type="button" id="wizard-back">Back</button><div class="wizard-actions-right"><button class="btn" type="button" id="cancel">Cancel</button><button class="btn primary" type="button" id="wizard-next">Continue</button><button class="btn primary hidden" type="submit" id="save">Save monitor</button></div></div>
 </form></div>
 <script>
-const API=(document.querySelector('meta[name="api-base"]')?.content||"/api").replace(/\/$/,"");let user=null,orgs=[],orgId=null,monitors=[],incidents=[],notificationChannels=[],notificationDeliveries=[],teamMemberCount=0,editingMonitorId=null,selectedIncidentId=null,selectedMonitorId=null,selectedMonitorEnabled=true;
+const API=(document.querySelector('meta[name="api-base"]')?.content||"/api").replace(/\/$/,"");let user=null,orgs=[],orgId=null,monitors=[],incidents=[],notificationChannels=[],notificationDeliveries=[],teamMemberCount=0,editingMonitorId=null,selectedIncidentId=null,selectedMonitorId=null,selectedMonitorEnabled=true,executionEnabled=false;
 const $=id=>document.getElementById(id);
 function showNotice(text,error=false){$("notice").textContent=text;$("notice").classList.remove("hidden","error");if(error)$("notice").classList.add("error")}
 async function request(path,options={}){const r=await fetch(API+path,{credentials:"include",...options,headers:{"content-type":"application/json",...(options.headers||{})}});const d=await r.json().catch(()=>({}));if(r.status===401){location.href="./auth.html";throw new Error("Please sign in again.")}if(!r.ok)throw new Error(d.message||d.error||"Request failed");return d}
@@ -96,12 +96,16 @@ async function load(){try{const me=await request("/auth/me");user=me.user;orgs=m
 async function loadMonitors(){
   const data=await request("/v1/monitors?organizationId="+encodeURIComponent(orgId));
   monitors=data.monitors||[];
+  executionEnabled=data.executionEnabled===true;
+  $("monitor-empty").querySelector("p").textContent=executionEnabled
+    ?"Add a website or API endpoint to configure what you want ZetuWatch to watch. Scheduled checks will begin at the monitor's next due time."
+    :"Add a website or API endpoint to configure what you want ZetuWatch to watch. Checks will begin when the secure scheduled runner is enabled.";
   const role=orgs.find(org=>org.id===orgId)?.role||"viewer";
   const canWrite=role!=="viewer";
   const canDelete=role==="owner"||role==="admin";
   $("stat-total").textContent=monitors.length;
   updateOnboarding();
-  $("monitor-count").textContent=monitors.length+" configured";
+  $("monitor-count").textContent=monitors.length+" configured · "+(executionEnabled?"checks enabled":"checks disabled");
   $("monitor-empty").classList.toggle("hidden",monitors.length>0);
   $("monitor-table").classList.toggle("hidden",monitors.length===0);
   $("monitor-rows").innerHTML="";
@@ -120,7 +124,8 @@ async function loadMonitors(){
     const state=document.createElement("td");
     const pill=document.createElement("span");
     pill.className="pill";
-    pill.textContent=Number(m.is_enabled)===1?"Awaiting first check":"Paused";
+    const stateLabels={paused:"Paused",execution_disabled:"Checks disabled",awaiting_first_check:"Awaiting first check",healthy:"Healthy",suspect:"Suspect",down:"Down",recovering:"Recovering",unknown:"Unknown"};
+    pill.textContent=stateLabels[m.state]||"Unknown";
     state.appendChild(pill);
     const action=document.createElement("td");
     const view=document.createElement("button");
@@ -171,6 +176,7 @@ async function openMonitor(monitorId){
     ]);
     if(selectedMonitorId!==monitorId)return;
     const monitor=detail.monitor||{};
+    executionEnabled=detail.executionEnabled===true;
     selectedMonitorEnabled=Number(monitor.is_enabled)===1;
     const role=orgs.find(org=>org.id===orgId)?.role||"viewer";
     const canWrite=role!=="viewer";
@@ -178,10 +184,19 @@ async function openMonitor(monitorId){
     $("monitor-edit").classList.toggle("hidden",!canWrite);
     $("monitor-toggle").textContent=selectedMonitorEnabled?"Pause monitor":"Resume monitor";
     $("monitor-toggle").setAttribute("aria-label",(selectedMonitorEnabled?"Pause ":"Resume ")+(monitor.name||"monitor"));
-    $("monitor-detail-notice").textContent=selectedMonitorEnabled
-      ?"Scheduled probes are disabled. This view only reads records already stored by the monitoring service."
-      :"This monitor is paused. Existing history is retained; resuming it will make it eligible for a future scheduled check.";
     const checks=Array.isArray(history.checks)?history.checks:[];
+    const monitorState=monitor.state||detail.state||"unknown";
+    $("monitor-detail-notice").textContent=!selectedMonitorEnabled
+      ?"This monitor is paused. Existing history is retained; resuming it will make it eligible for a future scheduled check."
+      :!executionEnabled
+        ?"Scheduled probes are disabled. This view only reads records already stored by the monitoring service."
+        :checks.length===0
+          ?"Scheduled probes are enabled. This monitor is waiting for its first scheduled check."
+          :monitorState==="recovering"
+            ?"Checks are passing again; the incident remains in recovery monitoring until the recovery threshold is met."
+            :monitorState==="down"
+              ?"An incident is open for this monitor. The history below shows its actual recorded checks."
+              :"Scheduled probes are enabled. The history below shows actual recorded checks.";
     $("monitor-detail-title").textContent=monitor.name||"Monitor details";
     $("monitor-detail-target").textContent=monitor.target_url||"";
     $("monitor-detail-meta").innerHTML="";
@@ -195,7 +210,9 @@ async function openMonitor(monitorId){
     addMeta("Request",String(monitor.method||"GET")+" · expects "+String(monitor.expected_status||200));
     addMeta("Interval",Math.round(Number(monitor.interval_seconds||300)/60)+" minutes");
     addMeta("Configured state",selectedMonitorEnabled?"Enabled":"Paused");
-    addMeta("Execution","Scheduled checks not active");
+    addMeta("Execution",executionEnabled?"Scheduled checks enabled":"Scheduled checks disabled");
+    addMeta("Last check",monitor.last_checked_at?formatCheckDate(monitor.last_checked_at):"Not yet checked");
+    addMeta("Latest state",String(monitorState).replace(/_/g," "));
     $("check-count").textContent=checks.length+" stored "+(checks.length===1?"check":"checks");
     $("check-rows").innerHTML="";
     $("check-empty").classList.toggle("hidden",checks.length>0);
@@ -228,7 +245,9 @@ function showMonitorList(){
 async function toggleMonitorEnabled(monitorId,action){
   try{
     const result=await request("/v1/monitors/"+encodeURIComponent(monitorId)+"/"+action,{method:"POST"});
-    showNotice((result.message||"Monitor state updated.")+" Scheduled probes remain disabled until secure execution is enabled.");
+    showNotice(result.executionEnabled===true
+      ?(result.message||"Monitor state updated.")+" The scheduler will honor the updated state on its next pass."
+      :(result.message||"Monitor state updated.")+" Probe execution is disabled; no network request was made.");
     await loadMonitors();
     if(selectedMonitorId===monitorId)await openMonitor(monitorId);
   }catch(error){
@@ -702,10 +721,10 @@ $("monitor-form").addEventListener("submit",async e=>{
     const payload={organizationId:orgId,name:$("monitor-name").value.trim(),targetUrl:$("monitor-url").value.trim(),monitorType:$("monitor-type").value,method:$("monitor-method").value,intervalSeconds:Number($("monitor-interval").value),expectedStatus:Number($("monitor-status").value),timeoutMs:10000};
     if(editingMonitorId){
       await request("/v1/monitors/"+editingMonitorId,{method:"PATCH",body:JSON.stringify(payload)});
-      closeModal();showNotice("Monitor updated. It is awaiting the secure scheduled check service.");
+      closeModal();showNotice(executionEnabled?"Monitor updated. The scheduler will use the saved settings on the next due check.":"Monitor updated. Probe execution is disabled; the target has not been contacted.");
     }else{
       await request("/v1/monitors",{method:"POST",body:JSON.stringify(payload)});
-      closeModal();showNotice("Monitor saved. It is awaiting the secure scheduled check service.");
+      closeModal();showNotice(executionEnabled?"Monitor saved. The first check will run when it becomes due.":"Monitor saved. Scheduled probes are disabled; the target has not been contacted.");
     }
     await loadMonitors();
     if(selectedMonitorId)await openMonitor(selectedMonitorId);
