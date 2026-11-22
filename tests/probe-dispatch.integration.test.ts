@@ -48,6 +48,21 @@ async function checkCount(monitorId: string): Promise<number> {
 }
 
 describe("bounded scheduled probe dispatch", () => {
+  it("rejects batch and concurrency bounds that could outlive the lease or exceed Worker connections", async () => {
+    await expect(dispatchDueMonitors(dispatchEnv, {
+      now: BASE_NOW,
+      limit: 16,
+      clock: () => new Date(BASE_NOW),
+      probe: async () => healthyResult
+    })).rejects.toThrow("SCHEDULER_LIMIT_INVALID");
+    await expect(dispatchDueMonitors(dispatchEnv, {
+      now: BASE_NOW,
+      concurrency: 6,
+      clock: () => new Date(BASE_NOW),
+      probe: async () => healthyResult
+    })).rejects.toThrow("SCHEDULER_CONCURRENCY_INVALID");
+  });
+
   it("does not claim work while probe execution is disabled", async () => {
     const organizationId = await createOrganization("Disabled dispatch");
     const monitorId = await createMonitor(organizationId);
