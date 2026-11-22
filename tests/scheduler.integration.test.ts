@@ -189,6 +189,66 @@ describe("D1 monitor scheduler claims", () => {
     });
   });
 
+  it("rejects expired leases before checks or incident transitions", async () => {
+    const cases = [
+      { isUp: true, statusCode: 200, errorCode: null },
+      { isUp: false, statusCode: 503, errorCode: "HTTP_STATUS_MISMATCH" }
+    ] as const;
+
+    for (const [index, result] of cases.entries()) {
+      const monitorId = await createMonitor({ nextCheckAt: "2026-11-10T08:59:00.000Z" });
+      const leaseToken = "scheduler-expired-lease-token-" + index;
+      const incidentId = crypto.randomUUID();
+      await env.DB.batch([
+        env.DB.prepare(`UPDATE monitors
+          SET consecutive_successes = 2, check_lease_token = ?, check_lease_until = ?
+          WHERE id = ?`)
+          .bind(leaseToken, "2026-11-10T08:59:59.000Z", monitorId),
+        env.DB.prepare(`INSERT INTO incidents (id, monitor_id, started_at, status, summary)
+          VALUES (?, ?, ?, 'monitoring', 'Existing recovery incident')`)
+          .bind(incidentId, monitorId, "2026-11-10 08:50:00")
+      ]);
+
+      const finalized = await finalizeMonitorCheck(env.DB, {
+        monitorId,
+        leaseToken,
+        checkedAt: "2026-11-10T09:00:00.000Z",
+        nextCheckAt: "2026-11-10T09:05:00.000Z",
+        isUp: result.isUp,
+        statusCode: result.statusCode,
+        responseTimeMs: 25,
+        errorCode: result.errorCode
+      });
+      expect(finalized).toBe(false);
+
+      const monitor = await env.DB.prepare(`SELECT consecutive_successes, check_lease_token,
+        check_lease_until, next_check_at FROM monitors WHERE id = ?`)
+        .bind(monitorId).first<{
+          consecutive_successes: number;
+          check_lease_token: string | null;
+          check_lease_until: string | null;
+          next_check_at: string;
+        }>();
+      expect(monitor).toEqual({
+        consecutive_successes: 2,
+        check_lease_token: leaseToken,
+        check_lease_until: "2026-11-10T08:59:59.000Z",
+        next_check_at: "2026-11-10 08:59:00"
+      });
+
+      const incident = await env.DB.prepare("SELECT status, resolved_at FROM incidents WHERE id = ?")
+        .bind(incidentId).first<{ status: string; resolved_at: string | null }>();
+      expect(incident).toEqual({ status: "monitoring", resolved_at: null });
+
+      const checks = await env.DB.prepare("SELECT COUNT(*) AS count FROM monitor_checks WHERE monitor_id = ?")
+        .bind(monitorId).first<{ count: number }>();
+      const events = await env.DB.prepare("SELECT COUNT(*) AS count FROM incident_events WHERE incident_id = ?")
+        .bind(incidentId).first<{ count: number }>();
+      expect(checks?.count).toBe(0);
+      expect(events?.count).toBe(0);
+    }
+  });
+
   it("resets the failure streak after a successful check", async () => {
     const monitorId = await createMonitor({
       nextCheckAt: "2026-11-10T08:59:00.000Z",
