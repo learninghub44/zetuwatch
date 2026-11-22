@@ -131,6 +131,18 @@ test("does not open a socket when DNS consumes the remaining total probe budget"
   assert.equal(requests, 0);
 });
 
+test("accepts the configured 30-second timeout and rejects larger values", () => {
+  const normalized = normalizeProbeInput({
+    targetUrl: "https://monitor.example.com/health",
+    timeoutMs: 30_000
+  });
+  assert.equal(normalized.timeoutMs, 30_000);
+  assert.throws(() => normalizeProbeInput({
+    targetUrl: "https://monitor.example.com/health",
+    timeoutMs: 30_001
+  }), /PROBE_TIMEOUT_INVALID/);
+});
+
 test("rejects methods, custom headers, and non-default ports", () => {
   assert.throws(() => normalizeProbeInput({ targetUrl: "https://monitor.example.com/", method: "POST" }), /PROBE_METHOD_NOT_ALLOWED/);
   assert.throws(() => normalizeProbeInput({ targetUrl: "https://monitor.example.com/", headers: { authorization: "secret" } }), /PROBE_JOB_INVALID/);
