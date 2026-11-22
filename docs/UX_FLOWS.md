@@ -50,6 +50,8 @@ After save: take user to monitor detail with live/pending state; do not fabricat
 
 ## Monitor detail
 - Current state, target, interval, last/next check and actions.
+- State is derived only from persisted observations and unresolved incidents: paused, execution disabled, awaiting first check, healthy, suspect, down or recovering.
+- A valid probe configuration is a dispatch-availability signal, not evidence of a successful check or live agent connectivity.
 - Time-range selector and response-time chart.
 - Check history with error categories and expandable sanitized diagnostics.
 - Incidents and maintenance history.
