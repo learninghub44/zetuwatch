@@ -27,6 +27,7 @@ type ProbeSender = (
 
 export interface ProbeDispatchOptions {
   now?: Date | string;
+  clock?: () => Date;
   limit?: number;
   perOrganizationLimit?: number;
   concurrency?: number;
@@ -130,11 +131,11 @@ export async function dispatchDueMonitors(
   if (claimed.length === 0) return summary;
 
   const probe = options.probe ?? sendProbeJob;
-  const clock = () => new Date(now.getTime() + Math.max(0, Date.now() - now.getTime()));
+  const clock = options.clock ?? (() => new Date());
 
   async function defer(monitor: ClaimedMonitor): Promise<void> {
     try {
-      const retryAt = new Date(clock().getTime() + retryDelayMs);
+      const retryAt = new Date(toDate(clock()).getTime() + retryDelayMs);
       if (await deferMonitorClaim(env.DB, monitor.id, monitor.leaseToken, retryAt)) summary.deferred += 1;
       else summary.stale += 1;
     } catch {
@@ -168,7 +169,7 @@ export async function dispatchDueMonitors(
       });
       if (!validProbeResult(result)) throw new Error("PROBE_AGENT_INVALID_RESPONSE");
 
-      const checkedAt = clock();
+      const checkedAt = toDate(clock());
       const nextCheckAt = new Date(checkedAt.getTime() + monitor.intervalSeconds * 1000);
       const finalized = await finalizeMonitorCheck(env.DB, {
         monitorId: monitor.id,
