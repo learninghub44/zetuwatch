@@ -308,3 +308,9 @@ No Cloudflare resources were created and no deployment was attempted. This is fe
 - The shared one-minute scheduled handler dispatches up to five emails first, then conditionally runs bounded probes. The two batches execute sequentially to stay below the six simultaneous-open-connection limit.
 - The Cron Trigger is declared in `wrangler.toml`, but no external resource has been created. Monitor probes remain disabled unless `PROBES_ENABLED=true` and valid HTTPS agent URL/shared-secret bindings are configured. Resend delivery is skipped without its sender/API configuration.
 - Full CI, browser acceptance, live DNS/TLS verification and controlled Resend delivery remain outstanding. Do not mark email or monitoring launch gates complete.
+
+## Probe-client timeout contract correction (2026-11-22)
+
+- Aligned the Worker-compatible probe client with the scheduler and Node agent's 1,000–30,000 ms monitor timeout range. The previous 10,000 ms client ceiling caused monitors configured above 10 seconds to be rejected before dispatch and repeatedly deferred as infrastructure failures.
+- Added a regression boundary: 30,000 ms is accepted, while 30,001 ms is rejected before any network request. The Worker-to-agent request deadline remains bounded to 35 seconds.
+- The complete GitHub Actions run for the updated integration head is still required; this correction is not marked CI-verified.
