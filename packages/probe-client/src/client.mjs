@@ -22,7 +22,7 @@ function normalizeJob(input) {
   if (typeof input.targetUrl !== "string" || input.targetUrl.length < 8 || input.targetUrl.length > 2048) throw new Error("PROBE_JOB_INVALID");
   if (method !== "GET" && method !== "HEAD") throw new Error("PROBE_METHOD_NOT_ALLOWED");
   if (!Number.isInteger(expectedStatus) || expectedStatus < 100 || expectedStatus > 599) throw new Error("PROBE_STATUS_INVALID");
-  if (!Number.isInteger(timeoutMs) || timeoutMs < 1_000 || timeoutMs > 10_000) throw new Error("PROBE_TIMEOUT_INVALID");
+  if (!Number.isInteger(timeoutMs) || timeoutMs < 1_000 || timeoutMs > 30_000) throw new Error("PROBE_TIMEOUT_INVALID");
   if (!Number.isInteger(maxRedirects) || maxRedirects < 0 || maxRedirects > 3) throw new Error("PROBE_REDIRECT_LIMIT_INVALID");
   return { targetUrl: input.targetUrl, method, expectedStatus, timeoutMs, maxRedirects };
 }
