@@ -50,7 +50,7 @@ export function buildPinnedRequestOptions(url, address, options = {}) {
 export function requestPinned(url, address, options = {}) {
   const timeoutMs = options.timeoutMs ?? 5_000;
   const maxResponseBytes = options.maxResponseBytes ?? MAX_RESPONSE_BYTES;
-  if (!Number.isInteger(timeoutMs) || timeoutMs < 100 || timeoutMs > 10_000) {
+  if (!Number.isInteger(timeoutMs) || timeoutMs < 100 || timeoutMs > 30_000) {
     return Promise.reject(new Error("PROBE_TIMEOUT_INVALID"));
   }
   if (!Number.isInteger(maxResponseBytes) || maxResponseBytes < 1 || maxResponseBytes > MAX_RESPONSE_BYTES) {
