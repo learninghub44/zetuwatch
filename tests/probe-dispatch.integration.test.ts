@@ -251,7 +251,7 @@ describe("bounded scheduled probe dispatch", () => {
       clock: () => new Date(BASE_NOW),
       probe: async () => {
         const reclaimed = await claimDueMonitors(env.DB, {
-          now: new Date(BASE_NOW.getTime() + 121_000),
+          now: new Date(BASE_NOW.getTime() + 181_000),
           token: replacementToken
         });
         expect(reclaimed.some(item => item.id === monitorId)).toBe(true);
