@@ -126,6 +126,7 @@ export async function dispatchDueMonitors(
     now,
     limit,
     perOrganizationLimit,
+    leaseMs: 180_000,
     token: crypto.randomUUID()
   });
   const summary: ProbeDispatchSummary = { ...emptySummary(), claimed: claimed.length };
