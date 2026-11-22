@@ -4,7 +4,7 @@ import { resolvePublicAddresses } from "./dns-resolver.mjs";
 import { requestPinned, MAX_RESPONSE_BYTES } from "./transport.mjs";
 
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
-const MAX_TIMEOUT_MS = 10_000;
+const MAX_TIMEOUT_MS = 30_000;
 const MAX_REDIRECTS = 3;
 
 export function normalizeProbeInput(input) {
