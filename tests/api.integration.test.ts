@@ -198,9 +198,17 @@ describe("Worker API tenant isolation", () => {
     const healthyId = await createMonitor(identity.organizationId);
     const unknownId = await createMonitor(identity.organizationId);
     const pausedId = await createMonitor(identity.organizationId);
+    const delayedId = await createMonitor(identity.organizationId);
+    const delayedFirstId = await createMonitor(identity.organizationId);
 
-    const checkedAt = "2026-11-22 07:00:00";
+    const nowMs = Date.now();
+    const checkedAt = new Date(nowMs).toISOString();
+    const nextCheckAt = new Date(nowMs + 5 * 60_000).toISOString();
+    const delayedCheckedAt = new Date(nowMs - 15 * 60_000).toISOString();
+    const delayedNextCheckAt = new Date(nowMs - 10 * 60_000).toISOString();
     await env.DB.batch([
+      env.DB.prepare("UPDATE monitors SET next_check_at = ? WHERE id IN (?, ?, ?, ?, ?, ?, ?)")
+        .bind(nextCheckAt, awaitingId, suspectId, downId, recoveringId, healthyId, unknownId, pausedId),
       env.DB.prepare("UPDATE monitors SET last_checked_at = ?, consecutive_failures = 1 WHERE id = ?")
         .bind(checkedAt, suspectId),
       env.DB.prepare("INSERT INTO monitor_checks (id, monitor_id, checked_at, is_up, status_code, response_time_ms, error_code) VALUES (?, ?, ?, 0, 503, 80, 'HTTP_STATUS_MISMATCH')")
@@ -213,7 +221,13 @@ describe("Worker API tenant isolation", () => {
         .bind(checkedAt, healthyId, unknownId),
       env.DB.prepare("INSERT INTO monitor_checks (id, monitor_id, checked_at, is_up, status_code, response_time_ms, error_code) VALUES (?, ?, ?, 1, 200, 25, NULL)")
         .bind(crypto.randomUUID(), healthyId, checkedAt),
-      env.DB.prepare("UPDATE monitors SET is_enabled = 0 WHERE id = ?").bind(pausedId)
+      env.DB.prepare("UPDATE monitors SET is_enabled = 0 WHERE id = ?").bind(pausedId),
+      env.DB.prepare("UPDATE monitors SET last_checked_at = ?, next_check_at = ?, interval_seconds = 60 WHERE id = ?")
+        .bind(delayedCheckedAt, delayedNextCheckAt, delayedId),
+      env.DB.prepare("INSERT INTO monitor_checks (id, monitor_id, checked_at, is_up, status_code, response_time_ms, error_code) VALUES (?, ?, ?, 1, 200, 25, NULL)")
+        .bind(crypto.randomUUID(), delayedId, delayedCheckedAt),
+      env.DB.prepare("UPDATE monitors SET next_check_at = ?, interval_seconds = 60 WHERE id = ?")
+        .bind(delayedNextCheckAt, delayedFirstId)
     ]);
     const downIncident = await createIncident(downId);
     const recoveryIncident = await createIncident(recoveringId);
@@ -246,6 +260,8 @@ describe("Worker API tenant isolation", () => {
     expect(states.get(healthyId)).toBe("healthy");
     expect(states.get(unknownId)).toBe("unknown");
     expect(states.get(pausedId)).toBe("paused");
+    expect(states.get(delayedId)).toBe("check_delayed");
+    expect(states.get(delayedFirstId)).toBe("check_delayed");
 
     const detailResponse = await apiWithEnv(
       `/v1/monitors/${awaitingId}`,
@@ -259,6 +275,19 @@ describe("Worker API tenant isolation", () => {
     expect(detailResponse.status).toBe(200);
     expect(detailBody.executionEnabled).toBe(true);
     expect(detailBody.monitor.state).toBe("awaiting_first_check");
+
+    const delayedDetailResponse = await apiWithEnv(
+      `/v1/monitors/${delayedId}`,
+      { token: identity.sessionToken },
+      configured
+    );
+    const delayedDetailBody = await delayedDetailResponse.json() as {
+      executionEnabled: boolean;
+      monitor: { state: string };
+    };
+    expect(delayedDetailResponse.status).toBe(200);
+    expect(delayedDetailBody.executionEnabled).toBe(true);
+    expect(delayedDetailBody.monitor.state).toBe("check_delayed");
 
     const historyResponse = await apiWithEnv(
       `/v1/monitors/${awaitingId}/checks`,
