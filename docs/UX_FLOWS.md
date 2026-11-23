@@ -50,7 +50,7 @@ After save: take user to monitor detail with live/pending state; do not fabricat
 
 ## Monitor detail
 - Current state, target, interval, last/next check and actions.
-- State is derived only from persisted observations and unresolved incidents: paused, execution disabled, awaiting first check, healthy, suspect, down or recovering.
+- State is derived only from persisted observations, the next due time and unresolved incidents: paused, execution disabled, awaiting first check, healthy, suspect, check delayed, down or recovering. If the next scheduled check is overdue by more than the greater of two minutes or two configured intervals, show **Check delayed** rather than implying that an old successful result is current. This is a scheduler-freshness warning, not a confirmed outage.
 - A valid probe configuration is a dispatch-availability signal, not evidence of a successful check or live agent connectivity.
 - Time-range selector and response-time chart.
 - Check history with error categories and expandable sanitized diagnostics.
