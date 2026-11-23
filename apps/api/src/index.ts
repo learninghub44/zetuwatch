@@ -18,19 +18,42 @@ interface Env {
 type UserRow = { id: string; email: string; display_name: string | null; email_verified_at: string | null; authMethod?: "api_key"; apiKeyOrganizationId?: string; apiKeyScopes?: string[] };
 type MonitorStateRow = {
   is_enabled: number;
+  interval_seconds?: number;
+  next_check_at?: string | null;
   last_checked_at?: string | null;
   consecutive_failures?: number;
   last_check_is_up?: number | null;
   open_incident_status?: string | null;
 };
+function parseMonitorTimestamp(value: unknown): number | null {
+  if (typeof value !== "string" || !value.trim()) return null;
+  const raw = value.trim();
+  // D1 CURRENT_TIMESTAMP values have no zone suffix; treat those as UTC.
+  const normalized = /^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?$/.test(raw)
+    ? raw.replace(" ", "T") + "Z"
+    : raw;
+  const parsed = Date.parse(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+function isMonitorCheckDelayed(monitor: MonitorStateRow, nowMs = Date.now()): boolean {
+  const nextCheckAt = parseMonitorTimestamp(monitor.next_check_at);
+  const intervalSeconds = Number(monitor.interval_seconds);
+  if (nextCheckAt === null || !Number.isInteger(intervalSeconds) ||
+      intervalSeconds < 60 || intervalSeconds > 3600) return true;
+  // Allow two configured intervals (at least two minutes) for Cron jitter,
+  // transient provider failures and bounded scheduler retries.
+  const graceMs = Math.max(120_000, intervalSeconds * 2_000);
+  return nowMs > nextCheckAt + graceMs;
+}
 function getMonitorState(monitor: MonitorStateRow, executionEnabled: boolean): string {
   if (Number(monitor.is_enabled) !== 1) return "paused";
   if (monitor.open_incident_status) return monitor.open_incident_status === "monitoring" ? "recovering" : "down";
   if (!executionEnabled) return "execution_disabled";
-  if (!monitor.last_checked_at) return "awaiting_first_check";
+  if (!monitor.last_checked_at) return isMonitorCheckDelayed(monitor) ? "check_delayed" : "awaiting_first_check";
   const lastCheckFailed = monitor.last_check_is_up !== null && monitor.last_check_is_up !== undefined &&
     Number(monitor.last_check_is_up) === 0;
   if (Number(monitor.consecutive_failures ?? 0) > 0 || lastCheckFailed) return "suspect";
+  if (isMonitorCheckDelayed(monitor)) return "check_delayed";
   if (Number(monitor.last_check_is_up) === 1) return "healthy";
   return "unknown";
 }
