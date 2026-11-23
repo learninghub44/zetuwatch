@@ -29,7 +29,7 @@ function parseMonitorTimestamp(value: unknown): number | null {
   if (typeof value !== "string" || !value.trim()) return null;
   const raw = value.trim();
   // D1 CURRENT_TIMESTAMP values have no zone suffix; treat those as UTC.
-  const normalized = /^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?$/.test(raw)
+  const normalized = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?$/.test(raw)
     ? raw.replace(" ", "T") + "Z"
     : raw;
   const parsed = Date.parse(normalized);
