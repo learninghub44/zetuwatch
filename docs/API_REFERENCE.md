@@ -112,3 +112,18 @@ Disabling/removing a channel cancels queued work. It cannot recall an email alre
 
 
 Delivery history retains the channel creator identifier independently of the channel row. Removing a channel sets the delivery's channel reference to null but does not erase the delivery record; the original member can still inspect their own retained log while they remain in the workspace. Workspace owners/admins can inspect all retained delivery records.
+
+
+## Encrypted webhook endpoint configuration
+
+All routes require a verified browser session and organization membership. API keys are rejected. Only workspace owners/admins may create, rename, rotate or remove endpoints; members can read the safe metadata list.
+
+- GET /v1/organizations/{organizationId}/webhooks — returns endpoint ID, display name, destination hostname, last four signing-secret characters, enabled state and timestamps. It never returns the URL, ciphertext or secret.
+- POST /v1/organizations/{organizationId}/webhooks — body: {"name":"Production alerts","url":"https://hooks.example.com/events"}. Returns endpoint metadata and the new whsec_ secret once.
+- PATCH /v1/organizations/{organizationId}/webhooks/{endpointId} — body: {"name":"Updated name"}.
+- POST /v1/organizations/{organizationId}/webhooks/{endpointId}/rotate — returns a replacement signing secret once.
+- DELETE /v1/organizations/{organizationId}/webhooks/{endpointId} — scrubs encrypted URL/secret material and retains the audit event.
+
+A workspace can configure up to 10 active endpoints. Creation accepts only syntactically valid HTTPS URLs without credentials, fragments, IP literals, obvious local/reserved host suffixes or non-default ports. This is not DNS validation. No DNS query or outbound HTTP request is made by these endpoints. deliveryEnabled is always false until a DNS-pinned delivery transport and durable webhook dispatcher are implemented and verified.
+
+The Worker requires a 32-byte base64url WEBHOOK_ENCRYPTION_KEY secret. Endpoint URLs and signing secrets use AES-256-GCM with a fresh nonce and tenant/endpoint/field-bound additional authenticated data. See docs/WEBHOOK_DELIVERY.md for key setup and rotation limitations.
