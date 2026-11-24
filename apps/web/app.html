@@ -51,6 +51,29 @@
         <tbody id="alert-channel-rows"><tr><td colspan="6">Loading alert channels…</td></tr></tbody>
       </table>
     </div>
+    <div class="panel-head" style="padding:20px 0 10px;margin-top:20px">
+      <div><h3 style="font-size:13px;margin:0">Webhook endpoints</h3><span>Encrypted endpoint configuration · delivery is not active yet</span></div>
+      <span id="webhook-endpoint-count">Loading…</span>
+    </div>
+    <div id="webhook-endpoint-message" class="notice hidden" role="status" aria-live="polite"></div>
+    <form id="webhook-endpoint-form" class="row" style="align-items:end;margin:10px 0 14px;grid-template-columns:minmax(180px,0.7fr) minmax(260px,1.5fr) auto">
+      <div class="field" style="margin:0"><label for="webhook-endpoint-name">Endpoint name</label><input id="webhook-endpoint-name" maxlength="80" required placeholder="Production alerts"></div>
+      <div class="field" style="margin:0"><label for="webhook-endpoint-url">HTTPS destination</label><input id="webhook-endpoint-url" type="url" maxlength="2048" required placeholder="https://hooks.example.com/events"></div>
+      <button class="btn primary" id="webhook-endpoint-submit" type="submit">Save endpoint</button>
+    </form>
+    <div id="webhook-secret-created" class="notice hidden" role="status" aria-live="polite">
+      <strong>Copy this signing secret now. It will not be shown again.</strong>
+      <code id="webhook-secret-value" style="display:block;overflow-wrap:anywhere;padding:10px;margin:9px 0;background:#fff;border:1px solid var(--line);border-radius:8px"></code>
+      <button class="btn" id="webhook-secret-copy" type="button">Copy secret</button>
+      <button class="btn" id="webhook-secret-hide" type="button">Hide</button>
+    </div>
+    <div style="overflow-x:auto">
+      <table>
+        <thead><tr><th>Endpoint</th><th>Host</th><th>Secret</th><th>Delivery</th><th>Created</th><th></th></tr></thead>
+        <tbody id="webhook-endpoint-rows"><tr><td colspan="6">Loading webhook endpoints…</td></tr></tbody>
+      </table>
+    </div>
+    <p style="font-size:11px;color:var(--muted);line-height:1.6;margin:10px 0 0">Endpoint URLs and signing secrets are encrypted before storage. Creating or rotating an endpoint never sends a network request. Delivery stays disabled until DNS-pinned outbound transport, redirect validation and durable retries are verified. Workspace owners and admins can manage endpoints; all members can view safe metadata.</p>
     <div class="panel-head" style="padding:20px 0 10px;margin-top:12px">
       <div><h3 style="font-size:13px;margin:0">Delivery history</h3><span>Latest queued and sent incident notifications</span></div>
       <button class="btn" id="alert-delivery-refresh" type="button">Refresh</button>
@@ -88,7 +111,7 @@
 <div class="wizard-actions"><button class="btn" type="button" id="wizard-back">Back</button><div class="wizard-actions-right"><button class="btn" type="button" id="cancel">Cancel</button><button class="btn primary" type="button" id="wizard-next">Continue</button><button class="btn primary hidden" type="submit" id="save">Save monitor</button></div></div>
 </form></div>
 <script>
-const API=(document.querySelector('meta[name="api-base"]')?.content||"/api").replace(/\/$/,"");let user=null,orgs=[],orgId=null,monitors=[],incidents=[],notificationChannels=[],notificationDeliveries=[],teamMemberCount=0,editingMonitorId=null,selectedIncidentId=null,selectedMonitorId=null,selectedMonitorEnabled=true,executionEnabled=false;
+const API=(document.querySelector('meta[name="api-base"]')?.content||"/api").replace(/\/$/,"");let user=null,orgs=[],orgId=null,monitors=[],incidents=[],notificationChannels=[],notificationDeliveries=[],webhookEndpoints=[],teamMemberCount=0,editingMonitorId=null,selectedIncidentId=null,selectedMonitorId=null,selectedMonitorEnabled=true,executionEnabled=false;
 const $=id=>document.getElementById(id);
 function showNotice(text,error=false){$("notice").textContent=text;$("notice").classList.remove("hidden","error");if(error)$("notice").classList.add("error")}
 async function request(path,options={}){const r=await fetch(API+path,{credentials:"include",...options,headers:{"content-type":"application/json",...(options.headers||{})}});const d=await r.json().catch(()=>({}));if(r.status===401){location.href="./auth.html";throw new Error("Please sign in again.")}if(!r.ok)throw new Error(d.message||d.error||"Request failed");return d}
@@ -573,12 +596,15 @@ async function loadAlerts(){
   const canWrite=role!=="viewer";
   const canManageAll=role==="owner"||role==="admin";
   $("alert-channel-form").classList.toggle("hidden",!canWrite);
-  const [channelResult,deliveryResult]=await Promise.all([
+  $("webhook-endpoint-form").classList.toggle("hidden",!canManageAll);
+  const [channelResult,deliveryResult,webhookResult]=await Promise.all([
     request("/v1/organizations/"+encodeURIComponent(orgId)+"/notification-channels"),
-    request("/v1/organizations/"+encodeURIComponent(orgId)+"/notification-deliveries")
+    request("/v1/organizations/"+encodeURIComponent(orgId)+"/notification-deliveries"),
+    request("/v1/organizations/"+encodeURIComponent(orgId)+"/webhooks")
   ]);
   notificationChannels=channelResult.channels||[];
   notificationDeliveries=deliveryResult.deliveries||[];
+  webhookEndpoints=webhookResult.endpoints||[];
   const ownChannel=notificationChannels.some(channel=>channel.createdBy===user.id);
   $("alert-channel-existing").classList.toggle("hidden",!ownChannel);
   $("alert-channel-submit").disabled=ownChannel;
@@ -610,6 +636,31 @@ async function loadAlerts(){
     row.append(type,destination,verified,state,added,actions);
     $("alert-channel-rows").appendChild(row);
   }
+  $("webhook-endpoint-count").textContent=webhookEndpoints.length+" endpoint(s)";
+  $("webhook-endpoint-rows").textContent="";
+  if(!webhookEndpoints.length){
+    const row=document.createElement("tr"),cell=document.createElement("td");
+    cell.colSpan=6;cell.textContent="No webhook endpoints configured.";
+    row.appendChild(cell);$("webhook-endpoint-rows").appendChild(row);
+  }
+  for(const endpoint of webhookEndpoints){
+    const row=document.createElement("tr");
+    const name=document.createElement("td");name.textContent=endpoint.name||"Unnamed endpoint";
+    const host=document.createElement("td");host.textContent=endpoint.destinationHost||"Unavailable";
+    const suffix=document.createElement("td");suffix.textContent=endpoint.secretLast4?"••••"+endpoint.secretLast4:"Rotated";
+    const delivery=document.createElement("td");delivery.textContent="Paused · secure transport pending";
+    const created=document.createElement("td");created.textContent=formatIncidentDate(endpoint.createdAt);
+    const actions=document.createElement("td");
+    if(canManageAll){
+      const rotate=document.createElement("button");rotate.className="btn";rotate.textContent="Rotate secret";
+      rotate.addEventListener("click",()=>rotateWebhookEndpoint(endpoint.id,endpoint.name));
+      const remove=document.createElement("button");remove.className="btn";remove.style.marginLeft="6px";remove.textContent="Remove";
+      remove.addEventListener("click",()=>removeWebhookEndpoint(endpoint.id,endpoint.name));
+      actions.append(rotate,remove);
+    }else actions.textContent="Managed by workspace admin";
+    row.append(name,host,suffix,delivery,created,actions);
+    $("webhook-endpoint-rows").appendChild(row);
+  }
   $("alert-delivery-rows").innerHTML="";
   if(!notificationDeliveries.length){
     const row=document.createElement("tr"),cell=document.createElement("td");
@@ -630,6 +681,53 @@ async function loadAlerts(){
   }
   updateOnboarding();
 }
+function showWebhookSecret(secret){
+  $("webhook-secret-value").textContent=secret;
+  $("webhook-secret-created").classList.remove("hidden");
+  $("webhook-secret-created").scrollIntoView({behavior:"smooth",block:"nearest"});
+}
+async function rotateWebhookEndpoint(endpointId,name){
+  if(!confirm("Rotate the signing secret for "+(name||"this endpoint")+"? The old secret will stop matching new signatures."))return;
+  try{
+    const result=await request("/v1/organizations/"+encodeURIComponent(orgId)+"/webhooks/"+encodeURIComponent(endpointId)+"/rotate",{method:"POST"});
+    showWebhookSecret(result.secret);
+    alertsMessage("Signing secret rotated. Copy the new secret; it is shown only once.");
+    await loadAlerts();
+  }catch(error){alertsMessage(error.message||"The signing secret could not be rotated.",true)}
+}
+async function removeWebhookEndpoint(endpointId,name){
+  if(!confirm("Remove "+(name||"this webhook endpoint")+"? Its encrypted URL and signing secret will be scrubbed."))return;
+  try{
+    await request("/v1/organizations/"+encodeURIComponent(orgId)+"/webhooks/"+encodeURIComponent(endpointId),{method:"DELETE"});
+    alertsMessage("Webhook endpoint removed and encrypted values scrubbed.");
+    await loadAlerts();
+  }catch(error){alertsMessage(error.message||"The webhook endpoint could not be removed.",true)}
+}
+$("webhook-endpoint-form").addEventListener("submit",async event=>{
+  event.preventDefault();
+  const button=$("webhook-endpoint-submit");button.disabled=true;button.textContent="Saving…";
+  try{
+    const result=await request("/v1/organizations/"+encodeURIComponent(orgId)+"/webhooks",{
+      method:"POST",
+      body:JSON.stringify({name:$("webhook-endpoint-name").value.trim(),url:$("webhook-endpoint-url").value.trim()})
+    });
+    $("webhook-endpoint-form").reset();
+    showWebhookSecret(result.secret);
+    alertsMessage("Endpoint saved. Delivery remains disabled; no network request was sent.");
+    await loadAlerts();
+  }catch(error){alertsMessage(error.message||"The webhook endpoint could not be saved.",true)}
+  finally{button.disabled=false;button.textContent="Save endpoint"}
+});
+$("webhook-secret-copy").addEventListener("click",async()=>{
+  try{
+    await navigator.clipboard.writeText($("webhook-secret-value").textContent||"");
+    alertsMessage("Signing secret copied. Store it in your receiver's secret manager.");
+  }catch{alertsMessage("Clipboard access is unavailable. Select and copy the secret manually.",true)}
+});
+$("webhook-secret-hide").addEventListener("click",()=>{
+  $("webhook-secret-value").textContent="";
+  $("webhook-secret-created").classList.add("hidden");
+});
 async function setEmailChannelEnabled(channelId,enabled){
   try{
     await request("/v1/organizations/"+encodeURIComponent(orgId)+"/notification-channels/"+encodeURIComponent(channelId),{
