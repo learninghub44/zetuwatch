@@ -127,6 +127,13 @@ describe("encrypted webhook endpoint configuration", () => {
     expect(memberDenied.status).toBe(403);
     expect(viewerDenied.status).toBe(403);
 
+    const admin = await createIdentity("admin");
+    const adminCreated = await api(`/v1/organizations/${admin.organizationId}/webhooks`, admin, {
+      method: "POST", body: { name: "Admin endpoint", url: "https://hooks.example.com/admin" }
+    });
+    expect(adminCreated.status).toBe(201);
+    expect(await adminCreated.json()).toMatchObject({ deliveryEnabled: false });
+
     const owner = await createIdentity("owner");
     const foreignRead = await api(`/v1/organizations/${owner.organizationId}/webhooks`, member);
     expect(foreignRead.status).toBe(403);
