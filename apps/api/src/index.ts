@@ -748,9 +748,9 @@ export default {
 
     // Webhook endpoint configuration is encrypted at rest. No outbound request
     // is made here; dispatch stays disabled until DNS-pinned transport is ready.
-    const webhookCollectionMatch = url.pathname.match(/^\/v1\/organizations\/([0-9a-f-]{36})\\/webhooks$/i);
-    const webhookItemMatch = url.pathname.match(/^\/v1\/organizations\/([0-9a-f-]{36})\\/webhooks\\/([0-9a-f-]{36})$/i);
-    const webhookRotateMatch = url.pathname.match(/^\/v1\/organizations\/([0-9a-f-]{36})\\/webhooks\\/([0-9a-f-]{36})\\/rotate$/i);
+    const webhookCollectionMatch = url.pathname.match(/^\/v1\/organizations\/([0-9a-f-]{36})\/webhooks$/i);
+    const webhookItemMatch = url.pathname.match(/^\/v1\/organizations\/([0-9a-f-]{36})\/webhooks\/([0-9a-f-]{36})$/i);
+    const webhookRotateMatch = url.pathname.match(/^\/v1\/organizations\/([0-9a-f-]{36})\/webhooks\/([0-9a-f-]{36})\/rotate$/i);
     if (webhookCollectionMatch || webhookItemMatch || webhookRotateMatch) {
       const user = await currentUser(request, env);
       if (!user) return json({ error: "UNAUTHENTICATED" }, 401);
@@ -782,7 +782,7 @@ export default {
         const body = await request.json().catch(() => null) as Record<string, unknown> | null;
         const name = typeof body?.name === "string" ? body.name.trim() : "";
         if (!name || name.length > 80 || /[\\u0000-\\u001f\\u007f]/.test(name)) {
-          return json({ error: "WEBHOOK_NAME_INVALID" }, 400);
+        if (!name || name.length > 80 || /[\u0000-\u001f\u007f]/.test(name)) {
         }
         let destination: { url: string; hostname: string };
         try { destination = normalizeWebhookDestination(body?.url); }
@@ -888,7 +888,7 @@ export default {
         const body = await request.json().catch(() => null) as Record<string, unknown> | null;
         const name = typeof body?.name === "string" ? body.name.trim() : "";
         if (!name || name.length > 80 || /[\\u0000-\\u001f\\u007f]/.test(name)) {
-          return json({ error: "WEBHOOK_NAME_INVALID" }, 400);
+        if (!name || name.length > 80 || /[\u0000-\u001f\u007f]/.test(name)) {
         }
         const now = new Date().toISOString();
         const results = await env.DB.batch([
