@@ -116,3 +116,6 @@ This is a public information surface, not a live service-health assertion. Do no
 - The Worker requires a 32-byte base64url WEBHOOK_ENCRYPTION_KEY secret. Test-only key material exists only in Vitest configuration and must never be reused in production. Master-key rotation is not implemented; the encryption version is recorded as 1.
 - URL checks are syntactic only. They reject obvious local/IP destinations, but do not resolve DNS. Endpoint creation and rotation make no outbound network request, and every endpoint remains disabled.
 - Do not dispatch webhooks until delivery-time A/AAAA validation, mixed-answer rejection, address pinning, TLS hostname verification, redirect-hop validation, deadlines, body limits, durable replay protection and idempotent retry/lease tests are complete. Never call ordinary fetch(customerUrl).
+
+- A shared HMAC-SHA256 helper signs the exact raw webhook body with a Unix timestamp. Verification checks the exact bytes, rejects malformed/oversized payloads and stale/future timestamps, and uses Web Crypto MAC verification. This is a tested primitive only; no outbound webhook request is sent.
+- Timestamp tolerance is not a durable replay store. Before delivery is enabled, each receiver event must carry a stable event ID and the dispatcher/outbox must enforce durable idempotency and bounded retry leases.
