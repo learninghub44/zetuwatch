@@ -16,6 +16,7 @@ export default defineConfig(async () => {
             PUBLIC_APP_URL: "https://app.zetuwatch.test",
             RESEND_API_KEY: "test-only-resend-key",
             EMAIL_FROM: "ZetuWatch Tests <noreply@example.test>",
+            WEBHOOK_ENCRYPTION_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
             TEST_MIGRATIONS: migrations
           }
         }
