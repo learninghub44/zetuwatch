@@ -92,3 +92,12 @@ After save: take user to monitor detail with live/pending state; do not fabricat
 - Never use color alone to communicate health; include text and iconography.
 - Avoid empty dashboard cards; guide the user to the next useful action.
 - Keep forms short, group related fields, preserve input on errors and show validation beside the field.
+
+
+## Alerts and webhook endpoint configuration
+
+- Workspace Alerts supports verified email channels and endpoint configuration for webhook receivers.
+- Owners/admins can create, rename, rotate and remove webhook endpoints; all workspace members can view only safe endpoint metadata.
+- A generated signing secret is displayed once on creation/rotation. The UI never writes it to localStorage or returns it in endpoint-list responses.
+- The endpoint URL and secret are encrypted before persistence. Endpoint creation does not send a test request or perform DNS resolution.
+- Every configured endpoint is visibly marked as paused while the DNS-pinned delivery transport and durable dispatcher are unfinished. The UI must not imply that a webhook was delivered or that a receiver was verified.
