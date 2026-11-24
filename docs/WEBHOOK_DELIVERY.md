@@ -55,3 +55,15 @@ Do not use ordinary `fetch(destination)` for customer-configured endpoints. The 
 ## Verification
 
 Unit tests cover AES-GCM round trips, authenticated tenant/endpoint/field context, tampering, invalid keys, secret generation and destination syntax rejection. D1 integration tests cover endpoint authorization, tenant isolation, encryption at rest, one-time secret responses, rotation, deletion and limits. These tests do not send network requests or claim that outbound delivery is ready.
+
+## Signature format implemented for the future dispatcher
+
+The shared HMAC primitive signs the exact UTF-8 body bytes using HMAC-SHA256 over:
+
+`<unix-timestamp-seconds>.<raw-body>`
+
+The future request header format is:
+
+`X-ZetuWatch-Signature: t=<timestamp>,v1=<64 lowercase hex characters>`
+
+Receivers must verify the raw body before JSON parsing, enforce a short timestamp tolerance (default five minutes), and deduplicate the stable event ID durably. A valid timestamped HMAC alone does not prevent replay within the allowed tolerance. The signing/verification primitive is unit-tested, but it is not yet wired to a network dispatcher and no signature header is currently sent.
