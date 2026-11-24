@@ -65,7 +65,7 @@ const json = (data: unknown, status = 200, headers: HeadersInit = {}): Response 
 type JsonRecordResult = { ok: true; value: Record<string, unknown> } | { ok: false; error: "too_large" | "invalid" };
 async function readJsonRecord(request: Request, maxBytes = 8_192): Promise<JsonRecordResult> {
   const contentLength = request.headers.get("content-length");
-  if (contentLength !== null && (!/^\\d+$/.test(contentLength) || Number(contentLength) > maxBytes)) {
+  if (contentLength !== null && (!/^\d+$/.test(contentLength) || Number(contentLength) > maxBytes)) {
     return { ok: false, error: "too_large" };
   }
   const reader = request.body?.getReader();
@@ -272,9 +272,7 @@ export default {
     if (request.method === "POST" && url.pathname === "/auth/register") {
       if (!(await rateLimit(request, env, "register", 5))) return json({ error: "RATE_LIMITED" }, 429);
       if (!env.RESEND_API_KEY || !env.EMAIL_FROM) return json({ error: "EMAIL_PROVIDER_NOT_CONFIGURED" }, 503);
-      const parsedBody = await readJsonRecord(request);
-        if (!parsedBody.ok) return json({ error: parsedBody.error === "too_large" ? "REQUEST_TOO_LARGE" : "INVALID_JSON" }, parsedBody.error === "too_large" ? 413 : 400);
-        const body = parsedBody.value;
+      const body = await request.json().catch(() => null) as Record<string, unknown> | null;
       const email = cleanText(body?.email, 254).toLowerCase();
       const name = cleanText(body?.name, 80);
       const password = typeof body?.password === "string" ? body.password : "";
@@ -818,7 +816,9 @@ export default {
       if (webhookCollectionMatch && request.method === "POST") {
         if (!canManageWebhooks) return json({ error: "FORBIDDEN" }, 403);
         if (!(await rateLimit(request, env, "webhook-endpoint-create", 10))) return json({ error: "RATE_LIMITED" }, 429);
-        const body = await request.json().catch(() => null) as Record<string, unknown> | null;
+        const parsedBody = await readJsonRecord(request);
+        if (!parsedBody.ok) return json({ error: parsedBody.error === "too_large" ? "REQUEST_TOO_LARGE" : "INVALID_JSON" }, parsedBody.error === "too_large" ? 413 : 400);
+        const body = parsedBody.value;
         const name = typeof body?.name === "string" ? body.name.trim() : "";
         if (!name || name.length > 80 || /[\u0000-\u001f\u007f]/.test(name)) {
           return json({ error: "WEBHOOK_NAME_INVALID" }, 400);
@@ -924,7 +924,9 @@ export default {
       if (webhookItemMatch && endpointId && request.method === "PATCH") {
         if (!canManageWebhooks) return json({ error: "FORBIDDEN" }, 403);
         if (!(await rateLimit(request, env, "webhook-endpoint-update", 30))) return json({ error: "RATE_LIMITED" }, 429);
-        const body = await request.json().catch(() => null) as Record<string, unknown> | null;
+        const parsedBody = await readJsonRecord(request);
+        if (!parsedBody.ok) return json({ error: parsedBody.error === "too_large" ? "REQUEST_TOO_LARGE" : "INVALID_JSON" }, parsedBody.error === "too_large" ? 413 : 400);
+        const body = parsedBody.value;
         const name = typeof body?.name === "string" ? body.name.trim() : "";
         if (!name || name.length > 80 || /[\u0000-\u001f\u007f]/.test(name)) {
           return json({ error: "WEBHOOK_NAME_INVALID" }, 400);
