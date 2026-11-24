@@ -18,7 +18,7 @@ def main() -> None:
         "monitor_checks", "incidents", "incident_events", "notification_channels",
         "audit_logs", "auth_tokens", "auth_sessions", "auth_rate_limits",
         "organization_invitations", "api_keys", "notification_deliveries",
-        "maintenance_windows", "status_pages", "status_page_monitors",
+        "maintenance_windows", "status_pages", "status_page_monitors", "webhook_endpoints",
     }
     existing = {row[0] for row in db.execute(
         "SELECT name FROM sqlite_master WHERE type = 'table'"
@@ -63,6 +63,18 @@ def main() -> None:
     if missing_notification_indexes:
         raise SystemExit(f"Missing notification indexes: {', '.join(sorted(missing_notification_indexes))}")
 
+    webhook_columns = {row[1] for row in db.execute("PRAGMA table_info(webhook_endpoints)")}
+    for column in (
+        "destination_host", "destination_hash", "destination_ciphertext", "destination_nonce",
+        "secret_ciphertext", "secret_nonce", "secret_last4", "encryption_key_version",
+        "is_enabled", "created_by", "deleted_at",
+    ):
+        if column not in webhook_columns:
+            raise SystemExit(f"Missing webhook_endpoints.{column}")
+    webhook_indexes = {row[1] for row in db.execute("PRAGMA index_list(webhook_endpoints)")}
+    for index in ("idx_webhook_endpoints_org_destination", "idx_webhook_endpoints_org_active"):
+        if index not in webhook_indexes:
+            raise SystemExit(f"Missing {index}")
     db.execute("INSERT INTO users (id, email, password_hash) VALUES ('u1', 'test@example.com', 'hash')")
     db.execute("INSERT INTO organizations (id, name, slug) VALUES ('o1', 'Test', 'test')")
     db.execute("INSERT INTO organization_members (organization_id, user_id, role) VALUES ('o1', 'u1', 'owner')")
