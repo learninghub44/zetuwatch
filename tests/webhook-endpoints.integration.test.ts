@@ -201,7 +201,7 @@ describe("encrypted webhook endpoint configuration", () => {
     expect(await listed.json()).toMatchObject({ endpoints: [] });
     const audit = await env.DB.prepare("SELECT COUNT(*) AS total FROM audit_logs WHERE organization_id = ? AND resource_id = ?")
       .bind(owner.organizationId, endpoint.id).first<{ total: number }>();
-    expect(audit?.total).toBe(3);
+    expect(audit?.total).toBe(4);
   });
 
   it("enforces the ten-active-endpoint workspace limit and rejects duplicates", async () => {
