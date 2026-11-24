@@ -3,6 +3,7 @@ import { hashPassword, verifyPassword } from "../../../packages/auth-core/src/pa
 import { canDeleteMonitors, canWriteMonitors, canAssignRole, canInviteRole, canRemoveMember, isOrganizationRole } from "../../../packages/auth-core/src/authorization";
 import { dispatchDueMonitors, isProbeExecutionEnabled } from "../../../packages/scheduler-core/src/dispatch";
 import { dispatchNotificationBatch } from "../../../packages/notifications-core/src/dispatch";
+import { createWebhookSecret, encryptWebhookValue, normalizeWebhookDestination, WEBHOOK_ENCRYPTION_KEY_VERSION } from "../../../packages/notifications-core/src/webhook-secrets";
 
 interface Env {
   DB: D1Database;
@@ -10,6 +11,7 @@ interface Env {
   PUBLIC_APP_URL: string;
   RESEND_API_KEY?: string;
   EMAIL_FROM?: string;
+  WEBHOOK_ENCRYPTION_KEY?: string;
   PROBES_ENABLED?: string;
   PROBE_AGENT_URL?: string;
   PROBE_SHARED_SECRET?: string;
@@ -740,6 +742,193 @@ export default {
         ]);
         return json({ message: "Email alert channel removed. Pending deliveries were cancelled." });
       }
+      return json({ error: "METHOD_NOT_ALLOWED" }, 405);
+    }
+
+
+    // Webhook endpoint configuration is encrypted at rest. No outbound request
+    // is made here; dispatch stays disabled until DNS-pinned transport is ready.
+    const webhookCollectionMatch = url.pathname.match(/^\\/v1\\/organizations\\/([0-9a-f-]{36})\\/webhooks$/i);
+    const webhookItemMatch = url.pathname.match(/^\\/v1\\/organizations\\/([0-9a-f-]{36})\\/webhooks\\/([0-9a-f-]{36})$/i);
+    const webhookRotateMatch = url.pathname.match(/^\\/v1\\/organizations\\/([0-9a-f-]{36})\\/webhooks\\/([0-9a-f-]{36})\\/rotate$/i);
+    if (webhookCollectionMatch || webhookItemMatch || webhookRotateMatch) {
+      const user = await currentUser(request, env);
+      if (!user) return json({ error: "UNAUTHENTICATED" }, 401);
+      if (user.authMethod === "api_key") return json({ error: "FORBIDDEN" }, 403);
+      const organizationId = (webhookCollectionMatch || webhookItemMatch || webhookRotateMatch)![1];
+      const endpointId = webhookItemMatch?.[2] || webhookRotateMatch?.[2];
+      const membership = await env.DB.prepare(
+        "SELECT role FROM organization_members WHERE organization_id = ? AND user_id = ?"
+      ).bind(organizationId, user.id).first<{ role: string }>();
+      if (!membership) return json({ error: "FORBIDDEN" }, 403);
+      const canManageWebhooks = membership.role === "owner" || membership.role === "admin";
+
+      if (webhookCollectionMatch && request.method === "GET") {
+        const rows = await env.DB.prepare(`
+          SELECT id, name, destination_host AS destinationHost,
+            secret_last4 AS secretLast4, is_enabled AS isEnabled,
+            created_at AS createdAt, updated_at AS updatedAt
+          FROM webhook_endpoints
+          WHERE organization_id = ? AND deleted_at IS NULL
+          ORDER BY created_at DESC, id ASC
+          LIMIT 10
+        `).bind(organizationId).all();
+        return json({ endpoints: rows.results, deliveryEnabled: false });
+      }
+
+      if (webhookCollectionMatch && request.method === "POST") {
+        if (!canManageWebhooks) return json({ error: "FORBIDDEN" }, 403);
+        if (!(await rateLimit(request, env, "webhook-endpoint-create", 10))) return json({ error: "RATE_LIMITED" }, 429);
+        const body = await request.json().catch(() => null) as Record<string, unknown> | null;
+        const name = typeof body?.name === "string" ? body.name.trim() : "";
+        if (!name || name.length > 80 || /[\\u0000-\\u001f\\u007f]/.test(name)) {
+          return json({ error: "WEBHOOK_NAME_INVALID" }, 400);
+        }
+        let destination: { url: string; hostname: string };
+        try { destination = normalizeWebhookDestination(body?.url); }
+        catch (error) {
+          const code = error instanceof Error ? error.message : "WEBHOOK_URL_INVALID";
+          return json({ error: code }, 400);
+        }
+        if (!env.WEBHOOK_ENCRYPTION_KEY) {
+          return json({ error: "WEBHOOK_ENCRYPTION_UNAVAILABLE", message: "The operator has not configured the webhook encryption secret." }, 503);
+        }
+
+        const endpointId = id();
+        const secret = createWebhookSecret();
+        let encryptedUrl: Awaited<ReturnType<typeof encryptWebhookValue>>;
+        let encryptedSecret: Awaited<ReturnType<typeof encryptWebhookValue>>;
+        try {
+          [encryptedUrl, encryptedSecret] = await Promise.all([
+            encryptWebhookValue(destination.url, env.WEBHOOK_ENCRYPTION_KEY, `zetuwatch:webhook:v${WEBHOOK_ENCRYPTION_KEY_VERSION}:${organizationId}:${endpointId}:url`),
+            encryptWebhookValue(secret, env.WEBHOOK_ENCRYPTION_KEY, `zetuwatch:webhook:v${WEBHOOK_ENCRYPTION_KEY_VERSION}:${organizationId}:${endpointId}:secret`)
+          ]);
+        } catch {
+          return json({ error: "WEBHOOK_ENCRYPTION_UNAVAILABLE" }, 503);
+        }
+
+        const now = new Date().toISOString();
+        try {
+          const results = await env.DB.batch([
+            env.DB.prepare(`
+              INSERT INTO webhook_endpoints (
+                id, organization_id, name, destination_host, destination_hash,
+                destination_ciphertext, destination_nonce, secret_ciphertext,
+                secret_nonce, secret_last4, encryption_key_version, is_enabled,
+                created_by, created_at, updated_at
+              )
+              SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?
+              WHERE (SELECT COUNT(*) FROM webhook_endpoints
+                WHERE organization_id = ? AND deleted_at IS NULL) < 10
+            `).bind(
+              endpointId, organizationId, name, destination.hostname,
+              await sha256(destination.url), encryptedUrl.ciphertext, encryptedUrl.nonce,
+              encryptedSecret.ciphertext, encryptedSecret.nonce, secret.slice(-4),
+              WEBHOOK_ENCRYPTION_KEY_VERSION, user.id, now, now, organizationId
+            ),
+            env.DB.prepare(`
+              INSERT INTO audit_logs
+                (id, organization_id, actor_user_id, action, resource_type, resource_id, metadata_json)
+              SELECT ?, ?, ?, 'notification.webhook_endpoint_created', 'webhook_endpoint', ?, ?
+              WHERE changes() = 1
+            `).bind(id(), organizationId, user.id, endpointId, JSON.stringify({ destinationHost: destination.hostname }))
+          ]);
+          if ((results[0]?.meta?.changes ?? 0) !== 1) {
+            return json({ error: "WEBHOOK_ENDPOINT_LIMIT_REACHED", message: "A workspace can configure up to 10 webhook endpoints." }, 409);
+          }
+        } catch {
+          return json({ error: "WEBHOOK_ENDPOINT_ALREADY_EXISTS", message: "This destination is already configured in the workspace." }, 409);
+        }
+        return json({
+          message: "Webhook endpoint saved. Delivery remains disabled until secure outbound transport is enabled.",
+          endpoint: {
+            id: endpointId, name, destinationHost: destination.hostname,
+            secretLast4: secret.slice(-4), isEnabled: 0, createdAt: now
+          },
+          secret,
+          deliveryEnabled: false
+        }, 201);
+      }
+
+      if (webhookRotateMatch && endpointId && request.method === "POST") {
+        if (!canManageWebhooks) return json({ error: "FORBIDDEN" }, 403);
+        if (!(await rateLimit(request, env, "webhook-endpoint-rotate", 20))) return json({ error: "RATE_LIMITED" }, 429);
+        const endpoint = await env.DB.prepare(
+          "SELECT id FROM webhook_endpoints WHERE id = ? AND organization_id = ? AND deleted_at IS NULL"
+        ).bind(endpointId, organizationId).first<{ id: string }>();
+        if (!endpoint) return json({ error: "NOT_FOUND" }, 404);
+        if (!env.WEBHOOK_ENCRYPTION_KEY) return json({ error: "WEBHOOK_ENCRYPTION_UNAVAILABLE" }, 503);
+        const secret = createWebhookSecret();
+        let encryptedSecret: Awaited<ReturnType<typeof encryptWebhookValue>>;
+        try {
+          encryptedSecret = await encryptWebhookValue(
+            secret, env.WEBHOOK_ENCRYPTION_KEY,
+            `zetuwatch:webhook:v${WEBHOOK_ENCRYPTION_KEY_VERSION}:${organizationId}:${endpointId}:secret`
+          );
+        } catch { return json({ error: "WEBHOOK_ENCRYPTION_UNAVAILABLE" }, 503); }
+        const now = new Date().toISOString();
+        const results = await env.DB.batch([
+          env.DB.prepare(`UPDATE webhook_endpoints
+            SET secret_ciphertext = ?, secret_nonce = ?, secret_last4 = ?, updated_at = ?
+            WHERE id = ? AND organization_id = ? AND deleted_at IS NULL`)
+            .bind(encryptedSecret.ciphertext, encryptedSecret.nonce, secret.slice(-4), now, endpointId, organizationId),
+          env.DB.prepare(`INSERT INTO audit_logs
+            (id, organization_id, actor_user_id, action, resource_type, resource_id)
+            SELECT ?, ?, ?, 'notification.webhook_secret_rotated', 'webhook_endpoint', ?
+            WHERE changes() = 1`)
+            .bind(id(), organizationId, user.id, endpointId)
+        ]);
+        if ((results[0]?.meta?.changes ?? 0) !== 1) return json({ error: "NOT_FOUND" }, 404);
+        return json({ message: "Webhook signing secret rotated. Copy it now; it will not be shown again.", secret, deliveryEnabled: false });
+      }
+
+      if (webhookItemMatch && endpointId && request.method === "PATCH") {
+        if (!canManageWebhooks) return json({ error: "FORBIDDEN" }, 403);
+        if (!(await rateLimit(request, env, "webhook-endpoint-update", 30))) return json({ error: "RATE_LIMITED" }, 429);
+        const body = await request.json().catch(() => null) as Record<string, unknown> | null;
+        const name = typeof body?.name === "string" ? body.name.trim() : "";
+        if (!name || name.length > 80 || /[\\u0000-\\u001f\\u007f]/.test(name)) {
+          return json({ error: "WEBHOOK_NAME_INVALID" }, 400);
+        }
+        const now = new Date().toISOString();
+        const results = await env.DB.batch([
+          env.DB.prepare("UPDATE webhook_endpoints SET name = ?, updated_at = ? WHERE id = ? AND organization_id = ? AND deleted_at IS NULL")
+            .bind(name, now, endpointId, organizationId),
+          env.DB.prepare(`INSERT INTO audit_logs
+            (id, organization_id, actor_user_id, action, resource_type, resource_id, metadata_json)
+            SELECT ?, ?, ?, 'notification.webhook_endpoint_renamed', 'webhook_endpoint', ?, ?
+            WHERE changes() = 1`)
+            .bind(id(), organizationId, user.id, endpointId, JSON.stringify({ name }))
+        ]);
+        if ((results[0]?.meta?.changes ?? 0) !== 1) return json({ error: "NOT_FOUND" }, 404);
+        return json({ message: "Webhook endpoint renamed." });
+      }
+
+      if (webhookItemMatch && endpointId && request.method === "DELETE") {
+        if (!canManageWebhooks) return json({ error: "FORBIDDEN" }, 403);
+        if (!(await rateLimit(request, env, "webhook-endpoint-delete", 30))) return json({ error: "RATE_LIMITED" }, 429);
+        const endpoint = await env.DB.prepare(
+          "SELECT destination_host AS destinationHost FROM webhook_endpoints WHERE id = ? AND organization_id = ? AND deleted_at IS NULL"
+        ).bind(endpointId, organizationId).first<{ destinationHost: string }>();
+        if (!endpoint) return json({ error: "NOT_FOUND" }, 404);
+        const now = new Date().toISOString();
+        const results = await env.DB.batch([
+          env.DB.prepare(`UPDATE webhook_endpoints
+            SET destination_ciphertext = '', destination_nonce = '',
+                secret_ciphertext = '', secret_nonce = '', secret_last4 = '----',
+                is_enabled = 0, deleted_at = ?, updated_at = ?
+            WHERE id = ? AND organization_id = ? AND deleted_at IS NULL`)
+            .bind(now, now, endpointId, organizationId),
+          env.DB.prepare(`INSERT INTO audit_logs
+            (id, organization_id, actor_user_id, action, resource_type, resource_id, metadata_json)
+            SELECT ?, ?, ?, 'notification.webhook_endpoint_removed', 'webhook_endpoint', ?, ?
+            WHERE changes() = 1`)
+            .bind(id(), organizationId, user.id, endpointId, JSON.stringify({ destinationHost: endpoint.destinationHost }))
+        ]);
+        if ((results[0]?.meta?.changes ?? 0) !== 1) return json({ error: "NOT_FOUND" }, 404);
+        return json({ message: "Webhook endpoint removed and encrypted destination/secret material scrubbed." });
+      }
+
       return json({ error: "METHOD_NOT_ALLOWED" }, 405);
     }
 
