@@ -39,6 +39,7 @@ describe("webhook secret encryption", () => {
     await expect(decryptWebhookValue(tampered, KEY, "context")).rejects.toThrow();
     await expect(encryptWebhookValue("secret", "not-a-key", "context")).rejects.toThrow("WEBHOOK_ENCRYPTION_KEY_INVALID");
     await expect(encryptWebhookValue("x".repeat(4_097), KEY, "context")).rejects.toThrow("WEBHOOK_VALUE_INVALID");
+    await expect(decryptWebhookValue({ ciphertext: "A".repeat(100_000), nonce: encrypted.nonce }, KEY, "context")).rejects.toThrow("WEBHOOK_CIPHERTEXT_INVALID");
   });
 });
 
