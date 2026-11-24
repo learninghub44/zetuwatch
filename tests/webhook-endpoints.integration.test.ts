@@ -211,6 +211,23 @@ describe("encrypted webhook endpoint configuration", () => {
     expect(audit?.total).toBe(4);
   });
 
+  it("rejects oversized JSON before parsing endpoint configuration", async () => {
+    const owner = await createIdentity("owner");
+    const response = await exports.default.fetch(new Request(
+      `https://api.zetuwatch.test/v1/organizations/${owner.organizationId}/webhooks`,
+      {
+        method: "POST",
+        headers: { cookie: `zw_session=${owner.sessionToken}`, "cf-connecting-ip": crypto.randomUUID(), "content-type": "application/json" },
+        body: JSON.stringify({ name: "Receiver", url: "https://hooks.example.com/events", padding: "x".repeat(9_000) })
+      }
+    ));
+    expect(response.status).toBe(413);
+    expect(await response.json()).toMatchObject({ error: "REQUEST_TOO_LARGE" });
+    const count = await env.DB.prepare("SELECT COUNT(*) AS total FROM webhook_endpoints WHERE organization_id = ?")
+      .bind(owner.organizationId).first<{ total: number }>();
+    expect(count?.total).toBe(0);
+  });
+
   it("enforces the ten-active-endpoint workspace limit and rejects duplicates", async () => {
     const owner = await createIdentity("owner");
     const first = await createEndpoint(owner, "same");
