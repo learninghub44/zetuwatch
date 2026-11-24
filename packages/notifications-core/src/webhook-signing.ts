@@ -29,7 +29,7 @@ function validSecret(secret: string): boolean {
 }
 
 function validPayload(payload: string): boolean {
-  return typeof payload === "string" &&
+  return typeof payload === "string" && payload.length <= MAX_WEBHOOK_PAYLOAD_BYTES &&
     encoder.encode(payload).byteLength <= MAX_WEBHOOK_PAYLOAD_BYTES;
 }
 
