@@ -62,6 +62,43 @@ function getMonitorState(monitor: MonitorStateRow, executionEnabled: boolean): s
 const encoder = new TextEncoder();
 const json = (data: unknown, status = 200, headers: HeadersInit = {}): Response =>
   Response.json(data, { status, headers: { "cache-control": "no-store", ...headers } });
+type JsonRecordResult = { ok: true; value: Record<string, unknown> } | { ok: false; error: "too_large" | "invalid" };
+async function readJsonRecord(request: Request, maxBytes = 8_192): Promise<JsonRecordResult> {
+  const contentLength = request.headers.get("content-length");
+  if (contentLength !== null && (!/^\\d+$/.test(contentLength) || Number(contentLength) > maxBytes)) {
+    return { ok: false, error: "too_large" };
+  }
+  const reader = request.body?.getReader();
+  if (!reader) return { ok: false, error: "invalid" };
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const part = await reader.read();
+      if (part.done) break;
+      total += part.value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel().catch(() => undefined);
+        return { ok: false, error: "too_large" };
+      }
+      chunks.push(part.value);
+    }
+  } catch {
+    return { ok: false, error: "invalid" };
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+  try {
+    const value = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)) as unknown;
+    if (!value || typeof value !== "object" || Array.isArray(value)) return { ok: false, error: "invalid" };
+    return { ok: true, value: value as Record<string, unknown> };
+  } catch {
+    return { ok: false, error: "invalid" };
+  }
+}
 const id = () => crypto.randomUUID();
 const b64url = (bytes: Uint8Array) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 const randomToken = () => b64url(crypto.getRandomValues(new Uint8Array(32)));
@@ -235,7 +272,9 @@ export default {
     if (request.method === "POST" && url.pathname === "/auth/register") {
       if (!(await rateLimit(request, env, "register", 5))) return json({ error: "RATE_LIMITED" }, 429);
       if (!env.RESEND_API_KEY || !env.EMAIL_FROM) return json({ error: "EMAIL_PROVIDER_NOT_CONFIGURED" }, 503);
-      const body = await request.json().catch(() => null) as Record<string, unknown> | null;
+      const parsedBody = await readJsonRecord(request);
+        if (!parsedBody.ok) return json({ error: parsedBody.error === "too_large" ? "REQUEST_TOO_LARGE" : "INVALID_JSON" }, parsedBody.error === "too_large" ? 413 : 400);
+        const body = parsedBody.value;
       const email = cleanText(body?.email, 254).toLowerCase();
       const name = cleanText(body?.name, 80);
       const password = typeof body?.password === "string" ? body.password : "";
