@@ -105,3 +105,14 @@ This is a public information surface, not a live service-health assertion. Do no
 - Email subjects strip control characters, plain text is normalized, and application links are constructed only from HTTPS origins (localhost HTTP only for development); URL credentials and unsafe protocols are rejected.
 - Customer-authored `incident.update` and `incident.status_changed` events are emailed only when visibility is explicitly public. Internal notes/status transitions are excluded at enqueue and checked again before provider delivery.
 
+
+
+## Webhook endpoint configuration boundary
+
+- Endpoint URL and signing secret values are encrypted in the Worker before D1 writes using AES-256-GCM, a fresh 96-bit nonce and a 128-bit authentication tag.
+- Additional authenticated data binds each ciphertext to organization ID, endpoint ID, schema version and field purpose. Ciphertext cannot be moved between tenants, endpoints or URL/secret columns.
+- D1 stores only encrypted URL/secret values, a non-secret hostname label, a SHA-256 destination uniqueness hash and the last four secret characters. List APIs never return ciphertext or the secret.
+- The generated 256-bit whsec_ value is returned only on create/rotate. Removal scrubs ciphertext/nonces and disables the row while retaining an audit record.
+- The Worker requires a 32-byte base64url WEBHOOK_ENCRYPTION_KEY secret. Test-only key material exists only in Vitest configuration and must never be reused in production. Master-key rotation is not implemented; the encryption version is recorded as 1.
+- URL checks are syntactic only. They reject obvious local/IP destinations, but do not resolve DNS. Endpoint creation and rotation make no outbound network request, and every endpoint remains disabled.
+- Do not dispatch webhooks until delivery-time A/AAAA validation, mixed-answer rejection, address pinning, TLS hostname verification, redirect-hop validation, deadlines, body limits, durable replay protection and idempotent retry/lease tests are complete. Never call ordinary fetch(customerUrl).
