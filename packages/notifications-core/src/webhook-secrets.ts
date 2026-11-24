@@ -53,10 +53,6 @@ function validContext(context: string): boolean {
     context.length <= 256 && !/[\u0000-\u001f\u007f]/.test(context);
 }
 
-function validSecret(value: string): boolean {
-  return typeof value === "string" && WEBHOOK_SECRET_PATTERN.test(value);
-}
-
 /** Generate a 256-bit endpoint secret. The caller must display it once and encrypt it at rest. */
 export function createWebhookSecret(): string {
   return "whsec_" + base64Url(crypto.getRandomValues(new Uint8Array(32)));
@@ -93,7 +89,9 @@ export async function decryptWebhookValue(
   context: string
 ): Promise<string> {
   if (!encrypted || typeof encrypted.ciphertext !== "string" ||
-      typeof encrypted.nonce !== "string" || !validContext(context)) {
+      typeof encrypted.nonce !== "string" || encrypted.nonce.length !== 16 ||
+      encrypted.ciphertext.length < 23 || encrypted.ciphertext.length > 5_483 ||
+      !validContext(context)) {
     throw new Error("WEBHOOK_CIPHERTEXT_INVALID");
   }
   const nonce = decodeBase64Url(encrypted.nonce);
