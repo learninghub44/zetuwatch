@@ -1,5 +1,5 @@
 import { env, exports } from "cloudflare:workers";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { decryptWebhookValue } from "../packages/notifications-core/src/webhook-secrets";
 
 type Role = "owner" | "admin" | "member" | "viewer";
@@ -226,6 +226,22 @@ describe("encrypted webhook endpoint configuration", () => {
     const count = await env.DB.prepare("SELECT COUNT(*) AS total FROM webhook_endpoints WHERE organization_id = ?")
       .bind(owner.organizationId).first<{ total: number }>();
     expect(count?.total).toBe(0);
+  });
+
+  it("does not resolve DNS or send a test request during endpoint creation or rotation", async () => {
+    const owner = await createIdentity("owner");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const endpoint = await createEndpoint(owner);
+      const rotated = await api(`/v1/organizations/${owner.organizationId}/webhooks/${endpoint.id}/rotate`, owner, {
+        method: "POST"
+      });
+      expect(rotated.status).toBe(200);
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("enforces the ten-active-endpoint workspace limit and rejects duplicates", async () => {
