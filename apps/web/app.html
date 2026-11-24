@@ -55,8 +55,7 @@
       <div><h3 style="font-size:13px;margin:0">Webhook endpoints</h3><span>Encrypted endpoint configuration · delivery is not active yet</span></div>
       <span id="webhook-endpoint-count">Loading…</span>
     </div>
-    <div id="webhook-endpoint-message" class="notice hidden" role="status" aria-live="polite"></div>
-    <form id="webhook-endpoint-form" class="row" style="align-items:end;margin:10px 0 14px;grid-template-columns:minmax(180px,0.7fr) minmax(260px,1.5fr) auto">
+        <form id="webhook-endpoint-form" class="row" style="align-items:end;margin:10px 0 14px;grid-template-columns:minmax(180px,0.7fr) minmax(260px,1.5fr) auto">
       <div class="field" style="margin:0"><label for="webhook-endpoint-name">Endpoint name</label><input id="webhook-endpoint-name" maxlength="80" required placeholder="Production alerts"></div>
       <div class="field" style="margin:0"><label for="webhook-endpoint-url">HTTPS destination</label><input id="webhook-endpoint-url" type="url" maxlength="2048" required placeholder="https://hooks.example.com/events"></div>
       <button class="btn primary" id="webhook-endpoint-submit" type="submit">Save endpoint</button>
