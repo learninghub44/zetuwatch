@@ -748,9 +748,9 @@ export default {
 
     // Webhook endpoint configuration is encrypted at rest. No outbound request
     // is made here; dispatch stays disabled until DNS-pinned transport is ready.
-    const webhookCollectionMatch = url.pathname.match(/^\\/v1\\/organizations\\/([0-9a-f-]{36})\\/webhooks$/i);
-    const webhookItemMatch = url.pathname.match(/^\\/v1\\/organizations\\/([0-9a-f-]{36})\\/webhooks\\/([0-9a-f-]{36})$/i);
-    const webhookRotateMatch = url.pathname.match(/^\\/v1\\/organizations\\/([0-9a-f-]{36})\\/webhooks\\/([0-9a-f-]{36})\\/rotate$/i);
+    const webhookCollectionMatch = url.pathname.match(/^\/v1\/organizations\/([0-9a-f-]{36})\\/webhooks$/i);
+    const webhookItemMatch = url.pathname.match(/^\/v1\/organizations\/([0-9a-f-]{36})\\/webhooks\\/([0-9a-f-]{36})$/i);
+    const webhookRotateMatch = url.pathname.match(/^\/v1\/organizations\/([0-9a-f-]{36})\\/webhooks\\/([0-9a-f-]{36})\\/rotate$/i);
     if (webhookCollectionMatch || webhookItemMatch || webhookRotateMatch) {
       const user = await currentUser(request, env);
       if (!user) return json({ error: "UNAUTHENTICATED" }, 401);
