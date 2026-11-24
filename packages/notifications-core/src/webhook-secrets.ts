@@ -1,5 +1,4 @@
 const encoder = new TextEncoder();
-const WEBHOOK_SECRET_PATTERN = /^whsec_[A-Za-z0-9_-]{43}$/;
 const ENCRYPTION_KEY_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 export const WEBHOOK_ENCRYPTION_KEY_VERSION = 1;
 
