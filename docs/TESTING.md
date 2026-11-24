@@ -126,3 +126,10 @@ All provider calls are intercepted with an injected/mock fetch. These tests do n
 Additional notification regression cases verify that delivery history remains visible to the channel creator after channel removal (the channel foreign key becomes null), application links reject unsafe protocols and embedded credentials, subject CR/LF control characters are removed, and dispatch does not claim queued work when provider/sender/application configuration is absent.
 
 The combined one-minute scheduled handler is covered by a D1 integration test that fires the Cron event without probe bindings and verifies no monitor lease or check is created. Email delivery is skipped when provider/sender configuration is absent.
+
+
+## Webhook endpoint configuration coverage
+
+The webhook endpoint integration suite uses the actual Worker entrypoint and isolated D1. It covers owner/admin mutation permissions, member/viewer denial, API-key denial, cross-tenant isolation, HTTPS destination syntax rejection, duplicate and ten-endpoint limits, encrypted URL/secret persistence, authenticated tenant/endpoint/field context, one-time secret responses, secret rotation, rename, removal scrubbing and audit records. Unit tests cover AES-GCM round trips, tampering, invalid key material, secret generation and local/IP destination rejection.
+
+The test encryption key is a deterministic, non-production Miniflare binding in vitest.config.mts. It must never be reused in a deployed environment. These tests make no DNS or HTTP request. They verify endpoint configuration only; webhook delivery remains disabled and is not counted as complete.
