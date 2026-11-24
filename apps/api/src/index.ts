@@ -781,8 +781,8 @@ export default {
         if (!(await rateLimit(request, env, "webhook-endpoint-create", 10))) return json({ error: "RATE_LIMITED" }, 429);
         const body = await request.json().catch(() => null) as Record<string, unknown> | null;
         const name = typeof body?.name === "string" ? body.name.trim() : "";
-        if (!name || name.length > 80 || /[\\u0000-\\u001f\\u007f]/.test(name)) {
         if (!name || name.length > 80 || /[\u0000-\u001f\u007f]/.test(name)) {
+          return json({ error: "WEBHOOK_NAME_INVALID" }, 400);
         }
         let destination: { url: string; hostname: string };
         try { destination = normalizeWebhookDestination(body?.url); }
@@ -887,8 +887,8 @@ export default {
         if (!(await rateLimit(request, env, "webhook-endpoint-update", 30))) return json({ error: "RATE_LIMITED" }, 429);
         const body = await request.json().catch(() => null) as Record<string, unknown> | null;
         const name = typeof body?.name === "string" ? body.name.trim() : "";
-        if (!name || name.length > 80 || /[\\u0000-\\u001f\\u007f]/.test(name)) {
         if (!name || name.length > 80 || /[\u0000-\u001f\u007f]/.test(name)) {
+          return json({ error: "WEBHOOK_NAME_INVALID" }, 400);
         }
         const now = new Date().toISOString();
         const results = await env.DB.batch([
