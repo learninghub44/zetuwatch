@@ -34,7 +34,8 @@ describe("webhook secret encryption", () => {
 
   it("rejects tampering, malformed key material and oversized values", async () => {
     const encrypted = await encryptWebhookValue("secret", KEY, "context");
-    const tampered = { ...encrypted, ciphertext: encrypted.ciphertext.slice(0, -1) + "A" };
+    const first = encrypted.ciphertext[0] === "A" ? "B" : "A";
+    const tampered = { ...encrypted, ciphertext: first + encrypted.ciphertext.slice(1) };
     await expect(decryptWebhookValue(tampered, KEY, "context")).rejects.toThrow();
     await expect(encryptWebhookValue("secret", "not-a-key", "context")).rejects.toThrow("WEBHOOK_ENCRYPTION_KEY_INVALID");
     await expect(encryptWebhookValue("x".repeat(4_097), KEY, "context")).rejects.toThrow("WEBHOOK_VALUE_INVALID");
