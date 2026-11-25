@@ -141,12 +141,10 @@ describe("durable webhook delivery outbox", () => {
     const identity = await createIdentity();
     const endpointId = await createEndpoint(identity);
     await enableEndpoint(endpointId);
-    const monitorId = await createMonitor(identity.organizationId);
-
-    const internalNote = await createIncidentEvent(monitorId, "incident.update", "internal");
-    const publicNote = await createIncidentEvent(monitorId, "incident.update", "public");
-    const internalStatus = await createIncidentEvent(monitorId, "incident.status_changed", "internal");
-    const publicStatus = await createIncidentEvent(monitorId, "incident.status_changed", "public");
+    const internalNote = await createIncidentEvent(await createMonitor(identity.organizationId), "incident.update", "internal");
+    const publicNote = await createIncidentEvent(await createMonitor(identity.organizationId), "incident.update", "public");
+    const internalStatus = await createIncidentEvent(await createMonitor(identity.organizationId), "incident.status_changed", "internal");
+    const publicStatus = await createIncidentEvent(await createMonitor(identity.organizationId), "incident.status_changed", "public");
 
     const count = await env.DB.prepare(
       "SELECT COUNT(*) AS total FROM webhook_deliveries WHERE endpoint_id = ?"
@@ -175,7 +173,7 @@ describe("durable webhook delivery outbox", () => {
     await enableEndpoint(endpointId);
     await env.DB.prepare("UPDATE webhook_endpoints SET is_enabled = 0, deleted_at = ? WHERE id = ?")
       .bind(new Date().toISOString(), endpointId).run();
-    const deletedEvent = await createIncidentEvent(monitorId);
+    const deletedEvent = await createIncidentEvent(await createMonitor(identity.organizationId));
 
     const count = await env.DB.prepare(
       "SELECT COUNT(*) AS total FROM webhook_deliveries WHERE endpoint_id = ?"
