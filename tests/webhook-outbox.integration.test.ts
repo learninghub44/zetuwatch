@@ -171,15 +171,40 @@ describe("durable webhook delivery outbox", () => {
     const monitorId = await createMonitor(identity.organizationId);
     const disabledEvent = await createIncidentEvent(monitorId);
     await enableEndpoint(endpointId);
+    const queuedEvent = await createIncidentEvent(await createMonitor(identity.organizationId));
+    const claimed = await claimDueWebhookDeliveries(env.DB, {
+      now: new Date(), leaseMs: 30_000, limit: 1, token: "endpoint-disable-claim-0001"
+    });
+    expect(claimed).toHaveLength(1);
+    expect(claimed[0]?.eventId).toBe(queuedEvent.eventId);
+
     await env.DB.prepare("UPDATE webhook_endpoints SET is_enabled = 0, deleted_at = ? WHERE id = ?")
       .bind(new Date().toISOString(), endpointId).run();
     const deletedEvent = await createIncidentEvent(await createMonitor(identity.organizationId));
 
-    const count = await env.DB.prepare(
-      "SELECT COUNT(*) AS total FROM webhook_deliveries WHERE endpoint_id = ?"
-    ).bind(endpointId).first<{ total: number }>();
-    expect(count?.total).toBe(0);
-    expect(disabledEvent.eventId).not.toBe(deletedEvent.eventId);
+    const rows = await env.DB.prepare(
+      "SELECT event_id AS eventId, status, next_attempt_at AS nextAttemptAt, lease_token AS leaseToken FROM webhook_deliveries WHERE endpoint_id = ?"
+    ).bind(endpointId).all<{
+      eventId: string; status: string; nextAttemptAt: string | null; leaseToken: string | null;
+    }>();
+    expect(rows.results).toEqual([
+      expect.objectContaining({
+        eventId: queuedEvent.eventId, status: "cancelled", nextAttemptAt: null, leaseToken: null
+      })
+    ]);
+    for (const excluded of [disabledEvent, deletedEvent]) {
+      const count = await env.DB.prepare(
+        "SELECT COUNT(*) AS total FROM webhook_deliveries WHERE event_id = ?"
+      ).bind(excluded.eventId).first<{ total: number }>();
+      expect(count?.total).toBe(0);
+    }
+    const attempt = await env.DB.prepare(
+      "SELECT status, error_code AS errorCode FROM webhook_delivery_attempts WHERE delivery_id = ?"
+    ).bind(claimed[0]!.id).first<{ status: string; errorCode: string }>();
+    expect(attempt).toMatchObject({ status: "abandoned", errorCode: "ENDPOINT_DISABLED" });
+    await expect(settleWebhookDelivery(env.DB, claimed[0]!, {
+      kind: "failed", errorCode: "ENDPOINT_DISABLED", now: new Date(Date.now() + 1_000)
+    })).resolves.toBe(false);
   });
 
   it("claims with leases, records each attempt and rejects stale settlement", async () => {
