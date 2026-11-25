@@ -119,6 +119,58 @@ def main() -> None:
     else:
         raise SystemExit("Invalid organization role was accepted")
 
+    # Exercise the webhook event trigger, tenant guard and attempt-log trigger
+    # against the fully migrated SQLite schema.
+    db.execute("INSERT INTO monitors (id, organization_id, name, target_url) VALUES ('m1', 'o1', 'Test monitor', 'https://example.com/health')")
+    db.execute("INSERT INTO incidents (id, monitor_id, started_at, status, summary) VALUES ('i1', 'm1', '2026-11-25T06:00:00Z', 'investigating', 'Test incident')")
+    db.execute("""INSERT INTO webhook_endpoints (
+        id, organization_id, name, destination_host, destination_hash,
+        destination_ciphertext, destination_nonce, secret_ciphertext, secret_nonce,
+        secret_last4, encryption_key_version, is_enabled, created_by
+    ) VALUES ('we1', 'o1', 'Receiver', 'hooks.example.com', ?, 'cipher', 'nonce',
+        'cipher', 'nonce', '1234', 1, 1, 'u1')""", ("a" * 64,))
+    db.execute("""INSERT INTO incident_events
+        (id, incident_id, event_type, message, created_at)
+        VALUES ('ev1', 'i1', 'incident.opened', 'Incident opened', '2026-11-25 06:00:00')""")
+    delivery = db.execute("""SELECT organization_id, endpoint_id, incident_id, event_id, status, attempt_count
+        FROM webhook_deliveries WHERE event_id = 'ev1'""").fetchone()
+    if delivery != ("o1", "we1", "i1", "ev1", "queued", 0):
+        raise SystemExit(f"Webhook event fan-out failed: {delivery}")
+    db.execute("""UPDATE webhook_deliveries
+        SET lease_token = 'migration-check-token-0001',
+            lease_until = '2026-11-25T06:02:00.000Z',
+            attempt_count = 1,
+            updated_at = '2026-11-25T06:01:00.000Z'
+        WHERE event_id = 'ev1'""")
+    attempt = db.execute("""SELECT attempt_number, status FROM webhook_delivery_attempts
+        WHERE delivery_id = (SELECT id FROM webhook_deliveries WHERE event_id = 'ev1')""").fetchone()
+    if attempt != (1, "started"):
+        raise SystemExit(f"Webhook attempt log creation failed: {attempt}")
+    db.execute("INSERT INTO organizations (id, name, slug) VALUES ('o2', 'Second', 'second')")
+    db.execute("""INSERT INTO webhook_endpoints (
+        id, organization_id, name, destination_host, destination_hash,
+        destination_ciphertext, destination_nonce, secret_ciphertext, secret_nonce,
+        secret_last4, encryption_key_version, is_enabled, created_by
+    ) VALUES ('we2', 'o2', 'Foreign receiver', 'hooks.example.net', ?, 'cipher', 'nonce',
+        'cipher', 'nonce', '5678', 1, 1, 'u2')""", ("b" * 64,))
+    try:
+        db.execute("""INSERT INTO webhook_deliveries
+            (id, organization_id, endpoint_id, incident_id, event_id, status, attempt_count, next_attempt_at)
+            VALUES ('bad-delivery', 'o1', 'we2', 'i1', 'ev1', 'queued', 0, '2026-11-25T06:00:00.000Z')""")
+    except sqlite3.IntegrityError as error:
+        if "WEBHOOK_DELIVERY_TENANT_MISMATCH" not in str(error):
+            raise
+    else:
+        raise SystemExit("Cross-tenant webhook delivery was accepted")
+    try:
+        db.execute("""UPDATE webhook_delivery_attempts SET error_code = 'TAMPERED'
+            WHERE delivery_id = (SELECT id FROM webhook_deliveries WHERE event_id = 'ev1')""")
+    except sqlite3.IntegrityError as error:
+        if "WEBHOOK_DELIVERY_ATTEMPTS_IMMUTABLE" not in str(error):
+            raise
+    else:
+        raise SystemExit("Completed webhook attempt log was mutable")
+
     violations = list(db.execute("PRAGMA foreign_key_check"))
     if violations:
         raise SystemExit(f"Foreign key violations: {violations}")
