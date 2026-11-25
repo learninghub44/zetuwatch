@@ -173,6 +173,17 @@ def main() -> None:
             raise
     else:
         raise SystemExit("Started webhook attempt row accepted an in-place mutation")
+    db.execute("""UPDATE webhook_endpoints
+        SET is_enabled = 0, deleted_at = '2026-11-25T06:02:00.000Z'
+        WHERE id = 'we1'""")
+    cancelled = db.execute("""SELECT status, next_attempt_at, lease_token
+        FROM webhook_deliveries WHERE event_id = 'ev1'""").fetchone()
+    if cancelled != ("cancelled", None, None):
+        raise SystemExit(f"Endpoint disable did not cancel delivery: {cancelled}")
+    abandoned = db.execute("""SELECT status, error_code FROM webhook_delivery_attempts
+        WHERE delivery_id = (SELECT id FROM webhook_deliveries WHERE event_id = 'ev1')""").fetchone()
+    if abandoned != ("abandoned", "ENDPOINT_DISABLED"):
+        raise SystemExit(f"Endpoint disable did not close active attempt: {abandoned}")
 
     violations = list(db.execute("PRAGMA foreign_key_check"))
     if violations:
