@@ -115,7 +115,7 @@ BEGIN
   )
   SELECT
     lower(hex(randomblob(16))), m.organization_id, e.id, i.id, NEW.id, 'queued',
-    0, NEW.created_at, NEW.created_at, NEW.created_at
+    0, strftime('%Y-%m-%dT%H:%M:%fZ', NEW.created_at), NEW.created_at, NEW.created_at
   FROM incidents i
   JOIN monitors m ON m.id = i.monitor_id
   JOIN webhook_endpoints e
