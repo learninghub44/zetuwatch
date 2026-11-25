@@ -237,6 +237,7 @@ export async function settleWebhookDelivery(
     UPDATE webhook_delivery_attempts
     SET status = ?, response_status = ?, error_code = ?, completed_at = ?
     WHERE delivery_id = ? AND attempt_number = ? AND status = 'started'
+      AND changes() = 1
       AND EXISTS (
         SELECT 1 FROM webhook_deliveries d
         WHERE d.id = ? AND d.attempt_count = ? AND d.lease_token IS NULL AND d.status = ?
