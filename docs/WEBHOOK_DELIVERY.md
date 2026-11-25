@@ -49,6 +49,7 @@ Migration `0011_webhook_delivery_outbox.sql` adds:
 - An incident-event insert trigger that fans out only to enabled, non-deleted endpoints in the same workspace. Internal customer-authored notes and internal status changes are excluded.
 - A tenant guard that rejects mismatched endpoint, organization, incident and event references.
 - A unique event/endpoint constraint so repeated enqueue attempts cannot create duplicate deliveries.
+- Disabling or removing an endpoint cancels queued deliveries, clears their leases and marks any started attempt as abandoned. A sender must still re-check endpoint state immediately before opening the outbound connection.
 
 The claim/settlement module enforces a 1–10 batch limit, 30–300 second leases, eight maximum attempts and retry delays from 30 seconds up to a six-hour cap. Only the current unexpired lease can settle a delivery. These primitives are not yet called by a network dispatcher or scheduled handler.
 
