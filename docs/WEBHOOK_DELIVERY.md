@@ -1,14 +1,16 @@
-# ZetuWatch webhook endpoint configuration
+# ZetuWatch webhook endpoint configuration and outbox
 
 ## Current scope
 
 The workspace Alerts screen can store HTTPS webhook endpoint configuration and generate a per-endpoint signing secret. The endpoint URL and signing secret are encrypted before they are written to D1. The secret is returned once on creation or rotation; list responses never include the URL, ciphertext or signing secret.
 
-**Outbound webhook delivery is not enabled.** Creating an endpoint does not send a test request, DNS query or HTTP request. Endpoints remain disabled until a reviewed DNS-pinned outbound transport and durable webhook outbox/dispatcher have passed their security and integration tests. Do not infer delivery from the endpoint appearing in the list.
+A durable event outbox and per-attempt history are now implemented in the integration branch. A database trigger creates one queued delivery for each enabled endpoint when an eligible incident timeline event is inserted. The trigger excludes internal customer-authored notes and internal status changes, enforces workspace/incident/event ownership, and uses a unique event/endpoint key for idempotency. The outbox stores references only; it does not copy destination URLs or signing secrets.
+
+**Outbound webhook delivery is still disabled.** Endpoint creation does not send a test request, DNS query or HTTP request. The public API keeps endpoints disabled; no endpoint activation route or outbound dispatcher is enabled yet. Do not infer delivery from the endpoint appearing in the list or from an outbox row.
 
 ## API
 
-All routes require a verified browser session and membership in the organization. API keys are rejected.
+All endpoint configuration routes require a verified browser session and membership in the organization. API keys are rejected.
 
 - `GET /v1/organizations/{organizationId}/webhooks`: list safe endpoint metadata. All workspace members may read the metadata.
 - `POST /v1/organizations/{organizationId}/webhooks`: owner/admin creates an endpoint. The response includes its secret exactly once.
@@ -38,23 +40,32 @@ AES-256-GCM uses a fresh 96-bit nonce for each encrypted value and a 128-bit aut
 
 The database records encryption key version 1. A master-key rotation procedure is not implemented yet. Before rotating the Worker secret, a future migration/tool must decrypt and re-encrypt every active endpoint with the new key. If the current key is lost, existing endpoint values cannot be recovered; delete and recreate endpoints after configuring a new key.
 
+## Durable outbox and attempt history
+
+Migration `0011_webhook_delivery_outbox.sql` adds:
+
+- `webhook_deliveries`: one event/endpoint delivery record with queued/sent/failed/cancelled state, attempt count, next-attempt timestamp, expiring lease, response status and a redacted error code.
+- `webhook_delivery_attempts`: one append-only completed record per claimed attempt. A started attempt becomes `abandoned` when its lease expires and another worker reclaims the delivery.
+- An incident-event insert trigger that fans out only to enabled, non-deleted endpoints in the same workspace. Internal customer-authored notes and internal status changes are excluded.
+- A tenant guard that rejects mismatched endpoint, organization, incident and event references.
+- A unique event/endpoint constraint so repeated enqueue attempts cannot create duplicate deliveries.
+
+The claim/settlement module enforces a 1–10 batch limit, 30–300 second leases, eight maximum attempts and retry delays from 30 seconds up to a six-hour cap. Only the current unexpired lease can settle a delivery. These primitives are not yet called by a network dispatcher or scheduled handler.
+
 ## Outbound safety requirements
 
-When delivery is implemented, every attempt must:
+Before delivery can be enabled, every attempt must:
+
 - decrypt the URL and secret only inside the trusted dispatcher;
-- resolve A and AAAA records at delivery time and reject mixed public/private answers;
-- pin the selected validated address for the connection while retaining the original hostname for TLS SNI/certificate validation;
-- disable redirects or independently validate, resolve and pin every redirect hop;
-- reject HTTPS downgrade, non-default ports, private/reserved addresses and DNS rebinding;
-- enforce strict connect/total deadlines, bounded headers and a small response-body cap;
-- sign the exact request bytes with timestamped HMAC-SHA256 and a stable event ID;
-- use durable leases, bounded retries, idempotency and delivery logs.
+- resolve A and AAAA records at delivery time and reject empty, malformed, oversized or mixed public/private answer sets;
+- pin the selected validated address for the connection while retaining the original hostname for TLS SNI and certificate verification;
+- disable redirects entirely (or independently validate, resolve and pin every hop before following it); never permit HTTPS downgrade;
+- enforce HTTPS, default port, strict connect/total deadlines, bounded headers and a small response-body cap;
+- sign the exact request bytes with timestamped HMAC-SHA256 and include a stable event ID;
+- use durable leases, bounded retries, idempotency and per-attempt delivery logs;
+- re-check endpoint enabled/deleted state immediately before network I/O.
 
-Do not use ordinary `fetch(destination)` for customer-configured endpoints. The current probe agent accepts only normalized monitor jobs and must not be turned into a general-purpose proxy.
-
-## Verification
-
-Unit tests cover AES-GCM round trips, authenticated tenant/endpoint/field context, tampering, invalid keys, secret generation and destination syntax rejection. D1 integration tests cover endpoint authorization, tenant isolation, encryption at rest, one-time secret responses, rotation, deletion and limits. These tests do not send network requests or claim that outbound delivery is ready.
+Do not use ordinary `fetch(destination)` for customer-configured endpoints. The current probe agent accepts only normalized monitor jobs and must not be turned into a general-purpose proxy. Webhook delivery needs a separate narrowly-scoped authenticated operation with its own schema and outbound request policy.
 
 ## Signature format implemented for the future dispatcher
 
@@ -67,3 +78,9 @@ The future request header format is:
 `X-ZetuWatch-Signature: t=<timestamp>,v1=<64 lowercase hex characters>`
 
 Receivers must verify the raw body before JSON parsing, enforce a short timestamp tolerance (default five minutes), and deduplicate the stable event ID durably. A valid timestamped HMAC alone does not prevent replay within the allowed tolerance. The signing/verification primitive is unit-tested, but it is not yet wired to a network dispatcher and no signature header is currently sent.
+
+## Verification
+
+Unit tests cover AES-GCM round trips, authenticated tenant/endpoint/field context, tampering, invalid keys, secret generation, destination syntax rejection, exact-body HMAC signing and timestamp tolerance. D1 integration tests cover endpoint authorization, tenant isolation, encryption at rest, one-time secret responses, rotation, deletion, endpoint limits, outbox fan-out, public/internal event filtering, lease claim/reclaim, stale settlement rejection and attempt-log immutability.
+
+These tests make no DNS or HTTP request. They verify endpoint configuration and durable outbox state only; outbound webhook delivery remains disabled and is not counted as complete.
