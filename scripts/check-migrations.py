@@ -19,6 +19,7 @@ def main() -> None:
         "audit_logs", "auth_tokens", "auth_sessions", "auth_rate_limits",
         "organization_invitations", "api_keys", "notification_deliveries",
         "maintenance_windows", "status_pages", "status_page_monitors", "webhook_endpoints",
+        "webhook_deliveries", "webhook_delivery_attempts",
     }
     existing = {row[0] for row in db.execute(
         "SELECT name FROM sqlite_master WHERE type = 'table'"
@@ -75,6 +76,38 @@ def main() -> None:
     for index in ("idx_webhook_endpoints_org_destination", "idx_webhook_endpoints_org_active"):
         if index not in webhook_indexes:
             raise SystemExit(f"Missing {index}")
+
+    webhook_delivery_columns = {row[1] for row in db.execute("PRAGMA table_info(webhook_deliveries)")}
+    for column in (
+        "organization_id", "endpoint_id", "incident_id", "event_id", "status",
+        "attempt_count", "next_attempt_at", "lease_token", "lease_until",
+        "response_status", "last_error_code", "delivered_at",
+    ):
+        if column not in webhook_delivery_columns:
+            raise SystemExit(f"Missing webhook_deliveries.{column}")
+    webhook_delivery_indexes = {row[1] for row in db.execute("PRAGMA index_list(webhook_deliveries)")}
+    for index in (
+        "idx_webhook_deliveries_due", "idx_webhook_deliveries_org_time",
+        "idx_webhook_deliveries_endpoint_time",
+    ):
+        if index not in webhook_delivery_indexes:
+            raise SystemExit(f"Missing {index}")
+
+    webhook_attempt_columns = {row[1] for row in db.execute("PRAGMA table_info(webhook_delivery_attempts)")}
+    for column in ("delivery_id", "attempt_number", "status", "response_status", "error_code", "started_at", "completed_at"):
+        if column not in webhook_attempt_columns:
+            raise SystemExit(f"Missing webhook_delivery_attempts.{column}")
+    webhook_attempt_indexes = {row[1] for row in db.execute("PRAGMA index_list(webhook_delivery_attempts)")}
+    if "idx_webhook_delivery_attempts_delivery_time" not in webhook_attempt_indexes:
+        raise SystemExit("Missing idx_webhook_delivery_attempts_delivery_time")
+    trigger_names = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type = 'trigger'")}
+    for trigger in (
+        "webhook_delivery_tenant_guard", "webhook_delivery_identity_immutable",
+        "webhook_delivery_attempt_started", "webhook_delivery_attempts_append_only",
+        "webhook_delivery_enqueue_after_event",
+    ):
+        if trigger not in trigger_names:
+            raise SystemExit(f"Missing {trigger}")
     db.execute("INSERT INTO users (id, email, password_hash) VALUES ('u1', 'test@example.com', 'hash')")
     db.execute("INSERT INTO organizations (id, name, slug) VALUES ('o1', 'Test', 'test')")
     db.execute("INSERT INTO organization_members (organization_id, user_id, role) VALUES ('o1', 'u1', 'owner')")
