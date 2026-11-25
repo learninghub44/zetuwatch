@@ -135,3 +135,10 @@ The webhook endpoint integration suite uses the actual Worker entrypoint and iso
 The test encryption key is a deterministic, non-production Miniflare binding in vitest.config.mts. It must never be reused in a deployed environment. These tests make no DNS or HTTP request. They verify endpoint configuration only; webhook delivery remains disabled and is not counted as complete.
 
 Webhook HMAC unit tests verify exact raw-body signing, tamper detection, wrong-secret rejection, malformed headers, stale/future timestamps, invalid tolerance and payload-size bounds. These tests verify cryptographic primitives only; they do not prove a delivery worker or receiver integration.
+
+
+## Webhook outbox integration coverage
+
+The webhook outbox suite uses the actual Worker test runtime and isolated D1. It verifies that the migration creates a durable delivery row only for enabled, non-deleted endpoints in the incident's own workspace; internal customer-authored notes and internal status changes are excluded; a unique event/endpoint pair cannot be duplicated; database tenant guards reject cross-workspace endpoint references; and no destination URL or signing secret is copied into outbox rows.
+
+Lease tests verify bounded claims, overlap rejection, attempt-count increments, automatic started-attempt logging, retry scheduling, lease expiry/reclaim, stale-worker settlement rejection, terminal success and append-only completed attempt records. The retry policy has unit coverage for bounded delays, Retry-After hints and exhaustion. These tests exercise persistence and retry state only: they do not resolve customer DNS, open sockets, send webhook HTTP requests or enable endpoint delivery.
