@@ -129,3 +129,31 @@ BEGIN
       OR NEW.visibility = 'public'
     );
 END;
+
+
+-- Disabling/removing an endpoint cancels all pending work and closes any
+-- in-flight attempt log. A sender must still re-check the endpoint directly
+-- before network I/O because an already-open socket cannot be recalled.
+CREATE TRIGGER IF NOT EXISTS webhook_delivery_cancel_on_endpoint_disable
+AFTER UPDATE OF is_enabled, deleted_at ON webhook_endpoints
+WHEN NEW.is_enabled = 0 OR NEW.deleted_at IS NOT NULL
+BEGIN
+  UPDATE webhook_delivery_attempts
+  SET status = 'abandoned',
+      error_code = 'ENDPOINT_DISABLED',
+      completed_at = CURRENT_TIMESTAMP
+  WHERE status = 'started'
+    AND delivery_id IN (
+      SELECT id FROM webhook_deliveries
+      WHERE endpoint_id = NEW.id AND status = 'queued'
+    );
+
+  UPDATE webhook_deliveries
+  SET status = 'cancelled',
+      next_attempt_at = NULL,
+      lease_token = NULL,
+      lease_until = NULL,
+      last_error_code = 'ENDPOINT_DISABLED',
+      updated_at = CURRENT_TIMESTAMP
+  WHERE endpoint_id = NEW.id AND status = 'queued';
+END;
