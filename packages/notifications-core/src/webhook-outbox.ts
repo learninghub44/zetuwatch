@@ -1,5 +1,3 @@
-import { parseRetryAfter } from "./outbox";
-
 export const DEFAULT_WEBHOOK_CLAIM_LIMIT = 5;
 export const MAX_WEBHOOK_CLAIM_LIMIT = 10;
 export const DEFAULT_WEBHOOK_LEASE_MS = 90_000;
@@ -162,9 +160,9 @@ export async function settleWebhookDelivery(
   }
 
   const now = parseTimestamp(settlement.now ?? new Date(), "NOW");
-  let status: "sent" | "retry" | "failed";
+  let deliveryStatus: "sent" | "queued" | "failed";
   let deliverySql: string;
-  let deliveryBindings: unknown[];
+  let deliveryBindings: Array<string | number | null>;
   let attemptStatus: "sent" | "retry" | "failed";
   let responseStatus: number | null = settlement.responseStatus ?? null;
   let errorCode: string | null = null;
@@ -176,7 +174,7 @@ export async function settleWebhookDelivery(
         settlement.responseStatus < 200 || settlement.responseStatus > 299) {
       throw new Error("WEBHOOK_SUCCESS_STATUS_INVALID");
     }
-    status = "sent";
+    deliveryStatus = "sent";
     attemptStatus = "sent";
     deliverySql = `
       UPDATE webhook_deliveries
@@ -191,7 +189,7 @@ export async function settleWebhookDelivery(
   } else if (settlement.kind === "failed") {
     errorCode = settlement.errorCode.trim();
     if (!validErrorCode(errorCode)) throw new Error("WEBHOOK_ERROR_CODE_INVALID");
-    status = "failed";
+    deliveryStatus = "failed";
     attemptStatus = "failed";
     deliverySql = `
       UPDATE webhook_deliveries
@@ -221,7 +219,7 @@ export async function settleWebhookDelivery(
       ];
     } else {
       const nextAttemptAt = new Date(now.milliseconds + delay * 1000).toISOString();
-      status = "retry";
+      deliveryStatus = "queued";
       attemptStatus = "retry";
       deliverySql = `
         UPDATE webhook_deliveries
@@ -249,7 +247,7 @@ export async function settleWebhookDelivery(
     db.prepare(attemptSql).bind(
       attemptStatus, responseStatus, errorCode, now.iso,
       delivery.id, delivery.attemptCount,
-      delivery.id, delivery.attemptCount, status
+      delivery.id, delivery.attemptCount, deliveryStatus
     )
   ]);
 
