@@ -259,11 +259,11 @@ describe("durable webhook delivery outbox", () => {
     ]);
 
     const delivery = await env.DB.prepare(
-      "SELECT status, attempt_count AS attemptCount, response_status AS responseStatus, delivered_at AS deliveredAt FROM webhook_deliveries WHERE event_id = ?"
+      "SELECT status, attempt_count AS attemptCount, response_status AS responseStatus, delivered_at AS deliveredAt, next_attempt_at AS nextAttemptAt FROM webhook_deliveries WHERE event_id = ?"
     ).bind(event.eventId).first<{
-      status: string; attemptCount: number; responseStatus: number; deliveredAt: string | null;
+      status: string; attemptCount: number; responseStatus: number; deliveredAt: string | null; nextAttemptAt: string | null;
     }>();
-    expect(delivery).toMatchObject({ status: "sent", attemptCount: 3, responseStatus: 204 });
+    expect(delivery).toMatchObject({ status: "sent", attemptCount: 3, responseStatus: 204, nextAttemptAt: null });
     expect(delivery?.deliveredAt).toBeTruthy();
 
     await expect(env.DB.prepare(
