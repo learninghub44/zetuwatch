@@ -77,7 +77,10 @@ def main() -> None:
         if index not in webhook_indexes:
             raise SystemExit(f"Missing {index}")
 
-    webhook_delivery_columns = {row[1] for row in db.execute("PRAGMA table_info(webhook_deliveries)")}
+    webhook_delivery_info = {row[1]: row for row in db.execute("PRAGMA table_info(webhook_deliveries)")}
+    if webhook_delivery_info.get("next_attempt_at", (None, None, None, 1))[3] != 0:
+        raise SystemExit("webhook_deliveries.next_attempt_at must be nullable for terminal rows")
+    webhook_delivery_columns = set(webhook_delivery_info)
     for column in (
         "organization_id", "endpoint_id", "incident_id", "event_id", "status",
         "attempt_count", "next_attempt_at", "lease_token", "lease_until",
