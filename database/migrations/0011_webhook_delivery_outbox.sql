@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS webhook_deliveries (
   status TEXT NOT NULL DEFAULT 'queued'
     CHECK (status IN ('queued', 'sent', 'failed', 'cancelled')),
   attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count BETWEEN 0 AND 8),
-  next_attempt_at TEXT NOT NULL,
+  next_attempt_at TEXT,
   lease_token TEXT,
   lease_until TEXT,
   response_status INTEGER CHECK (response_status IS NULL OR response_status BETWEEN 100 AND 599),
@@ -21,7 +21,8 @@ CREATE TABLE IF NOT EXISTS webhook_deliveries (
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE (event_id, endpoint_id),
   CHECK ((lease_token IS NULL AND lease_until IS NULL) OR
-         (lease_token IS NOT NULL AND lease_until IS NOT NULL))
+         (lease_token IS NOT NULL AND lease_until IS NOT NULL)),
+  CHECK (status <> 'queued' OR next_attempt_at IS NOT NULL)
 );
 
 CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_due
