@@ -169,7 +169,7 @@ def main() -> None:
         if "WEBHOOK_DELIVERY_ATTEMPTS_IMMUTABLE" not in str(error):
             raise
     else:
-        raise SystemExit("Completed webhook attempt log was mutable")
+        raise SystemExit("Started webhook attempt row accepted an in-place mutation")
 
     violations = list(db.execute("PRAGMA foreign_key_check"))
     if violations:
