@@ -107,7 +107,7 @@ def main() -> None:
     for trigger in (
         "webhook_delivery_tenant_guard", "webhook_delivery_identity_immutable",
         "webhook_delivery_attempt_started", "webhook_delivery_attempts_append_only",
-        "webhook_delivery_enqueue_after_event",
+        "webhook_delivery_enqueue_after_event", "webhook_delivery_cancel_on_endpoint_disable",
     ):
         if trigger not in trigger_names:
             raise SystemExit(f"Missing {trigger}")
