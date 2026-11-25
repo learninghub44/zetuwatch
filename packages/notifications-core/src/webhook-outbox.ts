@@ -206,7 +206,7 @@ export async function settleWebhookDelivery(
     const delay = webhookRetryDelaySeconds(delivery.attemptCount, settlement.retryAfterSeconds);
     if (delay === null) {
       errorCode = "RETRY_EXHAUSTED_" + errorCode;
-      status = "failed";
+      deliveryStatus = "failed";
       attemptStatus = "failed";
       deliverySql = `
         UPDATE webhook_deliveries
