@@ -142,3 +142,10 @@ Webhook HMAC unit tests verify exact raw-body signing, tamper detection, wrong-s
 The webhook outbox suite uses the actual Worker test runtime and isolated D1. It verifies that the migration creates a durable delivery row only for enabled, non-deleted endpoints in the incident's own workspace; internal customer-authored notes and internal status changes are excluded; a unique event/endpoint pair cannot be duplicated; database tenant guards reject cross-workspace endpoint references; and no destination URL or signing secret is copied into outbox rows.
 
 Lease tests verify bounded claims, overlap rejection, attempt-count increments, automatic started-attempt logging, retry scheduling, lease expiry/reclaim, stale-worker settlement rejection, terminal success, endpoint-disable cancellation of queued and leased work, and append-only completed attempt records. The retry policy has unit coverage for bounded delays, Retry-After hints and exhaustion. These tests exercise persistence and retry state only: they do not resolve customer DNS, open sockets, send webhook HTTP requests or enable endpoint delivery.
+
+
+## Webhook egress agent coverage
+
+New Node tests cover strict webhook-job normalization, HTTPS-only/default-port destination policy, IP-literal and local/special-use hostname rejection, event-ID/body binding, timestamp freshness, canonical base64url and payload-size bounds, A/AAAA mixed-answer rejection, DNS pinning, preservation of the original hostname/SNI and TLS verification options, redirect non-following, bounded Retry-After parsing, response classification, total-deadline enforcement, Worker-to-agent HMAC signing, route authentication/replay protection and the separate webhook request-body limit.
+
+The focused runner, transport and Worker-client tests were executed locally with Node v22.16.0: 18 tests passed. The server-route integration tests have been added but were not executed in this local harness. Run \`npm run test:probe-agent\` and the full Vitest/D1 CI on the latest branch before treating the sender primitive as verified. These tests do not prove a production TLS handshake or live destination delivery.
