@@ -3,7 +3,7 @@ import { hashPassword, verifyPassword } from "../../../packages/auth-core/src/pa
 import { canDeleteMonitors, canWriteMonitors, canAssignRole, canInviteRole, canRemoveMember, isOrganizationRole } from "../../../packages/auth-core/src/authorization";
 import { dispatchDueMonitors, isProbeExecutionEnabled } from "../../../packages/scheduler-core/src/dispatch";
 import { dispatchNotificationBatch } from "../../../packages/notifications-core/src/dispatch";
-import { dispatchWebhookBatch } from "../../../packages/notifications-core/src/webhook-dispatch";
+import { dispatchWebhookBatch, isWebhookDeliveryConfigured } from "../../../packages/notifications-core/src/webhook-dispatch";
 import { createWebhookSecret, encryptWebhookValue, normalizeWebhookDestination, WEBHOOK_ENCRYPTION_KEY_VERSION } from "../../../packages/notifications-core/src/webhook-secrets";
 
 interface Env {
@@ -790,12 +790,13 @@ export default {
     const webhookCollectionMatch = url.pathname.match(/^\/v1\/organizations\/([0-9a-f-]{36})\/webhooks$/i);
     const webhookItemMatch = url.pathname.match(/^\/v1\/organizations\/([0-9a-f-]{36})\/webhooks\/([0-9a-f-]{36})$/i);
     const webhookRotateMatch = url.pathname.match(/^\/v1\/organizations\/([0-9a-f-]{36})\/webhooks\/([0-9a-f-]{36})\/rotate$/i);
-    if (webhookCollectionMatch || webhookItemMatch || webhookRotateMatch) {
+    const webhookHistoryMatch = url.pathname.match(/^\/v1\/organizations\/([0-9a-f-]{36})\/webhooks\/([0-9a-f-]{36})\/deliveries$/i);
+    if (webhookCollectionMatch || webhookItemMatch || webhookRotateMatch || webhookHistoryMatch) {
       const user = await currentUser(request, env);
       if (!user) return json({ error: "UNAUTHENTICATED" }, 401);
       if (user.authMethod === "api_key") return json({ error: "FORBIDDEN" }, 403);
-      const organizationId = (webhookCollectionMatch || webhookItemMatch || webhookRotateMatch)![1];
-      const endpointId = webhookItemMatch?.[2] || webhookRotateMatch?.[2];
+      const organizationId = (webhookCollectionMatch || webhookItemMatch || webhookRotateMatch || webhookHistoryMatch)![1];
+      const endpointId = webhookItemMatch?.[2] || webhookRotateMatch?.[2] || webhookHistoryMatch?.[2];
       const membership = await env.DB.prepare(
         "SELECT role FROM organization_members WHERE organization_id = ? AND user_id = ?"
       ).bind(organizationId, user.id).first<{ role: string }>();
@@ -812,7 +813,72 @@ export default {
           ORDER BY created_at DESC, id ASC
           LIMIT 10
         `).bind(organizationId).all();
-        return json({ endpoints: rows.results, deliveryEnabled: false });
+        return json({ endpoints: rows.results, deliveryConfigured: isWebhookDeliveryConfigured(env) });
+      }
+
+      if (webhookHistoryMatch && endpointId && request.method === "GET") {
+        if (!(await rateLimit(request, env, "webhook-delivery-history", 60))) return json({ error: "RATE_LIMITED" }, 429);
+        const endpoint = await env.DB.prepare(
+          "SELECT id FROM webhook_endpoints WHERE id = ? AND organization_id = ? AND deleted_at IS NULL"
+        ).bind(endpointId, organizationId).first<{ id: string }>();
+        if (!endpoint) return json({ error: "NOT_FOUND" }, 404);
+        const requestedLimit = Number(url.searchParams.get("limit") ?? "25");
+        const limit = Number.isInteger(requestedLimit) ? Math.min(50, Math.max(1, requestedLimit)) : 25;
+        const rows = await env.DB.prepare(`
+          SELECT d.id, ev.event_type AS eventType,
+            COALESCE(m.name, 'Monitor removed') AS monitorName,
+            d.status, d.attempt_count AS attemptCount,
+            d.response_status AS responseStatus,
+            d.last_error_code AS lastErrorCode,
+            d.created_at AS createdAt, d.delivered_at AS deliveredAt,
+            d.next_attempt_at AS nextAttemptAt, d.updated_at AS updatedAt
+          FROM webhook_deliveries d
+          JOIN incident_events ev ON ev.id = d.event_id AND ev.incident_id = d.incident_id
+          JOIN incidents i ON i.id = d.incident_id
+          LEFT JOIN monitors m ON m.id = i.monitor_id AND m.organization_id = d.organization_id
+          WHERE d.organization_id = ? AND d.endpoint_id = ?
+          ORDER BY d.created_at DESC, d.id DESC
+          LIMIT ?
+        `).bind(organizationId, endpointId, limit).all<{
+          id: string; eventType: string; monitorName: string; status: string;
+          attemptCount: number; responseStatus: number | null; lastErrorCode: string | null;
+          createdAt: string; deliveredAt: string | null; nextAttemptAt: string | null; updatedAt: string;
+        }>();
+        if (!rows.results.length) return json({ deliveries: [] });
+        const deliveryIds = rows.results.map(row => row.id);
+        const placeholders = deliveryIds.map(() => "?").join(",");
+        const attempts = await env.DB.prepare(`
+          SELECT id, delivery_id AS deliveryId, attempt_number AS attemptNumber,
+            status, response_status AS responseStatus, error_code AS errorCode,
+            started_at AS startedAt, completed_at AS completedAt
+          FROM webhook_delivery_attempts
+          WHERE delivery_id IN (${placeholders})
+          ORDER BY started_at DESC, attempt_number DESC
+        `).bind(...deliveryIds).all<{
+          id: string; deliveryId: string; attemptNumber: number; status: string;
+          responseStatus: number | null; errorCode: string | null;
+          startedAt: string; completedAt: string | null;
+        }>();
+        const attemptsByDelivery = new Map<string, Array<{
+          id: string; attemptNumber: number; status: string;
+          responseStatus: number | null; errorCode: string | null;
+          startedAt: string; completedAt: string | null;
+        }>>();
+        for (const attempt of attempts.results) {
+          const items = attemptsByDelivery.get(attempt.deliveryId) ?? [];
+          items.push({
+            id: attempt.id, attemptNumber: attempt.attemptNumber, status: attempt.status,
+            responseStatus: attempt.responseStatus, errorCode: attempt.errorCode,
+            startedAt: attempt.startedAt, completedAt: attempt.completedAt
+          });
+          attemptsByDelivery.set(attempt.deliveryId, items);
+        }
+        return json({
+          deliveries: rows.results.map(row => ({
+            ...row,
+            attempts: attemptsByDelivery.get(row.id) ?? []
+          }))
+        });
       }
 
       if (webhookCollectionMatch && request.method === "POST") {
@@ -887,7 +953,8 @@ export default {
             secretLast4: secret.slice(-4), isEnabled: 0, createdAt: now
           },
           secret,
-          deliveryEnabled: false
+          deliveryEnabled: false,
+          deliveryConfigured: isWebhookDeliveryConfigured(env)
         }, 201);
       }
 
@@ -920,7 +987,7 @@ export default {
             .bind(id(), organizationId, user.id, endpointId)
         ]);
         if ((results[0]?.meta?.changes ?? 0) !== 1) return json({ error: "NOT_FOUND" }, 404);
-        return json({ message: "Webhook signing secret rotated. Copy it now; it will not be shown again.", secret, deliveryEnabled: false });
+        return json({ message: "Webhook signing secret rotated. Copy it now; it will not be shown again.", secret, deliveryEnabled: false, deliveryConfigured: isWebhookDeliveryConfigured(env) });
       }
 
       if (webhookItemMatch && endpointId && request.method === "PATCH") {
@@ -929,22 +996,61 @@ export default {
         const parsedBody = await readJsonRecord(request);
         if (!parsedBody.ok) return json({ error: parsedBody.error === "too_large" ? "REQUEST_TOO_LARGE" : "INVALID_JSON" }, parsedBody.error === "too_large" ? 413 : 400);
         const body = parsedBody.value;
-        const name = typeof body?.name === "string" ? body.name.trim() : "";
-        if (!name || name.length > 80 || /[\u0000-\u001f\u007f]/.test(name)) {
-          return json({ error: "WEBHOOK_NAME_INVALID" }, 400);
+        const allowedKeys = new Set(["name", "enabled"]);
+        if (Object.keys(body).some(key => !allowedKeys.has(key)) ||
+            (body.name === undefined && body.enabled === undefined)) {
+          return json({ error: "INVALID_WEBHOOK_UPDATE" }, 400);
         }
+        let name: string | undefined;
+        if (body.name !== undefined) {
+          name = typeof body.name === "string" ? body.name.trim() : "";
+          if (!name || name.length > 80 || /[\\u0000-\\u001f\\u007f]/.test(name)) {
+            return json({ error: "WEBHOOK_NAME_INVALID" }, 400);
+          }
+        }
+        if (body.enabled !== undefined && typeof body.enabled !== "boolean") {
+          return json({ error: "INVALID_WEBHOOK_STATE" }, 400);
+        }
+        if (body.enabled === true && !isWebhookDeliveryConfigured(env)) {
+          return json({
+            error: "WEBHOOK_DELIVERY_NOT_CONFIGURED",
+            message: "The operator must enable the webhook dispatcher and configure its encryption key and trusted egress agent before this endpoint can be enabled."
+          }, 503);
+        }
+        const enabled = body.enabled === undefined ? null : body.enabled ? 1 : 0;
+        const action = body.enabled === true
+          ? "notification.webhook_endpoint_enabled"
+          : body.enabled === false
+            ? "notification.webhook_endpoint_disabled"
+            : "notification.webhook_endpoint_renamed";
+        const metadata: Record<string, unknown> = {};
+        if (name !== undefined) metadata.name = name;
+        if (body.enabled !== undefined) metadata.enabled = body.enabled;
         const now = new Date().toISOString();
         const results = await env.DB.batch([
-          env.DB.prepare("UPDATE webhook_endpoints SET name = ?, updated_at = ? WHERE id = ? AND organization_id = ? AND deleted_at IS NULL")
-            .bind(name, now, endpointId, organizationId),
+          env.DB.prepare(`UPDATE webhook_endpoints
+            SET name = COALESCE(?, name), is_enabled = COALESCE(?, is_enabled), updated_at = ?
+            WHERE id = ? AND organization_id = ? AND deleted_at IS NULL
+              AND (? IS NULL OR ? = 0 OR (
+                destination_ciphertext <> '' AND secret_ciphertext <> ''
+                AND encryption_key_version = ?
+              ))`)
+            .bind(name ?? null, enabled, now, endpointId, organizationId,
+              enabled, enabled, WEBHOOK_ENCRYPTION_KEY_VERSION),
           env.DB.prepare(`INSERT INTO audit_logs
             (id, organization_id, actor_user_id, action, resource_type, resource_id, metadata_json)
-            SELECT ?, ?, ?, 'notification.webhook_endpoint_renamed', 'webhook_endpoint', ?, ?
+            SELECT ?, ?, ?, ?, 'webhook_endpoint', ?, ?
             WHERE changes() = 1`)
-            .bind(id(), organizationId, user.id, endpointId, JSON.stringify({ name }))
+            .bind(id(), organizationId, user.id, action, endpointId, JSON.stringify(metadata))
         ]);
-        if ((results[0]?.meta?.changes ?? 0) !== 1) return json({ error: "NOT_FOUND" }, 404);
-        return json({ message: "Webhook endpoint renamed." });
+        if ((results[0]?.meta?.changes ?? 0) !== 1) return json({ error: "NOT_FOUND_OR_UNAVAILABLE" }, 404);
+        return json({
+          message: body.enabled === true ? "Webhook endpoint enabled." :
+            body.enabled === false ? "Webhook endpoint disabled and pending deliveries cancelled." :
+            "Webhook endpoint renamed.",
+          isEnabled: body.enabled === undefined ? undefined : body.enabled ? 1 : 0,
+          deliveryConfigured: isWebhookDeliveryConfigured(env)
+        });
       }
 
       if (webhookItemMatch && endpointId && request.method === "DELETE") {
