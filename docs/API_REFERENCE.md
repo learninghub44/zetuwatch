@@ -114,16 +114,19 @@ Disabling/removing a channel cancels queued work. It cannot recall an email alre
 Delivery history retains the channel creator identifier independently of the channel row. Removing a channel sets the delivery's channel reference to null but does not erase the delivery record; the original member can still inspect their own retained log while they remain in the workspace. Workspace owners/admins can inspect all retained delivery records.
 
 
-## Encrypted webhook endpoint configuration
+## Encrypted webhook endpoint configuration and delivery
 
-All routes require a verified browser session and organization membership. API keys are rejected. Only workspace owners/admins may create, rename, rotate or remove endpoints; members can read the safe metadata list.
+All routes require a verified browser session and organization membership. Read-only API keys are denied. Owners/admins may create, rename, enable/disable, rotate and remove endpoints; all workspace members may read safe metadata and delivery history.
 
-- GET /v1/organizations/{organizationId}/webhooks — returns endpoint ID, display name, destination hostname, last four signing-secret characters, enabled state and timestamps. It never returns the URL, ciphertext or secret.
-- POST /v1/organizations/{organizationId}/webhooks — body: {"name":"Production alerts","url":"https://hooks.example.com/events"}. Returns endpoint metadata and the new whsec_ secret once.
-- PATCH /v1/organizations/{organizationId}/webhooks/{endpointId} — body: {"name":"Updated name"}.
-- POST /v1/organizations/{organizationId}/webhooks/{endpointId}/rotate — returns a replacement signing secret once.
-- DELETE /v1/organizations/{organizationId}/webhooks/{endpointId} — scrubs encrypted URL/secret material and retains the audit event.
+- `GET /v1/organizations/{organizationId}/webhooks` — returns endpoint ID, name, destination hostname, secret suffix, enabled state, timestamps and `deliveryConfigured`. It never returns the URL, ciphertext or secret. `deliveryConfigured` describes operator configuration only; it does not prove agent reachability or receiver delivery.
+- `POST /v1/organizations/{organizationId}/webhooks` — body `{"name":"Production alerts","url":"https://hooks.example.com/events"}`. Returns a new `whsec_` secret once; new endpoints are disabled.
+- `PATCH /v1/organizations/{organizationId}/webhooks/{endpointId}` — rename with `{"name":"Updated name"}`, enable with `{"enabled":true}`, or disable with `{"enabled":false}`. Enabling requires `WEBHOOKS_ENABLED=true`, valid operator key/agent configuration, and successful decryption/authentication of the stored endpoint values. Disable remains available when operator delivery is unavailable.
+- `POST /v1/organizations/{organizationId}/webhooks/{endpointId}/rotate` — returns a replacement signing secret once.
+- `GET /v1/organizations/{organizationId}/webhooks/{endpointId}/deliveries?limit=25` — returns up to 50 recent delivery records with attempt number, status, response status, sanitized error code and timestamps. It never returns payloads, endpoint URLs, ciphertext or secrets.
+- `DELETE /v1/organizations/{organizationId}/webhooks/{endpointId}` — scrubs encrypted URL/secret material, disables the endpoint, cancels queued deliveries and retains the audit event.
 
-A workspace can configure up to 10 active endpoints. Creation accepts only syntactically valid HTTPS URLs without credentials, fragments, IP literals, obvious local/reserved host suffixes or non-default ports. This is not DNS validation. No DNS query or outbound HTTP request is made by these endpoints. deliveryEnabled is always false until a DNS-pinned delivery transport and durable webhook dispatcher are implemented and verified.
+A workspace may configure up to 10 active endpoint records. URL validation at creation is syntactic only; it does not resolve DNS. No test request or DNS query is made during creation, rename, rotation or enablement. Each actual delivery resolves and pins public A/AAAA answers in the dedicated agent.
 
-The Worker requires a 32-byte base64url WEBHOOK_ENCRYPTION_KEY secret. Endpoint URLs and signing secrets use AES-256-GCM with a fresh nonce and tenant/endpoint/field-bound additional authenticated data. See docs/WEBHOOK_DELIVERY.md for key setup and rotation limitations.
+The Worker requires a 32-byte base64url `WEBHOOK_ENCRYPTION_KEY`, a trusted HTTPS `PROBE_AGENT_URL` ending in `/v1/probe`, and a `PROBE_SHARED_SECRET` of at least 32 bytes. The non-secret `WEBHOOKS_ENABLED` variable defaults to `false` in `wrangler.toml`. The one-minute scheduled handler claims at most three webhook deliveries with at most two concurrent agent requests. Delivery uses 90-second leases and up to eight attempts with bounded backoff. It is at-least-once; receivers must verify `X-ZetuWatch-Signature` over the exact raw body and durably deduplicate `eventId`.
+
+See [WEBHOOK_DELIVERY.md](WEBHOOK_DELIVERY.md) for the payload contract, egress model, operator setup and outstanding verification gates.

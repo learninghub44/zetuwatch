@@ -107,29 +107,19 @@ This is a public information surface, not a live service-health assertion. Do no
 
 
 
-## Webhook endpoint configuration boundary
+## Webhook delivery security boundary
 
-- Endpoint URL and signing secret values are encrypted in the Worker before D1 writes using AES-256-GCM, a fresh 96-bit nonce and a 128-bit authentication tag.
-- Additional authenticated data binds each ciphertext to organization ID, endpoint ID, schema version and field purpose. Ciphertext cannot be moved between tenants, endpoints or URL/secret columns.
-- D1 stores only encrypted URL/secret values, a non-secret hostname label, a SHA-256 destination uniqueness hash and the last four secret characters. List APIs never return ciphertext or the secret.
-- The generated 256-bit whsec_ value is returned only on create/rotate. Removal scrubs ciphertext/nonces and disables the row while retaining an audit record.
-- The Worker requires a 32-byte base64url WEBHOOK_ENCRYPTION_KEY secret. Test-only key material exists only in Vitest configuration and must never be reused in production. Master-key rotation is not implemented; the encryption version is recorded as 1.
-- URL checks are syntactic only. They reject obvious local/IP destinations, but do not resolve DNS. Endpoint creation and rotation make no outbound network request, and every endpoint remains disabled.
-- Migration 0011 adds a D1 event outbox with a unique event/endpoint key, an insert trigger limited to enabled same-tenant endpoints, a tenant/event ownership guard and per-attempt history. Internal customer-authored notes and internal status changes are excluded. The outbox contains references only, never destination URLs or signing secrets.
-- The claim/settlement module adds bounded leases, eight-attempt retry policy, Retry-After handling, lease-expiry abandonment and stale-worker settlement rejection. A database trigger cancels queued work and abandons a started attempt when its endpoint is disabled or removed. Isolated SQLite and strict TypeScript checks passed, but the D1/Vitest integration suite and repository CI have not run for the current head. The public API has no endpoint activation route and the dispatcher does not call these primitives yet.
-- Do not dispatch webhooks until delivery-time A/AAAA validation, mixed-answer rejection, address pinning, TLS hostname verification, redirect-hop rejection/validation, deadlines, body limits, a narrowly scoped authenticated sender operation and production-like SSRF/idempotency tests are complete. Never call ordinary fetch(customerUrl).
+- Endpoint URL and signing secret values are encrypted in the Worker before D1 writes using AES-256-GCM, a fresh 96-bit nonce and a 128-bit authentication tag. Additional authenticated data binds each ciphertext to organization ID, endpoint ID, schema version and field purpose.
+- D1 stores encrypted URL/secret values, a non-secret hostname label, destination uniqueness hash and secret suffix. List/history APIs never return ciphertext, URL, payload or secret. Removal scrubs encrypted material and records an audit event.
+- The Worker requires a 32-byte base64url `WEBHOOK_ENCRYPTION_KEY`. The test-only key in Vitest configuration must never be reused in production. Master-key rotation is not implemented; encryption version 1 is recorded.
+- `WEBHOOKS_ENABLED` defaults to false. Endpoint activation requires operator configuration, successful decryption of both endpoint values with tenant-bound AAD, normalized URL/hash consistency and a valid signing secret. Activation performs no DNS query or test request.
+- Migration 0011 adds an event outbox with a unique event/endpoint key, tenant/event ownership guard and per-attempt history. Internal customer-authored notes and internal status changes are excluded. Outbox rows contain references only.
+- The scheduled Worker drains at most three webhook deliveries with two concurrent agent requests after the email batch and before monitor probes. Claims use 90-second leases and at most eight attempts. Settlement uses a live clock and rejects stale/expired lease tokens.
+- The Worker decrypts only inside the trusted dispatcher, signs the exact body with timestamped HMAC-SHA256, and rechecks endpoint enabled/deleted state, current lease and encrypted configuration immediately before the agent request. A concurrent disable cancels queued work and prevents stale settlement; it cannot recall an already-open socket.
+- The dedicated agent `/v1/webhook` operation is separate from `/v1/probe`. It revalidates HTTPS/default-port URLs, resolves every A/AAAA answer, rejects any non-public answer, pins the selected public address while preserving hostname/SNI/TLS verification, disables redirects, and enforces bounded DNS/total timeouts, request size, response headers and discarded response body. Never call ordinary `fetch(customerUrl)` or expose a generic proxy.
+- Delivery is at-least-once. Stable event IDs are included in signed payloads; receivers must durably deduplicate them and verify the exact raw body, timestamp and HMAC before parsing.
+- Focused agent tests exist, and new Worker/D1 dispatcher and API history tests have been added. The complete Vitest/D1 suite, repository TypeScript check, browser script check and production-like trusted-TLS/DNS-rebinding/idempotency run remain outstanding. No production secrets or endpoints are enabled.
 
-- A shared HMAC-SHA256 helper signs the exact raw webhook body with a Unix timestamp. Verification checks the exact bytes, rejects malformed/oversized payloads and stale/future timestamps, and uses Web Crypto MAC verification. This is a tested primitive only; no outbound webhook request is sent.
-- The unique event/endpoint key prevents duplicate outbox rows, but at-least-once network delivery can still repeat after an ambiguous timeout. Include a stable event ID in each signed payload and document receiver-side durable deduplication before enabling delivery.
-
-
-## Webhook egress boundary update (2026-11-26)
-
-- The Node agent now has a dedicated \`/v1/webhook\` operation; it is separate from \`/v1/probe\` and accepts only a bounded signed JSON POST job. Both routes share the existing outer HMAC timestamp/nonce authentication, replay cache, rate limit and concurrency cap.
-- Every webhook attempt revalidates the HTTPS destination, rejects IP literals, credentials, fragments, non-default ports, localhost/metadata names and local/special-use suffixes, resolves all A/AAAA answers, rejects any non-public answer, pins the selected public IP through the socket lookup, retains the original hostname for SNI/certificate verification, and uses \`rejectUnauthorized: true\`. Redirects are not followed.
-- Egress limits are 2.5 seconds for DNS, 15 seconds total, 256 KiB payload, 16 KiB response headers and 8 KiB discarded response body. Target response bodies and redirect locations are not returned to the Worker.
-- The Worker client signs its agent request with the existing shared secret and passes the exact workspace-signed payload bytes unchanged. It does not yet decrypt endpoint secrets or dispatch D1 outbox rows.
-- The endpoint API still performs syntax-only validation, makes no network request and creates disabled endpoints. There is no endpoint activation route, scheduled outbox dispatcher or delivery-history API/UI. Production delivery remains disabled.
-- Remaining security gates: recheck endpoint enabled/deleted state immediately before socket creation; connect claim/settlement to the Worker dispatcher and append-only delivery logs; add durable shared replay protection before multi-instance agent operation; execute trusted-certificate hostname/expiry tests and production-like DNS-rebinding, redirect, timeout, tenant-isolation and ambiguous-timeout/idempotency tests.
+The agent's nonce replay cache is process-local. Multi-instance operation still requires a shared durable replay store or a verified single-instance deployment policy.
 
 Never call ordinary \`fetch(customerUrl)\` or expose the agent as a generic URL proxy.

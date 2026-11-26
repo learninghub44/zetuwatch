@@ -128,24 +128,22 @@ Additional notification regression cases verify that delivery history remains vi
 The combined one-minute scheduled handler is covered by a D1 integration test that fires the Cron event without probe bindings and verifies no monitor lease or check is created. Email delivery is skipped when provider/sender configuration is absent.
 
 
-## Webhook endpoint configuration coverage
+## Webhook endpoint, dispatcher and history coverage
 
-The webhook endpoint integration suite uses the actual Worker entrypoint and isolated D1. It covers owner/admin mutation permissions, member/viewer denial, API-key denial, cross-tenant isolation, HTTPS destination syntax rejection, duplicate and ten-endpoint limits, encrypted URL/secret persistence, authenticated tenant/endpoint/field context, one-time secret responses, secret rotation, rename, removal scrubbing and audit records. Unit tests cover AES-GCM round trips, tampering, invalid key material, secret generation and local/IP destination rejection.
+The webhook endpoint integration suite uses the actual Worker entrypoint and isolated D1. It covers owner/admin mutation permissions, member/viewer denial, API-key denial, cross-tenant isolation, HTTPS destination syntax rejection, duplicate and ten-endpoint limits, encrypted URL/secret persistence, tenant/endpoint/field-bound AAD, one-time secret responses, secret rotation, rename, removal scrubbing and audit records. New cases cover operator-gated activation and tenant-scoped delivery history/attempt metadata without exposing endpoint secrets.
 
-The test encryption key is a deterministic, non-production Miniflare binding in vitest.config.mts. It must never be reused in a deployed environment. These tests make no DNS or HTTP request. They verify endpoint configuration only; webhook delivery remains disabled and is not counted as complete.
+The test encryption key is a deterministic, non-production Miniflare binding in `vitest.config.mts`. It must never be reused in a deployed environment. Endpoint creation, rename, rotation and activation make no DNS or HTTP request.
 
-Webhook HMAC unit tests verify exact raw-body signing, tamper detection, wrong-secret rejection, malformed headers, stale/future timestamps, invalid tolerance and payload-size bounds. These tests verify cryptographic primitives only; they do not prove a delivery worker or receiver integration.
+Webhook HMAC unit tests verify exact raw-body signing, tamper detection, wrong-secret rejection, malformed headers, stale/future timestamps, invalid tolerance and payload-size bounds.
 
+The webhook outbox suite verifies tenant-safe event fan-out, public/internal visibility filtering, unique event/endpoint idempotency, lease claims/reclaims, attempt logging, retry scheduling, stale settlement rejection, terminal success, endpoint-disable cancellation and append-only attempt history.
 
-## Webhook outbox integration coverage
+The new `tests/webhook-dispatch.integration.test.ts` injects a fake sender while exercising the actual D1 dispatcher. It covers successful signed-body delivery, event ID and payload shape, exclusion of private notes/target URLs, inclusion of explicitly public update text, transient 503 retry scheduling, endpoint disable during an in-flight request, and the default-off operator gate. It does not open an external socket or resolve customer DNS.
 
-The webhook outbox suite uses the actual Worker test runtime and isolated D1. It verifies that the migration creates a durable delivery row only for enabled, non-deleted endpoints in the incident's own workspace; internal customer-authored notes and internal status changes are excluded; a unique event/endpoint pair cannot be duplicated; database tenant guards reject cross-workspace endpoint references; and no destination URL or signing secret is copied into outbox rows.
-
-Lease tests verify bounded claims, overlap rejection, attempt-count increments, automatic started-attempt logging, retry scheduling, lease expiry/reclaim, stale-worker settlement rejection, terminal success, endpoint-disable cancellation of queued and leased work, and append-only completed attempt records. The retry policy has unit coverage for bounded delays, Retry-After hints and exhaustion. These tests exercise persistence and retry state only: they do not resolve customer DNS, open sockets, send webhook HTTP requests or enable endpoint delivery.
-
+The new `tests/webhook-endpoints.integration.test.ts` cases cover owner/admin activation policy, a 503 when operator configuration is absent, and delivery/attempt history tenant isolation. The history response is checked for absence of ciphertext, secrets and private incident text.
 
 ## Webhook egress agent coverage
 
-New Node tests cover strict webhook-job normalization, HTTPS-only/default-port destination policy, IP-literal and local/special-use hostname rejection, event-ID/body binding, timestamp freshness, canonical base64url and payload-size bounds, A/AAAA mixed-answer rejection, DNS pinning, preservation of the original hostname/SNI and TLS verification options, redirect non-following, bounded Retry-After parsing, response classification, total-deadline enforcement, Worker-to-agent HMAC signing, route authentication/replay protection and the separate webhook request-body limit.
+Node tests cover strict webhook-job normalization, HTTPS/default-port destination policy, IP-literal and local/special-use hostname rejection, event-ID/body binding, timestamp freshness, canonical base64url and payload-size bounds, A/AAAA mixed-answer rejection, DNS pinning, original hostname/SNI and TLS verification, redirect non-following, bounded Retry-After, response classification, total-deadline enforcement, Worker-to-agent HMAC signing, route authentication/replay protection and separate webhook request-body limits.
 
-The focused runner, transport and Worker-client tests were executed locally with Node v22.16.0: 18 tests passed. The server-route integration tests have been added but were not executed in this local harness. Run \`npm run test:probe-agent\` and the full Vitest/D1 CI on the latest branch before treating the sender primitive as verified. These tests do not prove a production TLS handshake or live destination delivery.
+The existing focused Node runner/transport/client suite previously passed 18 tests on Node v22.16.0. That does not verify the newly added Worker dispatcher. The new Worker/D1 tests and current full repository typecheck, inline browser script check, migration validation, Vitest suite and Node suite must run on the latest branch head before webhook delivery can be considered verified. No production TLS handshake or live receiver delivery has been performed.

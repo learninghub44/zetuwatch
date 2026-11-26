@@ -94,10 +94,14 @@ After save: take user to monitor detail with live/pending state; do not fabricat
 - Keep forms short, group related fields, preserve input on errors and show validation beside the field.
 
 
-## Alerts and webhook endpoint configuration
+## Alerts and webhook delivery
 
-- Workspace Alerts supports verified email channels and endpoint configuration for webhook receivers.
-- Owners/admins can create, rename, rotate and remove webhook endpoints; all workspace members can view only safe endpoint metadata.
-- A generated signing secret is displayed once on creation/rotation. The UI never writes it to localStorage or returns it in endpoint-list responses.
-- The endpoint URL and secret are encrypted before persistence. Endpoint creation does not send a test request or perform DNS resolution.
-- Every configured endpoint is visibly marked as paused while the DNS-pinned delivery transport and durable dispatcher are unfinished. The UI must not imply that a webhook was delivered or that a receiver was verified.
+- Workspace Alerts separates verified-email channels from webhook endpoints and keeps their delivery histories separate.
+- Owners/admins can create, rename, enable/disable, rotate and remove webhook endpoints. All workspace members can inspect safe endpoint metadata and per-endpoint delivery/attempt history.
+- The generated signing secret is displayed once on creation/rotation. The UI never writes it to localStorage or returns it in endpoint-list responses.
+- Endpoint URLs and secrets are encrypted before persistence. Creating or rotating an endpoint does not send a test request or perform DNS resolution.
+- New endpoints remain disabled. The Enable action is available only when the operator has explicitly configured the webhook dispatcher, encryption key and trusted agent. A configuration indicator is not a reachability check.
+- Delivery history shows event type, monitor, status, attempt count, response status, last sanitized error and bounded attempt details. It never displays the payload, URL, ciphertext or secret.
+- Disabling/removing an endpoint cancels queued deliveries. A request already opened cannot be recalled; a stale worker cannot settle a cancelled lease.
+- Webhook events use timestamped HMAC-SHA256 over the exact body and a stable event ID. Receivers must verify the signature before parsing and deduplicate event IDs durably because delivery is at-least-once.
+- Show an explicit paused/configuration-pending state while `WEBHOOKS_ENABLED` is false. Do not imply a receiver has been contacted or a delivery succeeded until a persisted attempt reports a 2xx response.
