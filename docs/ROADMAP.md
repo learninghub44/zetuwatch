@@ -336,3 +336,12 @@ No Cloudflare resources were created and no deployment was attempted. This is fe
 - Updated monitor list/detail UI with an amber "Check delayed" label and an explanation that the last stored result may be old.
 - Added D1-backed API coverage for a delayed monitor with an old successful check, a delayed monitor awaiting its first check, and the monitor-detail response. Existing fresh healthy/awaiting, suspect, incident, disabled and paused states remain covered.
 - The change has been committed to the monitoring integration pull request. The full GitHub Actions suite and browser E2E/accessibility checks must still pass before this state logic is treated as launch-verified.
+
+
+## Secure webhook egress operation (2026-11-26)
+
+- Added a separate authenticated \`POST /v1/webhook\` route to the Node agent and a Worker-side \`sendWebhookJob\` client. The route has a strict destination/event/payload/signature schema and shares the existing outer HMAC, timestamp/nonce replay protection, rate limiting and bounded active-egress quota.
+- The agent revalidates HTTPS/default-port URLs and blocks IP literals, credentials, fragments, localhost/metadata hosts and special-use suffixes; resolves A and AAAA records on each attempt; rejects any non-public answer; pins the selected public IP through the HTTPS socket lookup; preserves the original hostname for SNI and certificate verification; requires normal TLS certificate validation; and never follows redirects.
+- Added bounded request/response handling (256 KiB payload, 16 KiB response headers, 8 KiB discarded response body), 2.5-second DNS and 15-second total deadlines, bounded Retry-After parsing, normalized error results and regression tests for URL policy, mixed DNS answers, pinning, redirects, timeouts, response classification and agent request signing.
+- The focused Node runner/transport/client tests passed locally (18 tests) on Node v22.16.0. Additional server-route tests cover the separate body limit, invalid job rejection and replay protection across probe/webhook routes, but have not yet run in the full repository test command.
+- This does **not** complete webhook delivery: the scheduled Worker does not yet drain the D1 outbox through the new client; endpoint activation and delivery-history API/UI are absent; the dispatcher must recheck endpoint state immediately before network I/O; and full repository CI, trusted-certificate/TLS, DNS-rebinding, tenant-isolation and production-like end-to-end tests remain outstanding. All endpoints remain disabled; no customer request has been sent.
