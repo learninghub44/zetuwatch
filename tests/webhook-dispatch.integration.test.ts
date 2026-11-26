@@ -92,21 +92,22 @@ describe("scheduled webhook dispatcher", () => {
     const event = await createIncidentEvent(identity);
     const now = new Date();
 
-    let captured: { destinationUrl: string; eventId: string; payload: string; signatureHeader: string } | null = null;
+    const captured: { job?: { destinationUrl: string; eventId: string; payload: string; signatureHeader: string } } = {};
     const summary = await dispatchWebhookBatch(dispatchEnv(), {
       now,
       clock: () => new Date(now.getTime() + 1_000),
       sender: async (_agentUrl, _agentSecret, job) => {
-        captured = job;
+        captured.job = job;
         return { delivered: true, responseStatus: 204, errorCode: null, retryAfterSeconds: null };
       }
     });
 
     expect(summary).toMatchObject({ skipped: false, claimed: 1, sent: 1, retried: 0, failed: 0, stale: 0 });
-    expect(captured).not.toBeNull();
-    expect(captured?.destinationUrl).toContain("hooks.customer.example.com");
-    expect(captured?.eventId).toBe(event.eventId);
-    const payload = JSON.parse(captured!.payload) as Record<string, unknown>;
+    expect(captured.job).toBeDefined();
+    const sentJob = captured.job!;
+    expect(sentJob.destinationUrl).toContain("hooks.customer.example.com");
+    expect(sentJob.eventId).toBe(event.eventId);
+    const payload = JSON.parse(sentJob.payload) as Record<string, unknown>;
     expect(payload).toMatchObject({
       eventId: event.eventId,
       type: "incident.opened",
@@ -116,13 +117,13 @@ describe("scheduled webhook dispatcher", () => {
         incident: { id: event.incidentId, status: "investigating" }
       }
     });
-    expect(captured!.payload).not.toContain("Internal diagnostic detail");
-    expect(captured!.payload).not.toContain("Internal incident summary");
-    expect(captured!.payload).not.toContain("https://api.example.com");
+    expect(sentJob.payload).not.toContain("Internal diagnostic detail");
+    expect(sentJob.payload).not.toContain("Internal incident summary");
+    expect(sentJob.payload).not.toContain("https://api.example.com");
     await expect(verifyWebhookSignature(
       endpoint.secret,
-      captured!.payload,
-      captured!.signatureHeader,
+      sentJob.payload,
+      sentJob.signatureHeader,
       Math.floor((now.getTime() + 1_000) / 1000)
     )).resolves.toBe(true);
 

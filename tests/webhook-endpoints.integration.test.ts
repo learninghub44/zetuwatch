@@ -252,7 +252,7 @@ describe("encrypted webhook endpoint configuration", () => {
         .bind(monitorId, owner.organizationId, "Billing API", "https://billing.example.com/health"),
       env.DB.prepare("INSERT INTO incidents (id, monitor_id, started_at, status, summary) VALUES (?, ?, ?, 'resolved', ?)")
         .bind(incidentId, monitorId, startedAt, "Private summary"),
-      env.DB.prepare("INSERT INTO incident_events (id, incident_id, event_type, message, created_at, visibility) VALUES (?, ?, 'incident.resolved', 'Private note', ?, 'internal')")
+      env.DB.prepare("INSERT INTO incident_events (id, incident_id, event_type, message, created_at, visibility) VALUES (?, ?, 'incident.opened', 'Private note', ?, 'internal')")
         .bind(eventId, incidentId, completedAt),
       env.DB.prepare(`INSERT INTO webhook_deliveries (
         id, organization_id, endpoint_id, incident_id, event_id, status,
@@ -271,7 +271,7 @@ describe("encrypted webhook endpoint configuration", () => {
     const payload = await history.json() as { deliveries: Array<Record<string, unknown>> };
     expect(payload.deliveries).toHaveLength(1);
     expect(payload.deliveries[0]).toMatchObject({
-      eventType: "incident.resolved",
+      eventType: "incident.opened",
       monitorName: "Billing API",
       status: "sent",
       attemptCount: 1,
