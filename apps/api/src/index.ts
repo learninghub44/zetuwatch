@@ -4,7 +4,8 @@ import { canDeleteMonitors, canWriteMonitors, canAssignRole, canInviteRole, canR
 import { dispatchDueMonitors, isProbeExecutionEnabled } from "../../../packages/scheduler-core/src/dispatch";
 import { dispatchNotificationBatch } from "../../../packages/notifications-core/src/dispatch";
 import { dispatchWebhookBatch, isWebhookDeliveryConfigured } from "../../../packages/notifications-core/src/webhook-dispatch";
-import { createWebhookSecret, encryptWebhookValue, normalizeWebhookDestination, WEBHOOK_ENCRYPTION_KEY_VERSION } from "../../../packages/notifications-core/src/webhook-secrets";
+import { createWebhookSecret, decryptWebhookValue, encryptWebhookValue, normalizeWebhookDestination, WEBHOOK_ENCRYPTION_KEY_VERSION } from "../../../packages/notifications-core/src/webhook-secrets";
+import { signWebhookPayload } from "../../../packages/notifications-core/src/webhook-signing";
 
 interface Env {
   DB: D1Database;
@@ -1011,11 +1012,53 @@ export default {
         if (body.enabled !== undefined && typeof body.enabled !== "boolean") {
           return json({ error: "INVALID_WEBHOOK_STATE" }, 400);
         }
-        if (body.enabled === true && !isWebhookDeliveryConfigured(env)) {
-          return json({
-            error: "WEBHOOK_DELIVERY_NOT_CONFIGURED",
-            message: "The operator must enable the webhook dispatcher and configure its encryption key and trusted egress agent before this endpoint can be enabled."
-          }, 503);
+        if (body.enabled === true) {
+          const storedEndpoint = await env.DB.prepare(`
+            SELECT destination_hash AS destinationHash,
+              destination_ciphertext AS destinationCiphertext,
+              destination_nonce AS destinationNonce,
+              secret_ciphertext AS secretCiphertext,
+              secret_nonce AS secretNonce,
+              encryption_key_version AS encryptionKeyVersion
+            FROM webhook_endpoints
+            WHERE id = ? AND organization_id = ? AND deleted_at IS NULL
+          `).bind(endpointId, organizationId).first<{
+            destinationHash: string; destinationCiphertext: string; destinationNonce: string;
+            secretCiphertext: string; secretNonce: string; encryptionKeyVersion: number;
+          }>();
+          if (!storedEndpoint) return json({ error: "NOT_FOUND" }, 404);
+          if (!isWebhookDeliveryConfigured(env)) {
+            return json({
+              error: "WEBHOOK_DELIVERY_NOT_CONFIGURED",
+              message: "The operator must enable the webhook dispatcher and configure its encryption key and trusted egress agent before this endpoint can be enabled."
+            }, 503);
+          }
+          if (storedEndpoint.encryptionKeyVersion !== WEBHOOK_ENCRYPTION_KEY_VERSION || !env.WEBHOOK_ENCRYPTION_KEY) {
+            return json({ error: "WEBHOOK_ENCRYPTION_KEY_VERSION_UNSUPPORTED" }, 409);
+          }
+          try {
+            const context = `zetuwatch:webhook:v${storedEndpoint.encryptionKeyVersion}:${organizationId}:${endpointId}`;
+            const [destination, signingSecret] = await Promise.all([
+              decryptWebhookValue({
+                ciphertext: storedEndpoint.destinationCiphertext,
+                nonce: storedEndpoint.destinationNonce
+              }, env.WEBHOOK_ENCRYPTION_KEY, context + ":url"),
+              decryptWebhookValue({
+                ciphertext: storedEndpoint.secretCiphertext,
+                nonce: storedEndpoint.secretNonce
+              }, env.WEBHOOK_ENCRYPTION_KEY, context + ":secret")
+            ]);
+            const normalized = normalizeWebhookDestination(destination);
+            if (normalized.url !== destination || await sha256(destination) !== storedEndpoint.destinationHash) {
+              throw new Error("WEBHOOK_ENDPOINT_DATA_MISMATCH");
+            }
+            await signWebhookPayload(signingSecret, "{}", Math.floor(Date.now() / 1000));
+          } catch {
+            return json({
+              error: "WEBHOOK_ENDPOINT_CONFIGURATION_INVALID",
+              message: "The endpoint could not be decrypted or authenticated with the currently configured encryption key."
+            }, 409);
+          }
         }
         const enabled = body.enabled === undefined ? null : body.enabled ? 1 : 0;
         const action = body.enabled === true
