@@ -288,11 +288,13 @@ export async function dispatchWebhookBatch(
     throw new Error("WEBHOOK_DISPATCH_CONCURRENCY_INVALID");
   }
 
-  const fixedNow = options.now === undefined ? null : toDate(options.now);
-  const clock = options.clock ?? (() => fixedNow ? new Date(fixedNow.getTime()) : new Date());
-  const now = toDate(clock());
+  // The optional now value controls only which work is due at claim time.
+  // Lease checks and settlement must use a live clock so a long request cannot
+  // settle against an expired lease using the invocation's stale start time.
+  const clock = options.clock ?? (() => new Date());
+  const claimNow = options.now === undefined ? toDate(clock()) : toDate(options.now);
   const deliveries = await claimDueWebhookDeliveries(env.DB, {
-    now,
+    now: claimNow,
     leaseMs: LEASE_MS,
     limit
   });
