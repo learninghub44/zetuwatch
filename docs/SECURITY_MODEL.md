@@ -121,3 +121,15 @@ This is a public information surface, not a live service-health assertion. Do no
 
 - A shared HMAC-SHA256 helper signs the exact raw webhook body with a Unix timestamp. Verification checks the exact bytes, rejects malformed/oversized payloads and stale/future timestamps, and uses Web Crypto MAC verification. This is a tested primitive only; no outbound webhook request is sent.
 - The unique event/endpoint key prevents duplicate outbox rows, but at-least-once network delivery can still repeat after an ambiguous timeout. Include a stable event ID in each signed payload and document receiver-side durable deduplication before enabling delivery.
+
+
+## Webhook egress boundary update (2026-11-26)
+
+- The Node agent now has a dedicated \`/v1/webhook\` operation; it is separate from \`/v1/probe\` and accepts only a bounded signed JSON POST job. Both routes share the existing outer HMAC timestamp/nonce authentication, replay cache, rate limit and concurrency cap.
+- Every webhook attempt revalidates the HTTPS destination, rejects IP literals, credentials, fragments, non-default ports, localhost/metadata names and local/special-use suffixes, resolves all A/AAAA answers, rejects any non-public answer, pins the selected public IP through the socket lookup, retains the original hostname for SNI/certificate verification, and uses \`rejectUnauthorized: true\`. Redirects are not followed.
+- Egress limits are 2.5 seconds for DNS, 15 seconds total, 256 KiB payload, 16 KiB response headers and 8 KiB discarded response body. Target response bodies and redirect locations are not returned to the Worker.
+- The Worker client signs its agent request with the existing shared secret and passes the exact workspace-signed payload bytes unchanged. It does not yet decrypt endpoint secrets or dispatch D1 outbox rows.
+- The endpoint API still performs syntax-only validation, makes no network request and creates disabled endpoints. There is no endpoint activation route, scheduled outbox dispatcher or delivery-history API/UI. Production delivery remains disabled.
+- Remaining security gates: recheck endpoint enabled/deleted state immediately before socket creation; connect claim/settlement to the Worker dispatcher and append-only delivery logs; add durable shared replay protection before multi-instance agent operation; execute trusted-certificate hostname/expiry tests and production-like DNS-rebinding, redirect, timeout, tenant-isolation and ambiguous-timeout/idempotency tests.
+
+Never call ordinary \`fetch(customerUrl)\` or expose the agent as a generic URL proxy.
