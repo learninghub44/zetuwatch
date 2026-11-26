@@ -820,8 +820,8 @@ export default {
       if (webhookHistoryMatch && endpointId && request.method === "GET") {
         if (!(await rateLimit(request, env, "webhook-delivery-history", 60))) return json({ error: "RATE_LIMITED" }, 429);
         const endpoint = await env.DB.prepare(
-          "SELECT id FROM webhook_endpoints WHERE id = ? AND organization_id = ? AND deleted_at IS NULL"
-        ).bind(endpointId, organizationId).first<{ id: string }>();
+          "SELECT id, is_enabled AS isEnabled FROM webhook_endpoints WHERE id = ? AND organization_id = ? AND deleted_at IS NULL"
+        ).bind(endpointId, organizationId).first<{ id: string; isEnabled: number }>();
         if (!endpoint) return json({ error: "NOT_FOUND" }, 404);
         const requestedLimit = Number(url.searchParams.get("limit") ?? "25");
         const limit = Number.isInteger(requestedLimit) ? Math.min(50, Math.max(1, requestedLimit)) : 25;
@@ -988,7 +988,7 @@ export default {
             .bind(id(), organizationId, user.id, endpointId)
         ]);
         if ((results[0]?.meta?.changes ?? 0) !== 1) return json({ error: "NOT_FOUND" }, 404);
-        return json({ message: "Webhook signing secret rotated. Copy it now; it will not be shown again.", secret, deliveryEnabled: false, deliveryConfigured: isWebhookDeliveryConfigured(env) });
+        return json({ message: "Webhook signing secret rotated. Copy it now; it will not be shown again.", secret, deliveryEnabled: endpoint.isEnabled === 1 && isWebhookDeliveryConfigured(env), deliveryConfigured: isWebhookDeliveryConfigured(env) });
       }
 
       if (webhookItemMatch && endpointId && request.method === "PATCH") {
