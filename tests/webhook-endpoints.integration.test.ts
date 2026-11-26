@@ -211,6 +211,84 @@ describe("encrypted webhook endpoint configuration", () => {
     expect(audit?.total).toBe(4);
   });
 
+  it("gates endpoint activation on operator configuration and enforces admin permissions", async () => {
+    const owner = await createIdentity("owner");
+    const endpoint = await createEndpoint(owner);
+    const member = await createIdentity("member");
+    await env.DB.prepare("INSERT INTO organization_members (organization_id, user_id, role) VALUES (?, ?, 'member')")
+      .bind(owner.organizationId, member.userId).run();
+
+    const memberEnable = await api(`/v1/organizations/${owner.organizationId}/webhooks/${endpoint.id}`, member, {
+      method: "PATCH", body: { enabled: true }
+    });
+    expect(memberEnable.status).toBe(403);
+
+    const ownerEnable = await api(`/v1/organizations/${owner.organizationId}/webhooks/${endpoint.id}`, owner, {
+      method: "PATCH", body: { enabled: true }
+    });
+    expect(ownerEnable.status).toBe(503);
+    expect(await ownerEnable.json()).toMatchObject({ error: "WEBHOOK_DELIVERY_NOT_CONFIGURED" });
+
+    const ownerDisable = await api(`/v1/organizations/${owner.organizationId}/webhooks/${endpoint.id}`, owner, {
+      method: "PATCH", body: { enabled: false }
+    });
+    expect(ownerDisable.status).toBe(200);
+    const stored = await env.DB.prepare("SELECT is_enabled FROM webhook_endpoints WHERE id = ?")
+      .bind(endpoint.id).first<{ is_enabled: number }>();
+    expect(stored?.is_enabled).toBe(0);
+  });
+
+  it("returns tenant-scoped delivery and attempt history without exposing endpoint secrets", async () => {
+    const owner = await createIdentity("owner");
+    const endpoint = await createEndpoint(owner);
+    const monitorId = crypto.randomUUID();
+    const incidentId = crypto.randomUUID();
+    const eventId = crypto.randomUUID();
+    const now = new Date().toISOString();
+    const startedAt = new Date(Date.now() - 10_000).toISOString();
+    const completedAt = new Date(Date.now() - 5_000).toISOString();
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO monitors (id, organization_id, name, target_url) VALUES (?, ?, ?, ?)")
+        .bind(monitorId, owner.organizationId, "Billing API", "https://billing.example.com/health"),
+      env.DB.prepare("INSERT INTO incidents (id, monitor_id, started_at, status, summary) VALUES (?, ?, ?, 'resolved', ?)")
+        .bind(incidentId, monitorId, startedAt, "Private summary"),
+      env.DB.prepare("INSERT INTO incident_events (id, incident_id, event_type, message, created_at, visibility) VALUES (?, ?, 'incident.resolved', 'Private note', ?, 'internal')")
+        .bind(eventId, incidentId, completedAt),
+      env.DB.prepare(`INSERT INTO webhook_deliveries (
+        id, organization_id, endpoint_id, incident_id, event_id, status,
+        attempt_count, next_attempt_at, response_status, delivered_at, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, 'sent', 1, NULL, 204, ?, ?, ?)`)
+        .bind(crypto.randomUUID(), owner.organizationId, endpoint.id, incidentId, eventId, completedAt, now, now),
+      env.DB.prepare(`INSERT INTO webhook_delivery_attempts (
+        id, delivery_id, attempt_number, status, response_status, error_code, started_at, completed_at
+      ) SELECT ?, id, 1, 'sent', 204, NULL, ?, ?
+        FROM webhook_deliveries WHERE event_id = ? AND endpoint_id = ?`)
+        .bind(crypto.randomUUID(), startedAt, completedAt, eventId, endpoint.id)
+    ]);
+
+    const history = await api(`/v1/organizations/${owner.organizationId}/webhooks/${endpoint.id}/deliveries`, owner);
+    expect(history.status).toBe(200);
+    const payload = await history.json() as { deliveries: Array<Record<string, unknown>> };
+    expect(payload.deliveries).toHaveLength(1);
+    expect(payload.deliveries[0]).toMatchObject({
+      eventType: "incident.resolved",
+      monitorName: "Billing API",
+      status: "sent",
+      attemptCount: 1,
+      responseStatus: 204,
+      attempts: [{ attemptNumber: 1, status: "sent", responseStatus: 204 }]
+    });
+    const serialized = JSON.stringify(payload);
+    expect(serialized).not.toContain("destination_ciphertext");
+    expect(serialized).not.toContain("secret_ciphertext");
+    expect(serialized).not.toContain("Private note");
+    expect(serialized).not.toContain("Private summary");
+
+    const foreign = await createIdentity("owner");
+    const denied = await api(`/v1/organizations/${owner.organizationId}/webhooks/${endpoint.id}/deliveries`, foreign);
+    expect(denied.status).toBe(403);
+  });
+
   it("rejects oversized JSON before parsing endpoint configuration", async () => {
     const owner = await createIdentity("owner");
     const response = await exports.default.fetch(new Request(
