@@ -70,6 +70,7 @@ const RETRYABLE_ERRORS = new Set([
   "REMOTE_RATE_LIMITED",
   "REMOTE_SERVER_ERROR",
   "REMOTE_RESPONSE_INVALID",
+  "WEBHOOK_DECRYPT_FAILED",
   "WEBHOOK_AGENT_UNAVAILABLE",
   "WEBHOOK_AGENT_AUTH_FAILED",
   "WEBHOOK_AGENT_INVALID_RESPONSE",
@@ -362,7 +363,13 @@ export async function dispatchWebhookBatch(
         message === "WEBHOOK_PAYLOAD_TOO_LARGE"
         ? message
         : "WEBHOOK_DECRYPT_FAILED";
-      await settle(delivery, { kind: "failed", errorCode: code }, "failed");
+      if (code === "WEBHOOK_DECRYPT_FAILED") {
+        // A key may be temporarily misconfigured during operator rotation.
+        // Preserve the event for bounded retry instead of losing the alert.
+        await settle(delivery, { kind: "retry", errorCode: code }, "retried");
+      } else {
+        await settle(delivery, { kind: "failed", errorCode: code }, "failed");
+      }
       return;
     }
 

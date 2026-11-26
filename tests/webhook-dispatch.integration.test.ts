@@ -201,6 +201,29 @@ describe("scheduled webhook dispatcher", () => {
     expect(row).toEqual({ status: "cancelled", leaseToken: null });
   });
 
+  it("retries a decrypt failure so a temporarily rotated operator key does not drop an alert", async () => {
+    const identity = await createIdentity();
+    const endpoint = await createEndpoint(identity);
+    const event = await createIncidentEvent(identity);
+    const now = new Date();
+    const wrongKey = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
+    const summary = await dispatchWebhookBatch({
+      ...dispatchEnv(),
+      WEBHOOK_ENCRYPTION_KEY: wrongKey
+    }, {
+      now,
+      clock: () => new Date(now.getTime() + 1_000),
+      sender: async () => {
+        throw new Error("Sender must not run when endpoint decryption fails.");
+      }
+    });
+    expect(summary).toMatchObject({ claimed: 1, retried: 1, failed: 0 });
+    const row = await env.DB.prepare(
+      "SELECT status, attempt_count AS attemptCount, last_error_code AS lastErrorCode FROM webhook_deliveries WHERE event_id = ? AND endpoint_id = ?"
+    ).bind(event.eventId, endpoint.id).first<{ status: string; attemptCount: number; lastErrorCode: string }>();
+    expect(row).toEqual({ status: "queued", attemptCount: 1, lastErrorCode: "WEBHOOK_DECRYPT_FAILED" });
+  });
+
   it("does not claim or mutate deliveries when the operator has not explicitly enabled webhooks", async () => {
     const identity = await createIdentity();
     const endpoint = await createEndpoint(identity);
