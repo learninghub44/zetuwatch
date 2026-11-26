@@ -85,3 +85,30 @@ Until those gates pass, scheduled monitoring stays disabled and public status pa
 The agent creates an isolated Node `dns/promises.Resolver` for each hostname, limits the resolver to one attempt per query, and uses one shared deadline for the A/AAAA pair. If that deadline expires, it calls `resolver.cancel()` before returning `DNS_TIMEOUT`; a timed-out target therefore cannot leave DNS queries running after the probe slot has been released. This uses the documented Node resolver timeout, retry and cancellation APIs: https://nodejs.org/api/dns.html#class-dnspromisesresolver.
 
 The total deadline is recomputed after every DNS resolution. If DNS consumes the remaining budget, no HTTP socket is opened; otherwise the transport receives only the remaining time, not the stale pre-DNS budget.
+
+
+## Authenticated webhook egress operation
+
+The agent now exposes a separate \`POST /v1/webhook\` operation. It is not a general-purpose proxy and does not accept arbitrary methods, headers or redirect policies. It shares the existing Worker-to-agent HMAC authentication, timestamp window, nonce replay guard, source-IP rate limit and bounded active-egress quota with \`/v1/probe\`.
+
+The normalized job contains only:
+- \`destinationUrl\`: one HTTPS destination on the default port;
+- \`eventId\`: a stable UUID/hex event identifier;
+- \`payloadBase64\`: canonical base64url for the exact JSON payload bytes (maximum 256 KiB);
+- \`signatureHeader\`: the workspace HMAC header, \`t=<10-digit timestamp>,v1=<64 lowercase hex>\`.
+
+For each attempt the agent:
+1. Revalidates the destination URL, rejects IP literals, credentials, fragments, non-default ports, local/special-use hostnames and blocked suffixes.
+2. Resolves A and AAAA records with the existing isolated, cancellable Node resolver (2.5-second DNS budget).
+3. Rejects the entire answer set if any returned address is non-public.
+4. Pins the selected public address through \`https.request\`'s custom \`lookup\` callback while preserving the original hostname for Host, SNI and certificate-name verification (\`rejectUnauthorized: true\`).
+5. Sends one POST only. Redirects are never followed; a 3xx response is returned as \`REDIRECT_BLOCKED\`.
+6. Enforces a 15-second total operation deadline, 256 KiB request payload, 16 KiB response-header limit and 8 KiB discarded response-body limit. Only status and a bounded Retry-After hint are returned; response bodies and Location values are not persisted or exposed.
+
+The Worker-side \`sendWebhookJob\` client targets only the fixed \`/v1/webhook\` path on the already validated agent origin, signs the agent request with the existing shared secret, disables redirects/credentials/cache, and validates a small response schema.
+
+This is an egress primitive, not an enabled product integration: the scheduled Worker does not call it yet, endpoint activation remains unavailable, and the D1 outbox is not being drained. Do not enable customer delivery until the Worker dispatcher, endpoint-state recheck, durable delivery logs, retry settlement and production-like TLS/DNS/SSRF tests are connected and verified.
+
+Implementation relies on Node's documented \`https.request()\` TLS options (\`servername\`, \`rejectUnauthorized\`, custom lookup via request options) and isolated \`dns/promises.Resolver\` timeout/cancellation behavior:
+- https://nodejs.org/download/release/latest-jod/docs/api/https.html#httpsrequestoptions-callback
+- https://nodejs.org/download/release/v22.18.0/docs/api/dns.html#class-dnspromisesresolver
