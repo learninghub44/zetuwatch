@@ -732,7 +732,7 @@ async function loadWebhookDeliveryHistory(endpointId){
     }
     for(const item of deliveries){
       const row=document.createElement("tr");
-      const event=document.createElement("td");event.textContent=String(item.eventType||"incident event").replace(/^incident\\./,"").replace(/_/g," ");
+      const event=document.createElement("td");event.textContent=String(item.eventType||"incident event").replace(/^incident\./,"").replace(/_/g," ");
       const monitor=document.createElement("td");monitor.textContent=item.monitorName||"Monitor removed";
       const status=document.createElement("td");status.textContent=String(item.status||"unknown").replace(/_/g," ");
       const attempts=document.createElement("td");attempts.textContent=String(item.attemptCount??0);
@@ -740,7 +740,7 @@ async function loadWebhookDeliveryHistory(endpointId){
       const updated=document.createElement("td");updated.textContent=formatIncidentDate(item.deliveredAt||item.nextAttemptAt||item.updatedAt||item.createdAt);
       const details=document.createElement("td");details.textContent=item.lastErrorCode||"—";
       if(Array.isArray(item.attempts)&&item.attempts.length){
-        details.title=item.attempts.map(attempt=>"Attempt "+attempt.attemptNumber+": "+attempt.status+(attempt.responseStatus?" · HTTP "+attempt.responseStatus:"")+(attempt.errorCode?" · "+attempt.errorCode:"")).join("\\n");
+        details.title=item.attempts.map(attempt=>"Attempt "+attempt.attemptNumber+": "+attempt.status+(attempt.responseStatus?" · HTTP "+attempt.responseStatus:"")+(attempt.errorCode?" · "+attempt.errorCode:"")).join(" | ");
       }
       row.append(event,monitor,status,attempts,response,updated,details);
       $("webhook-delivery-rows").appendChild(row);
