@@ -3,6 +3,7 @@ import { hashPassword, verifyPassword } from "../../../packages/auth-core/src/pa
 import { canDeleteMonitors, canWriteMonitors, canAssignRole, canInviteRole, canRemoveMember, isOrganizationRole } from "../../../packages/auth-core/src/authorization";
 import { dispatchDueMonitors, isProbeExecutionEnabled } from "../../../packages/scheduler-core/src/dispatch";
 import { dispatchNotificationBatch } from "../../../packages/notifications-core/src/dispatch";
+import { dispatchWebhookBatch } from "../../../packages/notifications-core/src/webhook-dispatch";
 import { createWebhookSecret, encryptWebhookValue, normalizeWebhookDestination, WEBHOOK_ENCRYPTION_KEY_VERSION } from "../../../packages/notifications-core/src/webhook-secrets";
 
 interface Env {
@@ -12,6 +13,7 @@ interface Env {
   RESEND_API_KEY?: string;
   EMAIL_FROM?: string;
   WEBHOOK_ENCRYPTION_KEY?: string;
+  WEBHOOKS_ENABLED?: string;
   PROBES_ENABLED?: string;
   PROBE_AGENT_URL?: string;
   PROBE_SHARED_SECRET?: string;
@@ -1469,8 +1471,8 @@ export default {
     const startedAt = new Date();
     const schedulerLagMs = Math.max(0, startedAt.getTime() - controller.scheduledTime);
 
-    // Run bounded email delivery before probes so the two batches do not
-    // compete for Cloudflare's simultaneous outbound-connection slots.
+    // Run the bounded email and webhook batches before monitor probes. Each
+    // workload is sequential at the Worker level and has its own concurrency cap.
     try {
       const notifications = await dispatchNotificationBatch(env, { now: startedAt, limit: 5 });
       if (notifications.skipped) {
@@ -1480,6 +1482,19 @@ export default {
       }
     } catch {
       console.error("notification_dispatch_failed", { schedulerLagMs });
+    }
+
+    try {
+      const webhooks = await dispatchWebhookBatch(env, { now: startedAt, limit: 3, concurrency: 2 });
+      if (webhooks.skipped) {
+        if (webhooks.reason !== "WEBHOOKS_DISABLED") {
+          console.info("webhook_dispatch_skipped", { reason: webhooks.reason, schedulerLagMs });
+        }
+      } else if (webhooks.claimed > 0) {
+        console.info("webhook_dispatch_completed", { ...webhooks, schedulerLagMs });
+      }
+    } catch {
+      console.error("webhook_dispatch_failed", { schedulerLagMs });
     }
 
     try {
