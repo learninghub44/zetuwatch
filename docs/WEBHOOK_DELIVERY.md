@@ -85,3 +85,16 @@ Receivers must verify the raw body before JSON parsing, enforce a short timestam
 Unit tests cover AES-GCM round trips, authenticated tenant/endpoint/field context, tampering, invalid keys, secret generation, destination syntax rejection, exact-body HMAC signing and timestamp tolerance. D1 integration tests cover endpoint authorization, tenant isolation, encryption at rest, one-time secret responses, rotation, deletion, endpoint limits, outbox fan-out, public/internal event filtering, lease claim/reclaim, stale settlement rejection and attempt-log immutability.
 
 These tests make no DNS or HTTP request. They verify endpoint configuration and durable outbox state only; outbound webhook delivery remains disabled and is not counted as complete.
+
+
+## Dedicated egress operation implemented (2026-11-26)
+
+A separate authenticated \`POST /v1/webhook\` operation now exists in the Node probe agent. It accepts a strict one-destination POST job and reuses the Worker-to-agent HMAC authentication, nonce replay protection, source-IP rate limiting and active-egress quota. The Worker-side \`sendWebhookJob\` client serializes the payload as canonical base64url, signs the outer agent request and validates the bounded result schema.
+
+The agent revalidates HTTPS/default-port URL syntax, rejects IP literals and local/special-use hostnames, resolves all A/AAAA answers on every attempt, rejects mixed public/private answer sets, pins one public address through the HTTPS request's custom lookup, preserves the original hostname for SNI/certificate verification, sets \`rejectUnauthorized: true\`, and never follows redirects. It limits DNS to 2.5 seconds, total execution to 15 seconds, payload to 256 KiB, response headers to 16 KiB and discarded response bodies to 8 KiB. It returns only a status, bounded error code and bounded Retry-After hint.
+
+The agent does not decrypt workspace webhook secrets. The Worker must decrypt the endpoint secret and create the timestamped HMAC header before submitting the job. The agent passes those exact signed payload bytes and signature header to the destination.
+
+**Not yet enabled:** the scheduled Worker does not call this route, there is no endpoint activation action, no delivery-history API/UI is connected, and the outbox is not drained. The earlier statement that a separate sender operation was still missing is superseded by this implementation; the remaining blockers are Worker dispatch integration, endpoint-state rechecks immediately before network I/O, durable delivery-log wiring, and production-like TLS/DNS-rebinding/SSRF/idempotency verification. All configured endpoints remain disabled and no customer webhook request has been sent.
+
+The focused Node tests cover URL policy, mixed DNS answers, pinned lookup/SNI/TLS options, redirect rejection, bounded response and request sizes, Retry-After parsing, result classification and Worker-to-agent request signing. The complete repository Node suite and CI still need to run on the current branch.
