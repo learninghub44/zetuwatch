@@ -355,3 +355,11 @@ No Cloudflare resources were created and no deployment was attempted. This is fe
 - Added owner/admin endpoint activation with a global configuration gate and per-endpoint decrypt/hash/signing-key verification. Added tenant-scoped delivery history and attempt-log API. The Alerts UI now exposes endpoint enable/disable controls and separate webhook history without displaying payloads or secrets.
 - Added `tests/webhook-dispatch.integration.test.ts` for exact-body signatures, payload privacy, public update handling, transient retries, disable-during-send behavior and the default-off gate. Extended endpoint integration tests for activation authorization, operator configuration blocking and delivery-history tenant isolation.
 - The new D1/Vitest tests and the full pinned TypeScript 5.9.3, browser inline-JS, migration-validator and Node agent suites have **not yet run on this head**. Keep the roadmap item unchecked and keep `WEBHOOKS_ENABLED=false` until current-head CI and production-like DNS/TLS/SSRF/idempotency tests pass. No customer webhook has been sent.
+
+
+### Webhook lease acquisition clock correction (2026-11-26)
+
+- Fixed a lease-duration bug in the sequential Cron pipeline: the webhook dispatcher previously used the Cron invocation timestamp both as the due-work cutoff and as the start of its 90-second lease. Because email delivery runs first, a slow email batch could consume part of the webhook lease before any webhook was claimed.
+- Split the claim clock into a due-work cutoff and an actual lease-acquisition time. The dispatcher keeps the invocation timestamp for selecting work that was due when the Cron run began, but starts the lease and checks expired leases against the live time when webhook dispatch actually begins. Preflight and settlement continue to use the live clock.
+- Added a D1-backed regression test that simulates an 80-second delay between Cron start and webhook claim and asserts that the claimed delivery receives the full 90-second lease from actual claim time.
+- This is a scheduling correctness fix, not evidence of successful external delivery. The full current-head TypeScript/Vitest/migration/browser/probe-agent CI and production-like DNS/TLS/SSRF/Worker-to-agent verification remain outstanding. Keep webhook delivery disabled until those launch gates pass.
