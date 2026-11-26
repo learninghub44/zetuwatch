@@ -291,8 +291,13 @@ export async function dispatchWebhookBatch(
   // settle against an expired lease using the invocation's stale start time.
   const clock = options.clock ?? (() => new Date());
   const claimNow = options.now === undefined ? toDate(clock()) : toDate(options.now);
+  // Cron passes its invocation timestamp for the due-work cutoff, but earlier
+  // email delivery can delay this batch. Start the lease at the actual claim
+  // time so sequential workloads do not consume the webhook lease in advance.
+  const leaseNow = toDate(clock());
   const deliveries = await claimDueWebhookDeliveries(env.DB, {
     now: claimNow,
+    leaseNow,
     leaseMs: LEASE_MS,
     limit
   });
