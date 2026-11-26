@@ -67,7 +67,7 @@ The Worker sends a JSON payload with:
 - `type`: `incident.opened`, `incident.monitoring`, `incident.resolved`, `incident.reopened`, `incident.status_changed` or `incident.update`.
 - `createdAt`: normalized ISO-8601 event timestamp.
 - `data.workspace.name`, `data.monitor.name` and `data.incident.id/status`.
-- Public incident summary/message only when the source timeline event is explicitly public.
+- The event message only when the source timeline event is explicitly public. Incident summaries are not included because they are not a separately governed public field.
 
 The payload excludes the monitor target URL, response body, request headers, credentials, private incident notes and internal update text. The body is bounded to 256 KiB.
 

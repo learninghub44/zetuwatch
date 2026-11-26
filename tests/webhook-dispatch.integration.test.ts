@@ -157,6 +157,7 @@ describe("scheduled webhook dispatcher", () => {
     });
     expect(summary.sent).toBe(1);
     expect(payloadText).toContain("We have identified the issue");
+    expect(payloadText).not.toContain("Internal incident summary");
     expect(JSON.parse(payloadText)).toMatchObject({ eventId: event.eventId, type: "incident.update" });
   });
 

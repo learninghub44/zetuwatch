@@ -42,7 +42,6 @@ interface WebhookDeliveryContext {
   organizationName: string;
   monitorName: string;
   incidentStatus: string;
-  incidentSummary: string | null;
   eventType: string;
   eventVisibility: string;
   eventMessage: string | null;
@@ -142,7 +141,6 @@ async function loadDeliveryContext(
       o.name AS organizationName,
       m.name AS monitorName,
       i.status AS incidentStatus,
-      i.summary AS incidentSummary,
       ev.event_type AS eventType,
       ev.visibility AS eventVisibility,
       ev.message AS eventMessage,
@@ -234,7 +232,6 @@ function buildWebhookPayload(
     id: delivery.incidentId,
     status: safeText(context.incidentStatus, 40)
   };
-  if (isPublic && context.incidentSummary) incident.summary = safeText(context.incidentSummary, 500);
   const data: Record<string, unknown> = {
     workspace: { name: safeText(context.organizationName, 80) },
     monitor: { name: safeText(context.monitorName, 80) },
@@ -416,10 +413,25 @@ export async function dispatchWebhookBatch(
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "";
-      const code = /^WEBHOOK_AGENT_[A-Z0-9_]{1,48}$/.test(message)
+      const code = /^[A-Z][A-Z0-9_]{0,63}$/.test(message)
         ? message
         : "WEBHOOK_AGENT_UNAVAILABLE";
-      await settle(delivery, { kind: "retry", errorCode: code }, "retried");
+      const permanentErrors = new Set([
+        "WEBHOOK_AGENT_ENDPOINT_INVALID",
+        "WEBHOOK_AGENT_TIMEOUT_INVALID",
+        "WEBHOOK_AGENT_SECRET_REQUIRED",
+        "WEBHOOK_DESTINATION_INVALID",
+        "WEBHOOK_JOB_INVALID",
+        "WEBHOOK_EVENT_ID_INVALID",
+        "WEBHOOK_PAYLOAD_INVALID",
+        "WEBHOOK_SIGNATURE_INVALID",
+        "WEBHOOK_SIGNATURE_STALE"
+      ]);
+      if (permanentErrors.has(code)) {
+        await settle(delivery, { kind: "failed", errorCode: code }, "failed");
+      } else {
+        await settle(delivery, { kind: "retry", errorCode: code }, "retried");
+      }
       return;
     }
 
