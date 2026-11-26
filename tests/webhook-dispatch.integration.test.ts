@@ -236,4 +236,38 @@ describe("scheduled webhook dispatcher", () => {
     ).bind(endpoint.id).first<{ status: string; attemptCount: number }>();
     expect(row).toEqual({ status: "queued", attemptCount: 0 });
   });
+
+  it("starts the lease at actual claim time after an earlier Cron workload", async () => {
+    const identity = await createIdentity();
+    await createEndpoint(identity);
+    const event = await createIncidentEvent(identity);
+    const invocationAt = new Date(Date.now() - 80_000);
+    const actualClaimAt = new Date(invocationAt.getTime() + 80_000);
+
+    // The event was already due when this Cron invocation began. The email
+    // batch may consume most of the 90-second webhook lease before this
+    // dispatcher is reached, so lease expiry must use the actual claim time.
+    await env.DB.prepare(
+      "UPDATE webhook_deliveries SET next_attempt_at = ? WHERE event_id = ?"
+    ).bind(invocationAt.toISOString(), event.eventId).run();
+
+    let observedLeaseUntil: string | null = null;
+    const summary = await dispatchWebhookBatch(dispatchEnv(), {
+      now: invocationAt,
+      clock: () => actualClaimAt,
+      sender: async () => {
+        const row = await env.DB.prepare(
+          "SELECT lease_until AS leaseUntil FROM webhook_deliveries WHERE event_id = ?"
+        ).bind(event.eventId).first<{ leaseUntil: string }>();
+        observedLeaseUntil = row?.leaseUntil ?? null;
+        return { delivered: true, responseStatus: 204, errorCode: null, retryAfterSeconds: null };
+      }
+    });
+
+    expect(summary).toMatchObject({ claimed: 1, sent: 1, stale: 0 });
+    expect(observedLeaseUntil).toBe(
+      new Date(actualClaimAt.getTime() + 90_000).toISOString()
+    );
+  });
+
 });
