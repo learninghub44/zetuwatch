@@ -250,7 +250,7 @@ describe("encrypted webhook endpoint configuration", () => {
     await env.DB.batch([
       env.DB.prepare("INSERT INTO monitors (id, organization_id, name, target_url) VALUES (?, ?, ?, ?)")
         .bind(monitorId, owner.organizationId, "Billing API", "https://billing.example.com/health"),
-      env.DB.prepare("INSERT INTO incidents (id, monitor_id, started_at, status, summary) VALUES (?, ?, ?, 'resolved', ?)")
+      env.DB.prepare("INSERT INTO incidents (id, monitor_id, started_at, status, summary) VALUES (?, ?, ?, 'investigating', ?)")
         .bind(incidentId, monitorId, startedAt, "Private summary"),
       env.DB.prepare("INSERT INTO incident_events (id, incident_id, event_type, message, created_at, visibility) VALUES (?, ?, 'incident.opened', 'Private note', ?, 'internal')")
         .bind(eventId, incidentId, completedAt),

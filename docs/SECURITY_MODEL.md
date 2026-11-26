@@ -121,5 +121,3 @@ This is a public information surface, not a live service-health assertion. Do no
 - Focused agent tests exist, and new Worker/D1 dispatcher and API history tests have been added. The complete Vitest/D1 suite, repository TypeScript check, browser script check and production-like trusted-TLS/DNS-rebinding/idempotency run remain outstanding. No production secrets or endpoints are enabled.
 
 The agent's nonce replay cache is process-local. Multi-instance operation still requires a shared durable replay store or a verified single-instance deployment policy.
-
-Never call ordinary \`fetch(customerUrl)\` or expose the agent as a generic URL proxy.
