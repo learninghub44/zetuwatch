@@ -187,3 +187,99 @@ test("bounds concurrent probe execution", async () => {
     await close(server);
   }
 });
+
+
+function webhookJobBody(extraBytes = 0) {
+  const eventId = "6a9b0f2e-1c4d-4e7a-9b12-123456789abc";
+  const payload = JSON.stringify({
+    eventId,
+    type: "incident.opened",
+    createdAt: new Date().toISOString(),
+    data: { detail: "x".repeat(extraBytes) }
+  });
+  return JSON.stringify({
+    destinationUrl: "https://hooks.customer.com/events",
+    eventId,
+    payloadBase64: Buffer.from(payload).toString("base64url"),
+    signatureHeader: "t=" + String(Math.floor(Date.now() / 1000)) + ",v1=" + "a".repeat(64)
+  });
+}
+
+test("accepts a signed webhook job larger than the probe request limit", async () => {
+  let called = 0;
+  const handler = createProbeHandler({
+    secret,
+    webhook: async received => {
+      called += 1;
+      assert.equal(received.destinationUrl, "https://hooks.customer.com/events");
+      assert.equal(received.eventId, "6a9b0f2e-1c4d-4e7a-9b12-123456789abc");
+      assert.equal(Buffer.isBuffer(received.body), true);
+      assert.ok(received.body.length > 16 * 1024);
+      return { delivered: true, responseStatus: 204, errorCode: null, retryAfterSeconds: null };
+    }
+  });
+  const server = createServer((request, response) => { void handler(request, response); });
+  const port = await listen(server);
+  try {
+    const response = await send(port, {
+      path: "/v1/webhook",
+      body: webhookJobBody(20 * 1024),
+      nonce: "webhook-route-nonce-000000000001"
+    });
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      result: { delivered: true, responseStatus: 204, errorCode: null, retryAfterSeconds: null }
+    });
+    assert.equal(called, 1);
+  } finally { await close(server); }
+});
+
+test("rejects malformed webhook jobs before invoking the egress adapter", async () => {
+  let called = 0;
+  const handler = createProbeHandler({ secret, webhook: async () => { called += 1; throw new Error("must not run"); } });
+  const server = createServer((request, response) => { void handler(request, response); });
+  const port = await listen(server);
+  try {
+    const response = await send(port, {
+      path: "/v1/webhook",
+      body: "{}",
+      nonce: "webhook-invalid-job-nonce-000001"
+    });
+    assert.equal(response.status, 400);
+    assert.deepEqual(await response.json(), { error: "INVALID_WEBHOOK_JOB" });
+    assert.equal(called, 0);
+  } finally { await close(server); }
+});
+
+test("applies a separate bounded webhook request-body limit", async () => {
+  const handler = createProbeHandler({ secret, webhook: async () => { throw new Error("must not run"); } });
+  const server = createServer((request, response) => { void handler(request, response); });
+  const port = await listen(server);
+  try {
+    const response = await send(port, {
+      path: "/v1/webhook",
+      body: "x".repeat(361 * 1024),
+      nonce: "webhook-too-large-nonce-0000001"
+    });
+    assert.equal(response.status, 413);
+    assert.deepEqual(await response.json(), { error: "BODY_TOO_LARGE" });
+  } finally { await close(server); }
+});
+
+test("shares replay protection across probe and webhook egress operations", async () => {
+  const handler = createProbeHandler({
+    secret,
+    probe: async () => ({ isUp: true, statusCode: 200, responseTimeMs: 1, errorCode: null, redirectCount: 0 }),
+    webhook: async () => ({ delivered: true, responseStatus: 204, errorCode: null, retryAfterSeconds: null })
+  });
+  const server = createServer((request, response) => { void handler(request, response); });
+  const port = await listen(server);
+  try {
+    const nonce = "shared-egress-replay-nonce-000001";
+    const first = await send(port, { nonce });
+    assert.equal(first.status, 200);
+    const replay = await send(port, { path: "/v1/webhook", body: webhookJobBody(), nonce });
+    assert.equal(replay.status, 409);
+    assert.deepEqual(await replay.json(), { error: "REPLAYED_REQUEST" });
+  } finally { await close(server); }
+});
