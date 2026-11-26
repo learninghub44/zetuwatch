@@ -3,15 +3,17 @@ import { readFileSync } from "node:fs";
 import { createServer as createHttpsServer } from "node:https";
 import { pathToFileURL } from "node:url";
 import { runProbe, normalizeProbeInput } from "./runner.mjs";
+import { runWebhook, normalizeWebhookInput } from "./webhook-runner.mjs";
 
 const MAX_BODY_BYTES = 16 * 1024;
+const MAX_WEBHOOK_JOB_BYTES = 360 * 1024;
 const MAX_CLOCK_SKEW_SECONDS = 60;
 const NONCE_TTL_MS = 5 * 60 * 1000;
 const MAX_NONCES = 10_000;
 const RATE_WINDOW_MS = 60_000;
 const RATE_LIMIT = 300;
 const MAX_RATE_BUCKETS = 5_000;
-const MAX_ACTIVE_PROBES = 20;
+const MAX_ACTIVE_EGRESS = 20;
 
 function sendJson(response, status, body) {
   response.writeHead(status, {
@@ -129,6 +131,7 @@ export function createProbeHandler(options = {}) {
     throw new Error("PROBE_SHARED_SECRET_REQUIRED");
   }
   const probe = options.probe ?? runProbe;
+  const webhook = options.webhook ?? runWebhook;
   const now = options.now ?? (() => Date.now());
   const nonces = new Map();
   const clock = createNonDecreasingClock(now);
@@ -140,7 +143,9 @@ export function createProbeHandler(options = {}) {
       sendJson(response, 200, { status: "ok" });
       return;
     }
-    if (request.method !== "POST" || request.url !== "/v1/probe") {
+    const isProbeRoute = request.method === "POST" && request.url === "/v1/probe";
+    const isWebhookRoute = request.method === "POST" && request.url === "/v1/webhook";
+    if (!isProbeRoute && !isWebhookRoute) {
       sendJson(response, 404, { error: "NOT_FOUND" });
       return;
     }
@@ -150,7 +155,7 @@ export function createProbeHandler(options = {}) {
       sendJson(response, 429, { error: "RATE_LIMITED" });
       return;
     }
-    if (active >= MAX_ACTIVE_PROBES) {
+    if (active >= MAX_ACTIVE_EGRESS) {
       sendJson(response, 429, { error: "CAPACITY_EXCEEDED" });
       return;
     }
@@ -166,7 +171,7 @@ export function createProbeHandler(options = {}) {
         return;
       }
       let body;
-      try { body = await readBody(request, MAX_BODY_BYTES); }
+      try { body = await readBody(request, isWebhookRoute ? MAX_WEBHOOK_JOB_BYTES : MAX_BODY_BYTES); }
       catch (error) {
         sendJson(response, error?.message === "BODY_TOO_LARGE" ? 413 : 400, { error: error?.message === "BODY_TOO_LARGE" ? "BODY_TOO_LARGE" : "INVALID_REQUEST" });
         return;
@@ -202,13 +207,18 @@ export function createProbeHandler(options = {}) {
       nonces.set(nonce, nonceExpiresAt);
 
       let job;
-      try { job = normalizeProbeInput(JSON.parse(body)); }
-      catch { sendJson(response, 400, { error: "INVALID_PROBE_JOB" }); return; }
+      try {
+        const parsed = JSON.parse(body);
+        job = isWebhookRoute ? normalizeWebhookInput(parsed, currentTime) : normalizeProbeInput(parsed);
+      } catch {
+        sendJson(response, 400, { error: isWebhookRoute ? "INVALID_WEBHOOK_JOB" : "INVALID_PROBE_JOB" });
+        return;
+      }
 
-      const result = await probe(job);
+      const result = isWebhookRoute ? await webhook(job) : await probe(job);
       sendJson(response, 200, { result });
     } catch {
-      if (!response.headersSent) sendJson(response, 502, { error: "PROBE_FAILED" });
+      if (!response.headersSent) sendJson(response, 502, { error: isWebhookRoute ? "WEBHOOK_FAILED" : "PROBE_FAILED" });
       else response.destroy();
     } finally {
       active -= 1;
