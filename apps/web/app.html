@@ -74,7 +74,7 @@
     </div>
     <p style="font-size:11px;color:var(--muted);line-height:1.6;margin:10px 0 0">Endpoint URLs and signing secrets are encrypted before storage. Creating or rotating an endpoint never sends a network request. Delivery stays disabled until DNS-pinned outbound transport, redirect validation and durable retries are verified. Workspace owners and admins can manage endpoints; all members can view safe metadata.</p>
     <div class="panel-head" style="padding:20px 0 10px;margin-top:12px">
-      <div><h3 style="font-size:13px;margin:0">Delivery history</h3><span>Latest queued and sent incident notifications</span></div>
+      <div><h3 style="font-size:13px;margin:0">Email delivery history</h3><span>Latest verified-email notification deliveries</span></div>
       <button class="btn" id="alert-delivery-refresh" type="button">Refresh</button>
     </div>
     <div style="overflow-x:auto">
@@ -83,7 +83,18 @@
         <tbody id="alert-delivery-rows"><tr><td colspan="7">Loading delivery history…</td></tr></tbody>
       </table>
     </div>
-    <p style="font-size:11px;color:var(--muted);line-height:1.6;margin:14px 0 0">Disabling or removing a channel cancels queued deliveries. A message already accepted by the email provider cannot be recalled. Webhook endpoint configuration is available, but outbound webhook delivery remains disabled until the DNS-pinned transport and durable dispatcher are verified.</p>
+    <div class="panel-head" style="padding:20px 0 10px;margin-top:20px">
+      <div><h3 style="font-size:13px;margin:0">Webhook delivery history</h3><span id="webhook-history-title">Choose an endpoint to inspect attempts</span></div>
+      <button class="btn" id="webhook-delivery-refresh" type="button">Refresh</button>
+    </div>
+    <div style="overflow-x:auto">
+      <table>
+        <thead><tr><th>Event</th><th>Monitor</th><th>Status</th><th>Attempts</th><th>Response</th><th>Updated</th><th>Last error</th></tr></thead>
+        <tbody id="webhook-delivery-rows"><tr><td colspan="7">Select History on a webhook endpoint.</td></tr></tbody>
+      </table>
+    </div>
+    <p style="font-size:11px;color:var(--muted);line-height:1.6;margin:14px 0 0">Disabling or removing an endpoint cancels queued deliveries. A request already opened cannot be recalled. Delivery is available only when the operator has explicitly enabled the dispatcher and configured the encryption key and trusted DNS-pinning agent.</p>
+    <p style="font-size:11px;color:var(--muted);line-height:1.6;margin:10px 0 0">Email and webhook delivery histories are separate. Webhook payloads include a stable event ID; receivers should verify the timestamped HMAC signature and deduplicate that ID because retries are at-least-once.</p>
   </div>
 </section>
 <section class="panel" id="team" style="margin-top:22px"><div class="panel-head"><div><h2>Workspace team</h2><span>Manage access to this workspace</span></div><span id="team-count">Loading…</span></div><div style="padding:18px 19px"><div id="team-message" class="notice hidden" role="status" aria-live="polite"></div><form id="invite-form" class="row" style="align-items:end;margin-bottom:18px;grid-template-columns:minmax(0,1fr) 180px auto"><div class="field" style="margin:0"><label for="invite-email">Invite by email</label><input id="invite-email" type="email" required maxlength="254" placeholder="teammate@example.com"></div><div class="field" style="margin:0"><label for="invite-role">Workspace role</label><select id="invite-role"><option value="member">Member</option><option value="viewer">Viewer</option><option value="admin">Admin</option></select></div><button class="btn primary" id="invite-submit" type="submit">Send invitation</button></form><div style="overflow-x:auto"><table><thead><tr><th>Member</th><th>Email</th><th>Role</th><th>Joined</th><th></th></tr></thead><tbody id="team-rows"><tr><td colspan="5">Loading members…</td></tr></tbody></table></div><div id="pending-invitations" style="margin-top:22px"><h3 style="font-size:13px;margin:0 0 10px">Pending invitations</h3><div id="invitation-rows" style="font-size:12px;color:var(--muted)">Loading invitations…</div></div></div></section><section class="panel" id="api-keys" style="margin-top:22px">
@@ -110,7 +121,7 @@
 <div class="wizard-actions"><button class="btn" type="button" id="wizard-back">Back</button><div class="wizard-actions-right"><button class="btn" type="button" id="cancel">Cancel</button><button class="btn primary" type="button" id="wizard-next">Continue</button><button class="btn primary hidden" type="submit" id="save">Save monitor</button></div></div>
 </form></div>
 <script>
-const API=(document.querySelector('meta[name="api-base"]')?.content||"/api").replace(/\/$/,"");let user=null,orgs=[],orgId=null,monitors=[],incidents=[],notificationChannels=[],notificationDeliveries=[],webhookEndpoints=[],teamMemberCount=0,editingMonitorId=null,selectedIncidentId=null,selectedMonitorId=null,selectedMonitorEnabled=true,executionEnabled=false;
+const API=(document.querySelector('meta[name="api-base"]')?.content||"/api").replace(/\/$/,"");let user=null,orgs=[],orgId=null,monitors=[],incidents=[],notificationChannels=[],notificationDeliveries=[],webhookEndpoints=[],teamMemberCount=0,editingMonitorId=null,selectedIncidentId=null,selectedMonitorId=null,selectedMonitorEnabled=true,executionEnabled=false,webhookHistoryEndpointId=null,webhookDeliveryConfigured=false;
 const $=id=>document.getElementById(id);
 function showNotice(text,error=false){$("notice").textContent=text;$("notice").classList.remove("hidden","error");if(error)$("notice").classList.add("error")}
 async function request(path,options={}){const r=await fetch(API+path,{credentials:"include",...options,headers:{"content-type":"application/json",...(options.headers||{})}});const d=await r.json().catch(()=>({}));if(r.status===401){location.href="./auth.html";throw new Error("Please sign in again.")}if(!r.ok)throw new Error(d.message||d.error||"Request failed");return d}
@@ -604,6 +615,7 @@ async function loadAlerts(){
   notificationChannels=channelResult.channels||[];
   notificationDeliveries=deliveryResult.deliveries||[];
   webhookEndpoints=webhookResult.endpoints||[];
+  webhookDeliveryConfigured=webhookResult.deliveryConfigured===true;
   const ownChannel=notificationChannels.some(channel=>channel.createdBy===user.id);
   $("alert-channel-existing").classList.toggle("hidden",!ownChannel);
   $("alert-channel-submit").disabled=ownChannel;
@@ -647,19 +659,41 @@ async function loadAlerts(){
     const name=document.createElement("td");name.textContent=endpoint.name||"Unnamed endpoint";
     const host=document.createElement("td");host.textContent=endpoint.destinationHost||"Unavailable";
     const suffix=document.createElement("td");suffix.textContent=endpoint.secretLast4?"••••"+endpoint.secretLast4:"Rotated";
-    const delivery=document.createElement("td");delivery.textContent="Paused · secure transport pending";
+    const endpointEnabled=Number(endpoint.isEnabled)===1;
+    const delivery=document.createElement("td");
+    delivery.textContent=endpointEnabled
+      ?(webhookDeliveryConfigured?"Enabled":"Paused · dispatcher unavailable")
+      :(webhookDeliveryConfigured?"Disabled":"Paused · operator setup pending");
     const created=document.createElement("td");created.textContent=formatIncidentDate(endpoint.createdAt);
     const actions=document.createElement("td");
+    const history=document.createElement("button");history.className="btn";history.textContent="History";
+    history.addEventListener("click",()=>loadWebhookDeliveryHistory(endpoint.id));
+    actions.appendChild(history);
     if(canManageAll){
-      const rotate=document.createElement("button");rotate.className="btn";rotate.textContent="Rotate secret";
+      const toggle=document.createElement("button");toggle.className="btn";toggle.style.marginLeft="6px";
+      toggle.textContent=endpointEnabled?"Disable":"Enable";
+      toggle.disabled=!endpointEnabled&&!webhookDeliveryConfigured;
+      if(toggle.disabled)toggle.title="The operator has not configured secure webhook delivery.";
+      toggle.addEventListener("click",()=>toggleWebhookEndpoint(endpoint.id,!endpointEnabled));
+      const rotate=document.createElement("button");rotate.className="btn";rotate.style.marginLeft="6px";rotate.textContent="Rotate secret";
       rotate.addEventListener("click",()=>rotateWebhookEndpoint(endpoint.id,endpoint.name));
       const remove=document.createElement("button");remove.className="btn";remove.style.marginLeft="6px";remove.textContent="Remove";
       remove.addEventListener("click",()=>removeWebhookEndpoint(endpoint.id,endpoint.name));
-      actions.append(rotate,remove);
-    }else actions.textContent="Managed by workspace admin";
+      actions.append(toggle,rotate,remove);
+    }else{
+      const note=document.createElement("span");note.style.marginLeft="6px";note.textContent="Managed by workspace admin";
+      actions.appendChild(note);
+    }
     row.append(name,host,suffix,delivery,created,actions);
     $("webhook-endpoint-rows").appendChild(row);
   }
+  if(webhookHistoryEndpointId&&!webhookEndpoints.some(endpoint=>endpoint.id===webhookHistoryEndpointId)){
+    webhookHistoryEndpointId=null;
+    $("webhook-history-title").textContent="Choose an endpoint to inspect attempts";
+    $("webhook-delivery-rows").innerHTML="<tr><td colspan='7'>Select History on a webhook endpoint.</td></tr>";
+  }
+  if(!webhookHistoryEndpointId&&webhookEndpoints.length)webhookHistoryEndpointId=webhookEndpoints[0].id;
+  if(webhookHistoryEndpointId)await loadWebhookDeliveryHistory(webhookHistoryEndpointId);
   $("alert-delivery-rows").innerHTML="";
   if(!notificationDeliveries.length){
     const row=document.createElement("tr"),cell=document.createElement("td");
@@ -680,6 +714,53 @@ async function loadAlerts(){
   }
   updateOnboarding();
 }
+async function loadWebhookDeliveryHistory(endpointId){
+  webhookHistoryEndpointId=endpointId;
+  const endpoint=webhookEndpoints.find(item=>item.id===endpointId);
+  $("webhook-history-title").textContent=endpoint
+    ?(endpoint.name||"Webhook endpoint")+" · "+(endpoint.destinationHost||"destination")
+    :"Webhook endpoint delivery history";
+  $("webhook-delivery-rows").innerHTML="<tr><td colspan='7'>Loading webhook delivery history…</td></tr>";
+  try{
+    const result=await request("/v1/organizations/"+encodeURIComponent(orgId)+"/webhooks/"+encodeURIComponent(endpointId)+"/deliveries?limit=25");
+    const deliveries=result.deliveries||[];
+    $("webhook-delivery-rows").innerHTML="";
+    if(!deliveries.length){
+      const row=document.createElement("tr"),cell=document.createElement("td");
+      cell.colSpan=7;cell.textContent="No webhook deliveries have been recorded for this endpoint.";
+      row.appendChild(cell);$("webhook-delivery-rows").appendChild(row);return;
+    }
+    for(const item of deliveries){
+      const row=document.createElement("tr");
+      const event=document.createElement("td");event.textContent=String(item.eventType||"incident event").replace(/^incident\\./,"").replace(/_/g," ");
+      const monitor=document.createElement("td");monitor.textContent=item.monitorName||"Monitor removed";
+      const status=document.createElement("td");status.textContent=String(item.status||"unknown").replace(/_/g," ");
+      const attempts=document.createElement("td");attempts.textContent=String(item.attemptCount??0);
+      const response=document.createElement("td");response.textContent=item.responseStatus?"HTTP "+item.responseStatus:"—";
+      const updated=document.createElement("td");updated.textContent=formatIncidentDate(item.deliveredAt||item.nextAttemptAt||item.updatedAt||item.createdAt);
+      const details=document.createElement("td");details.textContent=item.lastErrorCode||"—";
+      if(Array.isArray(item.attempts)&&item.attempts.length){
+        details.title=item.attempts.map(attempt=>"Attempt "+attempt.attemptNumber+": "+attempt.status+(attempt.responseStatus?" · HTTP "+attempt.responseStatus:"")+(attempt.errorCode?" · "+attempt.errorCode:"")).join("\\n");
+      }
+      row.append(event,monitor,status,attempts,response,updated,details);
+      $("webhook-delivery-rows").appendChild(row);
+    }
+  }catch(error){
+    $("webhook-delivery-rows").innerHTML="";
+    const row=document.createElement("tr"),cell=document.createElement("td");
+    cell.colSpan=7;cell.textContent=error.message||"Webhook delivery history could not be loaded.";
+    row.appendChild(cell);$("webhook-delivery-rows").appendChild(row);
+  }
+}
+async function toggleWebhookEndpoint(endpointId,enabled){
+  try{
+    const result=await request("/v1/organizations/"+encodeURIComponent(orgId)+"/webhooks/"+encodeURIComponent(endpointId),{
+      method:"PATCH",body:JSON.stringify({enabled})
+    });
+    alertsMessage(result.message||"Webhook endpoint state updated.");
+    await loadAlerts();
+  }catch(error){alertsMessage(error.message||"Webhook endpoint state could not be updated.",true)}
+}
 function showWebhookSecret(secret){
   $("webhook-secret-value").textContent=secret;
   $("webhook-secret-created").classList.remove("hidden");
@@ -698,6 +779,7 @@ async function removeWebhookEndpoint(endpointId,name){
   if(!confirm("Remove "+(name||"this webhook endpoint")+"? Its encrypted URL and signing secret will be scrubbed."))return;
   try{
     await request("/v1/organizations/"+encodeURIComponent(orgId)+"/webhooks/"+encodeURIComponent(endpointId),{method:"DELETE"});
+    if(webhookHistoryEndpointId===endpointId)webhookHistoryEndpointId=null;
     alertsMessage("Webhook endpoint removed and encrypted values scrubbed.");
     await loadAlerts();
   }catch(error){alertsMessage(error.message||"The webhook endpoint could not be removed.",true)}
@@ -759,6 +841,14 @@ $("alert-channel-form").addEventListener("submit",async event=>{
 $("alert-delivery-refresh").addEventListener("click",async()=>{
   const button=$("alert-delivery-refresh");button.disabled=true;
   try{await loadAlerts()}catch(error){alertsMessage(error.message,true)}
+  finally{button.disabled=false}
+});
+$("webhook-delivery-refresh").addEventListener("click",async()=>{
+  const button=$("webhook-delivery-refresh");button.disabled=true;
+  try{
+    if(webhookHistoryEndpointId)await loadWebhookDeliveryHistory(webhookHistoryEndpointId);
+    else alertsMessage("Choose a webhook endpoint first.");
+  }catch(error){alertsMessage(error.message,true)}
   finally{button.disabled=false}
 });
 
