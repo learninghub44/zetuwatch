@@ -19,7 +19,10 @@ export interface WebhookDelivery {
 }
 
 export interface WebhookClaimOptions {
+  /** Due-work cutoff. Defaults to the lease clock when omitted. */
   now?: Date | string;
+  /** Actual claim time used to start leases and reclaim expired leases. */
+  leaseNow?: Date | string;
   leaseMs?: number;
   limit?: number;
   token?: string;
@@ -68,7 +71,8 @@ export async function claimDueWebhookDeliveries(
   db: D1Database,
   options: WebhookClaimOptions = {}
 ): Promise<WebhookDelivery[]> {
-  const now = parseTimestamp(options.now ?? new Date(), "NOW");
+  const dueNow = parseTimestamp(options.now ?? new Date(), "NOW");
+  const leaseNow = parseTimestamp(options.leaseNow ?? dueNow.iso, "LEASE_NOW");
   const leaseMs = options.leaseMs ?? DEFAULT_WEBHOOK_LEASE_MS;
   const limit = options.limit ?? DEFAULT_WEBHOOK_CLAIM_LIMIT;
   const token = options.token ?? crypto.randomUUID();
@@ -83,7 +87,7 @@ export async function claimDueWebhookDeliveries(
     throw new Error("WEBHOOK_TOKEN_INVALID");
   }
 
-  const leaseUntil = new Date(now.milliseconds + leaseMs).toISOString();
+  const leaseUntil = new Date(leaseNow.milliseconds + leaseMs).toISOString();
   const claimSql = `
     UPDATE webhook_deliveries
     SET lease_token = ?, lease_until = ?, attempt_count = attempt_count + 1, updated_at = ?
@@ -128,8 +132,8 @@ export async function claimDueWebhookDeliveries(
 
   const results = await db.batch([
     db.prepare(claimSql).bind(
-      token, leaseUntil, now.iso, now.iso, now.iso,
-      MAX_WEBHOOK_ATTEMPTS, limit, now.iso, now.iso, MAX_WEBHOOK_ATTEMPTS
+      token, leaseUntil, leaseNow.iso, dueNow.iso, leaseNow.iso,
+      MAX_WEBHOOK_ATTEMPTS, limit, dueNow.iso, leaseNow.iso, MAX_WEBHOOK_ATTEMPTS
     ),
     db.prepare(selectSql).bind(token, leaseUntil)
   ]);
