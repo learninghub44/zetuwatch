@@ -43,7 +43,7 @@ The product is built in vertical slices. A slice is complete only when UI, API, 
 - [ ] Plan/usage enforcement and transparent upgrade UX
 - [ ] Payment provider integration after merchant activation and callback verification
 - [ ] Receipts, renewals, failed-payment and cancellation workflows
-- [ ] Webhook alerts (tenant-scoped encrypted endpoint configuration, HMAC signing, incident-event D1 outbox, bounded leases/retries, dedicated DNS-pinned agent, scheduled Worker dispatcher, endpoint activation gate and delivery-history API/UI are implemented on the integration branch; remain launch-blocked pending current-head CI, production-like DNS/TLS/SSRF/idempotency verification and operator configuration)
+- [ ] Webhook alerts (tenant-scoped encrypted endpoint configuration, HMAC signing, incident-event D1 outbox, bounded leases/retries, dedicated DNS-pinned agent, scheduled Worker dispatcher, endpoint activation gate, delivery-history API/UI and versioned master-key rotation are implemented on the integration branch; remain launch-blocked pending current-head CI, production-like DNS/TLS/SSRF/idempotency verification and operator configuration)
 - [ ] SMS credits/add-ons only after cost and provider validation
 
 ## Phase 5 — advanced monitoring and scale
@@ -363,3 +363,14 @@ No Cloudflare resources were created and no deployment was attempted. This is fe
 - Split the claim clock into a due-work cutoff and an actual lease-acquisition time. The dispatcher keeps the invocation timestamp for selecting work that was due when the Cron run began, but starts the lease and checks expired leases against the live time when webhook dispatch actually begins. Preflight and settlement continue to use the live clock.
 - Added a D1-backed regression test that simulates an 80-second delay between Cron start and webhook claim and asserts that the claimed delivery receives the full 90-second lease from actual claim time.
 - This is a scheduling correctness fix, not evidence of successful external delivery. The full current-head TypeScript/Vitest/migration/browser/probe-agent CI and production-like DNS/TLS/SSRF/Worker-to-agent verification remain outstanding. Keep webhook delivery disabled until those launch gates pass.
+
+
+## Webhook master-key rotation implementation update (2026-11-27)
+
+- Added migration `0012_webhook_encryption_key_ids.sql`. It separates the AES-GCM format version from an operator-managed `encryption_key_id`; existing rows default to legacy id `v1` and preserve the original AAD context.
+- Added a validated current/previous keyring. New endpoint values use the current key; dispatch can decrypt the current or previous key without falling back when a stored id is unavailable. Key ids other than legacy `v1` are bound into AES-GCM AAD.
+- Added `rotateWebhookEncryptionBatch`, a scheduled, no-network maintenance operation bounded to one active endpoint per minute. It decrypts and authenticates both fields, verifies the normalized destination/hash and signing-secret suffix, re-encrypts both fields with the current key, and uses compare-and-swap conditions to avoid overwriting concurrent endpoint changes. It reports scanned/rotated/conflict/failed/remaining/blocked counts without logging key material or ciphertext.
+- Updated endpoint creation and signing-secret rotation to write with the current key id. Signing-secret rotation also re-encrypts the destination in the same guarded update. Endpoint activation and scheduled delivery resolve the stored key id through the keyring.
+- Added keyring unit tests, D1 integration tests for bounded/resumable rotation, concurrent-worker safety, corrupt/hash-mismatched rows, unknown key ids, legacy/current-key delivery, and migration-validator checks.
+- Updated webhook operator/security/testing documentation. Rotation requires a reviewed Worker version containing the current and previous secrets plus matching non-secret key ids; do not stage these values through sequential immediate-deploy secret commands.
+- **Verification pending:** the full repository TypeScript 5.9.3, Vitest/D1, migration, inline-browser-JS and Node probe-agent suites have not yet completed on this head. The migration and new integration tests are committed but not claimed as passed. Keep production webhook delivery disabled and do not remove the previous key until the live rotation counters report zero remaining, blocked and failed rows after a verified deployment.
