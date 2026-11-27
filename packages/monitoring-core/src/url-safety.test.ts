@@ -24,6 +24,20 @@ describe("validateMonitorUrl", () => {
     expect(() => validateMonitorUrl("http://service.localhost")).toThrow("HOST_NOT_ALLOWED");
   });
 
+  it("rejects special-use reverse-DNS and common local-network suffixes", () => {
+    for (const hostname of [
+      "localhost.localdomain",
+      "api.home",
+      "printer.lan",
+      "service.onion",
+      "1.0.0.127.in-addr.arpa",
+      "router.home.arpa"
+    ]) {
+      expect(() => validateMonitorUrl("https://" + hostname + "/health"), hostname)
+        .toThrow("HOST_NOT_ALLOWED");
+    }
+  });
+
   it("rejects private, link-local and special-purpose IPv4 destinations", () => {
     for (const address of [
       "0.0.0.0", "10.0.0.1", "100.64.0.1", "127.0.0.1",

@@ -1,7 +1,18 @@
 import { isIpv4Address, isPublicIpAddress } from "./ip-address.mjs";
 
 const BLOCKED_HOSTS = new Set(["localhost", "localhost.localdomain", "metadata.google.internal", "metadata"]);
-const BLOCKED_SUFFIXES = [".localhost", ".local", ".internal", ".test", ".invalid", ".example"];
+const BLOCKED_SUFFIXES = [
+  ".localhost", ".local", ".internal", ".home", ".lan",
+  ".test", ".invalid", ".example", ".onion", ".arpa"
+];
+
+// Keep local-only and special-use DNS names out of every customer egress path.
+// IANA's special-use designation applies to listed names and their subdomains.
+export function isBlockedHostname(input) {
+  const host = typeof input === "string" ? input.toLowerCase().replace(/\.$/, "") : "";
+  return !host || BLOCKED_HOSTS.has(host) ||
+    BLOCKED_SUFFIXES.some(suffix => host.endsWith(suffix));
+}
 const NUMERIC_HOST = /^(?:0x[0-9a-f]+|[0-9]+)(?:\.(?:0x[0-9a-f]+|[0-9]+))*$/i;
 
 function rawAuthorityHost(input) {
@@ -38,7 +49,7 @@ export function validateMonitorUrl(input) {
   if (url.port && url.port !== defaultPort) throw new Error("PORT_NOT_ALLOWED");
 
   const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, "").replace(/\.$/, "");
-  if (!host || BLOCKED_HOSTS.has(host) || BLOCKED_SUFFIXES.some(suffix => host.endsWith(suffix))) {
+  if (isBlockedHostname(host)) {
     throw new Error("HOST_NOT_ALLOWED");
   }
 

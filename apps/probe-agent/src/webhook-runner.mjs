@@ -1,6 +1,6 @@
 import { isIP } from "node:net";
 import { assertPublicDnsAnswers, isIpv4Address } from "../../../packages/monitoring-core/src/ip-address.mjs";
-import { validateMonitorUrl } from "../../../packages/monitoring-core/src/url-safety.mjs";
+import { validateMonitorUrl, isBlockedHostname } from "../../../packages/monitoring-core/src/url-safety.mjs";
 import { resolvePublicAddresses } from "./dns-resolver.mjs";
 import { requestWebhookPinned, MAX_WEBHOOK_REQUEST_BYTES, MAX_WEBHOOK_TIMEOUT_MS } from "./webhook-transport.mjs";
 
@@ -9,9 +9,6 @@ const MAX_SIGNATURE_AGE_SECONDS = 300;
 const SIGNATURE_PATTERN = /^t=(\d{10}),v1=([a-f0-9]{64})$/;
 const EVENT_ID_PATTERN = /^[a-f0-9-]{32,36}$/i;
 const BASE64URL_PATTERN = /^[A-Za-z0-9_-]+$/;
-const BLOCKED_HOSTS = new Set(["localhost", "localhost.localdomain", "metadata", "metadata.google.internal"]);
-const BLOCKED_SUFFIXES = [".localhost", ".local", ".internal", ".home", ".lan", ".test", ".invalid", ".example", ".onion", ".arpa"];
-
 function decodePayload(value, eventId) {
   if (typeof value !== "string" || value.length < 1 || value.length > 350_000 || !BASE64URL_PATTERN.test(value)) {
     throw new Error("WEBHOOK_PAYLOAD_INVALID");
@@ -36,8 +33,7 @@ function validateWebhookDestination(input) {
   const destination = validateMonitorUrl(input);
   const hostname = destination.hostname.toLowerCase().replace(/\.$/, "");
   if (destination.protocol !== "https:" || (destination.port && destination.port !== "443") ||
-      destination.hash || isIP(hostname.replace(/^\[|\]$/g, "")) !== 0 || BLOCKED_HOSTS.has(hostname) ||
-      BLOCKED_SUFFIXES.some(suffix => hostname.endsWith(suffix))) {
+      destination.hash || isIP(hostname.replace(/^\[|\]$/g, "")) !== 0 || isBlockedHostname(hostname)) {
     throw new Error("WEBHOOK_DESTINATION_INVALID");
   }
   return destination;

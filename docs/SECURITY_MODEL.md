@@ -17,7 +17,7 @@ The URL gate:
 - permits only HTTP and HTTPS;
 - rejects embedded URL credentials;
 - permits only the scheme's default port (80 for HTTP, 443 for HTTPS);
-- rejects localhost, internal/test/example suffixes and single-label hostnames;
+- rejects localhost and localhost.localdomain, local/internal/test/example/onion and reverse-DNS suffixes, common home/LAN suffixes, and single-label hostnames;
 - rejects non-public IPv4 literals, including private, loopback, link-local, carrier-grade NAT, benchmarking, documentation, multicast and reserved ranges;
 - rejects IPv6 URL literals; IPv6 DNS answers are classified and can be selected/pinned by the agent;
 - caps URL length.

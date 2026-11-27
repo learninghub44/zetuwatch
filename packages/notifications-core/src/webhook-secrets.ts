@@ -1,3 +1,5 @@
+import { isBlockedHostname } from "../../monitoring-core/src/url-safety";
+
 const encoder = new TextEncoder();
 const ENCRYPTION_KEY_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 export const WEBHOOK_ENCRYPTION_KEY_VERSION = 1;
@@ -128,10 +130,9 @@ export function normalizeWebhookDestination(value: unknown): { url: string; host
   }
 
   const hostname = parsed.hostname.toLowerCase().replace(/\.$/, "");
-  const blockedSuffixes = [".localhost", ".local", ".internal", ".home", ".lan", ".test", ".invalid", ".example", ".onion"];
   if (!hostname || hostname.startsWith("[") || hostname.includes(":") ||
       /^\d+(?:\.\d+){0,3}$/.test(hostname) || !hostname.includes(".") ||
-      hostname === "localhost" || blockedSuffixes.some(suffix => hostname.endsWith(suffix))) {
+      isBlockedHostname(hostname)) {
     throw new Error("WEBHOOK_HOST_POLICY_REJECTED");
   }
   const labels = hostname.split(".");

@@ -44,7 +44,11 @@ test("rejects non-HTTPS, IP-literal, credentialed, fragmented and non-default-po
     "https://localhost/events",
     "https://hooks.customer.com.test/events",
     "https://hooks.customer.home/events",
+    "https://hooks.customer.lan/events",
     "https://hooks.customer.onion/events",
+    "https://hooks.customer.arpa/events",
+    "https://1.0.0.127.in-addr.arpa/events",
+    "https://localhost.localdomain/events",
     "https://metadata.google.internal/events"
   ]) {
     assert.throws(() => normalizeWebhookInput(rawJob({ destinationUrl }), now), /WEBHOOK_DESTINATION_INVALID/);

@@ -61,6 +61,12 @@ describe("webhook destination syntax policy", () => {
     "https://[::1]/events",
     "https://service.internal/events",
     "https://service.example.test/events",
+    "https://localhost.localdomain/events",
+    "https://api.home/events",
+    "https://printer.lan/events",
+    "https://service.onion/events",
+    "https://1.0.0.127.in-addr.arpa/events",
+    "https://router.home.arpa/events",
     "https://hooks.example.com/events#fragment",
     "https://hooks.example.com/events\nX-Injected: yes"
   ])("rejects unsafe or unsupported destination %s", value => {
