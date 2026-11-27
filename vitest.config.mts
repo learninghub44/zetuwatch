@@ -17,6 +17,7 @@ export default defineConfig(async () => {
             RESEND_API_KEY: "test-only-resend-key",
             EMAIL_FROM: "ZetuWatch Tests <noreply@example.test>",
             WEBHOOK_ENCRYPTION_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            WEBHOOK_ENCRYPTION_KEY_ID: "v1",
             TEST_MIGRATIONS: migrations
           }
         }
