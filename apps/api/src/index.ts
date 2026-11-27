@@ -244,9 +244,6 @@ export default {
         return json({ error: parsed.error === "too_large" ? "BODY_TOO_LARGE" : "INVALID_REQUEST" },
           parsed.error === "too_large" ? 413 : 400);
       }
-      if (!(await rateLimit(request, env, "probe-agent-replay", 5_000))) {
-        return json({ error: "RATE_LIMITED" }, 429);
-      }
       const timestampText = request.headers.get("x-zw-timestamp") || "";
       const nonce = request.headers.get("x-zw-nonce") || "";
       const signature = request.headers.get("x-zw-signature") || "";
@@ -260,6 +257,9 @@ export default {
         return json({ error: "UNAUTHORIZED" }, 401);
       }
 
+      if (!(await rateLimit(request, env, "probe-agent-replay", 5_000))) {
+        return json({ error: "RATE_LIMITED" }, 429);
+      }
       // The unique hash is the durable replay guard. Cleanup and insert run in
       // one D1 batch, so two agent instances cannot both claim the same nonce.
       const now = new Date(nowMs).toISOString();
