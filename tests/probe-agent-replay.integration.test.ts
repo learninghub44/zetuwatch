@@ -58,13 +58,14 @@ describe("D1-backed probe-agent replay guard", () => {
     const nonce = makeNonce();
     const compact = JSON.stringify({ nonce });
     const spaced = "{ \"nonce\": \"" + nonce + "\" }";
-    const signature = await signProbePayload(secret, String(Math.floor(Date.now() / 1000)), nonce, compact);
+    const timestamp = String(Math.floor(Date.now() / 1000));
+    const signature = await signProbePayload(secret, timestamp, nonce, compact);
     const invalidSignatureIp = "198.51.100.79";
     const rateKey = await sha256("probe-agent-replay:" + invalidSignatureIp);
     const beforeRateLimit = await env.DB.prepare(
       "SELECT attempts FROM auth_rate_limits WHERE key_hash = ?"
     ).bind(rateKey).first<{ attempts: number }>();
-    const tampered = await makeRequest({ nonce, rawBody: spaced, signature, ip: invalidSignatureIp });
+    const tampered = await makeRequest({ nonce, timestamp, rawBody: spaced, signature, ip: invalidSignatureIp });
     expect(tampered.status).toBe(401);
     const afterRateLimit = await env.DB.prepare(
       "SELECT attempts FROM auth_rate_limits WHERE key_hash = ?"
