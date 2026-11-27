@@ -14,6 +14,7 @@ The Worker requires all of the following before an owner can enable an endpoint:
 
 - `WEBHOOKS_ENABLED=true` as a non-secret Worker variable. The repository default is false.
 - `WEBHOOK_ENCRYPTION_KEY`: 32 random bytes encoded as unpadded base64url (43 characters).
+- `WEBHOOK_ENCRYPTION_KEY_ID`: non-secret key identifier. It defaults to `v1` for existing ciphertext and must change whenever the current master key is replaced.
 - `PROBE_AGENT_URL`: the trusted agent's HTTPS `/v1/probe` URL. The webhook client derives the dedicated `/v1/webhook` route from its origin.
 - `PROBE_SHARED_SECRET`: the agent's shared HMAC secret, at least 32 bytes.
 
@@ -34,7 +35,33 @@ Set `PROBE_AGENT_URL` as a Worker variable for the trusted agent URL, and set `W
 
 The `deliveryConfigured` API field means the operator variables and secret shapes are present and the agent URL passes local validation. It does not prove that the agent is reachable, its certificate is trusted, or a destination can be delivered to.
 
-The deterministic encryption key in `vitest.config.mts` is test-only and must never be reused in a deployed environment. Master-key rotation is not implemented. The encryption version is recorded as 1; losing the key makes existing endpoint values unrecoverable.
+The deterministic encryption key in `vitest.config.mts` is test-only and must never be reused in a deployed environment. The ciphertext format version remains 1; the separate `encryption_key_id` column identifies the operator-managed master key. Losing every configured copy of a key makes endpoint values encrypted by it unrecoverable.
+
+## Master-key rotation
+
+Master-key rotation is versioned separately from the AES-GCM ciphertext format. Migration `0012_webhook_encryption_key_ids.sql` adds `encryption_key_id`; legacy rows default to `v1` and keep their byte-for-byte legacy AAD context. New key ids are included in authenticated additional data.
+
+The Worker supports one current key and one decrypt-only previous key:
+
+- `WEBHOOK_ENCRYPTION_KEY`: current 32-byte key (secret).
+- `WEBHOOK_ENCRYPTION_KEY_ID`: current non-secret id (defaults to `v1` for the original installation).
+- `WEBHOOK_ENCRYPTION_KEY_PREVIOUS`: previous 32-byte key (secret, optional).
+- `WEBHOOK_ENCRYPTION_KEY_PREVIOUS_ID`: previous non-secret id (defaults to `v1` when the previous key is present).
+
+Never reuse a key id for different key material. Keep the previous key configured until all active endpoint rows have moved to the current id.
+
+### Rotation procedure
+
+1. Generate a fresh 32-byte key locally using the command above. Choose a new key id such as `v2`; do not reuse the old id.
+2. Set the new value as `WEBHOOK_ENCRYPTION_KEY` and set `WEBHOOK_ENCRYPTION_KEY_ID` to the new id.
+3. Preserve the old `WEBHOOK_ENCRYPTION_KEY` value as `WEBHOOK_ENCRYPTION_KEY_PREVIOUS` and set `WEBHOOK_ENCRYPTION_KEY_PREVIOUS_ID` to its existing id (normally `v1`).
+4. Keep both keys configured. The one-minute scheduled handler re-encrypts at most one active endpoint per invocation. It decrypts and authenticates both fields, verifies the destination hash and signing-secret suffix, encrypts both fields with the current key, then uses a compare-and-swap update so a concurrent endpoint edit or rotation cannot be overwritten. This maintenance performs no customer network request and runs even when webhook delivery is disabled.
+5. Review the sanitized `webhook_key_rotation_completed` Worker log fields. Remove the previous key only after `remaining=0`, `blocked=0` and `failed=0`. A conflict is retried on a later tick; failed rows remain unchanged. Unknown key ids are counted as blocked and must be resolved before retiring any key.
+6. Remove `WEBHOOK_ENCRYPTION_KEY_PREVIOUS` and `WEBHOOK_ENCRYPTION_KEY_PREVIOUS_ID` only after the counters confirm completion. Keep the old key in an approved offline backup until the normal backup-retention policy permits its destruction.
+
+During rotation, existing endpoints remain decryptable through the previous key, while new endpoints and signing-secret rotations use the current key. The customer signing-secret rotation route also re-encrypts the stored destination and secret together and uses a compare-and-swap update. The dispatcher rechecks the endpoint key id and ciphertext immediately before sending.
+
+Do not delete the previous key merely because the scheduled worker has processed one batch. The default batch size is one endpoint per minute to keep scheduled CPU and D1 work bounded. If a previous key is lost, do not change ids to make ciphertext appear current; restore the exact old key from the approved backup. The Worker never logs key material or ciphertext.
 
 ## Endpoint API and customer controls
 
@@ -43,7 +70,7 @@ All routes require a verified browser session and organization membership. Read-
 - `GET /v1/organizations/{organizationId}/webhooks`: safe endpoint metadata and `deliveryConfigured`.
 - `POST /v1/organizations/{organizationId}/webhooks`: create an HTTPS endpoint and return its new `whsec_` secret once. New endpoints are disabled.
 - `PATCH /v1/organizations/{organizationId}/webhooks/{endpointId}`: rename with `{"name":"Production alerts"}`, or enable/disable with `{"enabled":true}` / `{"enabled":false}`.
-- `POST /v1/organizations/{organizationId}/webhooks/{endpointId}/rotate`: replace the signing secret and return it once.
+- `POST /v1/organizations/{organizationId}/webhooks/{endpointId}/rotate`: replace the signing secret, re-encrypt both endpoint values with the current master key, and return the new signing secret once.
 - `GET /v1/organizations/{organizationId}/webhooks/{endpointId}/deliveries?limit=25`: return up to 50 recent deliveries and their sanitized attempt records.
 - `DELETE /v1/organizations/{organizationId}/webhooks/{endpointId}`: disable, cancel pending work and scrub encrypted destination/secret material while retaining an audit record.
 
