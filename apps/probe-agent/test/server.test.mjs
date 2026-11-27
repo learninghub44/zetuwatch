@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { createProbeHandler, createRateLimiter, signProbeRequest } from "../src/server.mjs";
+import { createProbeHandler, createDurableNonceClaimer, createRateLimiter, signProbeRequest, startServer } from "../src/server.mjs";
 
 const secret = "test-only-shared-secret-with-at-least-32-bytes";
 const job = { targetUrl: "https://monitor.example.com/health", method: "GET", expectedStatus: 200, timeoutMs: 2_000, maxRedirects: 0 };
@@ -25,6 +25,97 @@ async function send(port, options = {}) {
     body: options.method === "GET" ? undefined : body
   });
 }
+
+test("standalone server refuses to start without the durable replay endpoint", () => {
+  assert.throws(() => startServer({
+    PROBE_TLS_CERT_FILE: "/not-read/cert.pem",
+    PROBE_TLS_KEY_FILE: "/not-read/key.pem",
+    PROBE_SHARED_SECRET: secret
+  }), /PROBE_REPLAY_URL_REQUIRED/);
+});
+
+test("requires a public HTTPS Worker replay endpoint with the exact internal path", () => {
+  assert.throws(() => createDurableNonceClaimer({ url: "http://api.zetuwatch.com/internal/probe-agent/replay", secret }), /REPLAY_STORE_URL_INVALID/);
+  assert.throws(() => createDurableNonceClaimer({ url: "https://127.0.0.1/internal/probe-agent/replay", secret }), /REPLAY_STORE_URL_INVALID/);
+  assert.throws(() => createDurableNonceClaimer({ url: "https://api.zetuwatch.com/internal/probe-agent/replay?next=https://evil.example", secret }), /REPLAY_STORE_URL_INVALID/);
+  assert.throws(() => createDurableNonceClaimer({ url: "https://api.zetuwatch.com/other", secret }), /REPLAY_STORE_URL_INVALID/);
+});
+
+test("claims a nonce through the Worker using the exact signed body and no redirects", async () => {
+  let captured;
+  const timestamp = "1800000000";
+  const nonce = "0123456789abcdef0123456789abcdef";
+  const claim = createDurableNonceClaimer({
+    url: "https://api.zetuwatch.com/internal/probe-agent/replay",
+    secret,
+    fetcher: async (url, init) => {
+      captured = { url, init };
+      return new Response(null, { status: 204 });
+    }
+  });
+  assert.equal(await claim({ timestamp, nonce }), true);
+  assert.equal(captured.url, "https://api.zetuwatch.com/internal/probe-agent/replay");
+  assert.equal(captured.init.method, "POST");
+  assert.equal(captured.init.redirect, "error");
+  assert.equal(captured.init.cache, "no-store");
+  assert.equal(captured.init.credentials, "omit");
+  assert.equal(captured.init.body, JSON.stringify({ nonce }));
+  assert.equal(captured.init.headers["x-zw-timestamp"], timestamp);
+  assert.equal(captured.init.headers["x-zw-nonce"], nonce);
+  assert.equal(captured.init.headers["x-zw-signature"], signProbeRequest(secret, timestamp, nonce, captured.init.body));
+});
+
+test("treats an already claimed nonce as replay and fails closed when D1 is unavailable", async () => {
+  const nonce = "1123456789abcdef1123456789abcdef";
+  const claimReplay = createDurableNonceClaimer({
+    url: "https://api.zetuwatch.com/internal/probe-agent/replay",
+    secret,
+    fetcher: async () => new Response(null, { status: 409 })
+  });
+  assert.equal(await claimReplay({ timestamp: "1800000000", nonce }), false);
+  const unavailable = createDurableNonceClaimer({
+    url: "https://api.zetuwatch.com/internal/probe-agent/replay",
+    secret,
+    fetcher: async () => { throw new Error("offline"); }
+  });
+  await assert.rejects(unavailable({ timestamp: "1800000000", nonce }), /REPLAY_STORE_UNAVAILABLE/);
+});
+
+test("does not execute a probe when the durable replay claim fails", async () => {
+  let probeCalls = 0;
+  const handler = createProbeHandler({
+    secret, claimNonce: async () => false,
+    probe: async () => {
+      probeCalls += 1;
+      return { isUp: true, statusCode: 200, responseTimeMs: 1, errorCode: null, redirectCount: 0 };
+    }
+  });
+  const server = createServer((request, response) => { void handler(request, response); });
+  const port = await listen(server);
+  try {
+    const response = await send(port, { nonce: "2123456789abcdef2123456789abcdef" });
+    assert.equal(response.status, 409);
+    assert.equal(probeCalls, 0);
+  } finally { await close(server); }
+});
+
+test("fails closed with 503 when the durable replay store is unavailable", async () => {
+  let probeCalls = 0;
+  const handler = createProbeHandler({
+    secret, claimNonce: async () => { throw new Error("offline"); },
+    probe: async () => {
+      probeCalls += 1;
+      return { isUp: true, statusCode: 200, responseTimeMs: 1, errorCode: null, redirectCount: 0 };
+    }
+  });
+  const server = createServer((request, response) => { void handler(request, response); });
+  const port = await listen(server);
+  try {
+    const response = await send(port, { nonce: "3123456789abcdef3123456789abcdef" });
+    assert.equal(response.status, 503);
+    assert.equal(probeCalls, 0);
+  } finally { await close(server); }
+});
 
 test("requires a sufficiently strong shared secret", () => {
   assert.throws(() => createProbeHandler({ secret: "short" }), /PROBE_SHARED_SECRET_REQUIRED/);

@@ -14,7 +14,7 @@ ZetuWatch uses Cloudflare Workers and D1 for the customer API and control plane.
 
 1. The control plane sends a bounded job containing targetUrl, GET or HEAD, expected status, timeout and redirect limit. Additional fields are rejected.
 2. The Worker client requires an HTTPS endpoint at the exact /v1/probe path, omits credentials, disables redirects and signs the exact JSON body.
-3. The signature is HMAC-SHA-256 over the version, Unix timestamp, nonce and SHA-256 body digest. The agent compares signatures in constant time, accepts only a 60-second clock window and rejects a nonce reused during its five-minute replay window.
+3. The signature is HMAC-SHA-256 over the version, Unix timestamp, nonce and SHA-256 body digest. The agent compares signatures in constant time, accepts only a 60-second clock window and claims each nonce in shared D1 for a five-minute replay window before executing the job.
 4. The agent validates the URL again. It rejects ASCII control characters before parsing (WHATWG URL parsing strips tabs/newlines), credentials, unsupported protocols, non-default ports, blocked/local suffixes, non-canonical numeric IPv4 spellings (including shortened, integer-only, octal and hexadecimal forms), and non-public IP literals. Only GET and HEAD are accepted.
 5. For a hostname, the agent resolves A and AAAA records. Only an empty answer for one address family is tolerated; other resolver errors fail closed. The combined set is capped at 16 and rejected if any address is non-public.
 6. The agent chooses a validated address and passes it to Node HTTP(S) through a custom lookup callback. The callback returns that address instead of performing a second DNS lookup. HTTPS retains the original hostname as SNI and leaves certificate verification enabled. Connection pooling is disabled so a later job cannot reuse a socket established under a different validation decision.
@@ -42,7 +42,8 @@ Configure these environment variables outside source control:
 
 - PROBE_TLS_CERT_FILE: path to the agent HTTPS certificate chain.
 - PROBE_TLS_KEY_FILE: path to the matching private key.
-- PROBE_SHARED_SECRET: a random secret of at least 32 bytes, shared with the Worker secret store.
+- PROBE_SHARED_SECRET: a random secret of at least 32 bytes, shared with the Worker secret store. The same secret authenticates Worker-to-agent jobs and agent-to-Worker replay claims.
+- PROBE_REPLAY_URL: required HTTPS URL for the Worker endpoint `https://<api-host>/internal/probe-agent/replay`. It must use the default port and exact path; the agent refuses to start without it.
 - PROBE_PORT: optional listener port; defaults to 8788.
 - PROBE_HOST: optional bind address; defaults to 0.0.0.0.
 
@@ -52,7 +53,9 @@ Generate a secret locally with a cryptographically secure generator such as open
 
 Start the service with node apps/probe-agent/src/server.mjs. It requires TLS files and the shared secret at startup. GET /healthz returns only a minimal status value. POST /v1/probe requires the signed request headers.
 
-The nonce replay cache is currently in process memory. Replay-nonce and source-IP rate-limit entries use a non-decreasing clock and insertion-ordered expiry pruning: routine requests do not scan the full bounded maps, and expired entries are removed from the oldest end. If all nonce slots remain live, new signed requests fail closed with 503. Run one agent instance only. Do not add replicas or load balancing until a shared durable nonce store is implemented and tested; otherwise a captured signed request could be replayed against another replica. The source-IP rate limit is an additional abuse control, not a tenant quota. Its in-memory bucket map is hard-capped at 5,000 entries: expired buckets are reclaimed, and new source IPs are rejected while all slots remain live. The D1 scheduler enforces a two-in-flight-probe workspace quota across overlapping invocations; plan/usage quotas remain separate launch work.
+The standalone agent now claims each signed request nonce through the Worker endpoint configured by `PROBE_REPLAY_URL`. The Worker verifies the exact raw-body HMAC and timestamp, hashes the nonce with SHA-256, then atomically deletes expired rows and inserts the new hash into D1 under a unique key. Duplicate claims return 409; D1/network failures fail closed before any customer-target socket is opened. Only nonce hashes and expiry timestamps are stored—never raw nonces, signed bodies or customer URLs. This shared D1 guard survives agent restarts and prevents the same nonce from being accepted by two agents using the same control-plane database.
+
+The source-IP rate limiter and active-egress cap remain per-process. Keep one agent instance until shared global rate-limit and concurrency controls are implemented and verified; the durable nonce store alone does not make horizontal scaling safe. The source-IP rate limit is an additional abuse control, not a tenant quota. Its in-memory bucket map is hard-capped at 5,000 entries: expired buckets are reclaimed, and new source IPs are rejected while all slots remain live. The D1 scheduler enforces a two-in-flight-probe workspace quota across overlapping invocations; plan/usage quotas remain separate launch work.
 
 ## Tests and verified limits
 
@@ -74,7 +77,7 @@ These tests use injected DNS answers and a local HTTP server. They do not perfor
 - Run the full repository CI and probe-agent Node suite for the latest feature branch.
 - Exercise a real HTTPS handshake using a trusted test certificate and verify hostname mismatch/expiry failures.
 - Verify DNS behavior and outbound network restrictions in the intended host environment.
-- Add a durable, shared replay store before multi-instance agent operation.
+- Add shared global source-IP rate limiting and active-egress capacity controls before multi-instance agent operation; signed nonce replay is now claimed in D1.
 - Deploy the agent and configure its URL/TLS/secret only after explicit deployment authorization.
 - Automatic incident lifecycle transitions now enqueue email deliveries in the same D1 batch; complete full CI and a production-like Worker-to-agent-to-D1/notification end-to-end test before enabling customer probes.
 

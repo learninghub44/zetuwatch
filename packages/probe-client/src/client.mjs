@@ -68,6 +68,30 @@ export async function signProbePayload(secret, timestamp, nonce, body) {
   return toHex(await crypto.subtle.sign("HMAC", key, encoder.encode(canonical)));
 }
 
+export async function verifyProbePayload(secret, timestamp, nonce, body, signature) {
+  if (typeof secret !== "string" || encoder.encode(secret).byteLength < 32 ||
+      typeof timestamp !== "string" || !/^\d{10}$/.test(timestamp) ||
+      typeof nonce !== "string" || !/^[A-Za-z0-9_-]{16,64}$/.test(nonce) ||
+      typeof body !== "string" || encoder.encode(body).byteLength > 360 * 1024 ||
+      typeof signature !== "string" || !/^[a-f0-9]{64}$/.test(signature)) {
+    return false;
+  }
+  try {
+    const digest = toHex(await crypto.subtle.digest("SHA-256", encoder.encode(body)));
+    const canonical = `v1\n${timestamp}\n${nonce}\n${digest}`;
+    const key = await crypto.subtle.importKey(
+      "raw", encoder.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["verify"]
+    );
+    const signatureBytes = new Uint8Array(32);
+    for (let index = 0; index < signatureBytes.length; index += 1) {
+      signatureBytes[index] = Number.parseInt(signature.slice(index * 2, index * 2 + 2), 16);
+    }
+    return await crypto.subtle.verify("HMAC", key, signatureBytes, encoder.encode(canonical));
+  } catch {
+    return false;
+  }
+}
+
 export async function sendProbeJob(endpoint, secret, input, options = {}) {
   const target = validateProbeAgentEndpoint(endpoint);
   const job = normalizeJob(input);

@@ -1,4 +1,5 @@
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+import { isIP } from "node:net";
 import { readFileSync } from "node:fs";
 import { createServer as createHttpsServer } from "node:https";
 import { pathToFileURL } from "node:url";
@@ -39,6 +40,64 @@ function validSignature(secret, timestamp, nonce, body, received) {
   const expected = Buffer.from(signProbeRequest(secret, timestamp, nonce, body), "hex");
   const actual = Buffer.from(received, "hex");
   return expected.length === actual.length && timingSafeEqual(expected, actual);
+}
+
+export function createDurableNonceClaimer(options = {}) {
+  const secret = options.secret;
+  if (typeof secret !== "string" || Buffer.byteLength(secret, "utf8") < 32) {
+    throw new Error("PROBE_SHARED_SECRET_REQUIRED");
+  }
+  let endpoint;
+  try { endpoint = new URL(options.url); }
+  catch { throw new Error("REPLAY_STORE_URL_INVALID"); }
+  const hostname = endpoint.hostname.replace(/^\[|\]$/g, "");
+  if (endpoint.protocol !== "https:" || endpoint.username || endpoint.password ||
+      endpoint.search || endpoint.hash || endpoint.pathname !== "/internal/probe-agent/replay" ||
+      (endpoint.port && endpoint.port !== "443") || isIP(hostname) !== 0 ||
+      !hostname.includes(".") || hostname === "localhost" ||
+      hostname.endsWith(".localhost") || hostname.endsWith(".local") ||
+      hostname.endsWith(".internal") || hostname.endsWith(".test") ||
+      hostname.endsWith(".invalid") || hostname.endsWith(".onion")) {
+    throw new Error("REPLAY_STORE_URL_INVALID");
+  }
+  const fetcher = options.fetcher ?? fetch;
+  const timeoutMs = options.timeoutMs ?? 3_000;
+  if (typeof fetcher !== "function" || !Number.isInteger(timeoutMs) ||
+      timeoutMs < 250 || timeoutMs > 5_000) {
+    throw new Error("REPLAY_STORE_CONFIG_INVALID");
+  }
+
+  return async ({ timestamp, nonce }) => {
+    if (typeof timestamp !== "string" || !/^\d{10}$/.test(timestamp) ||
+        typeof nonce !== "string" || !/^[A-Za-z0-9_-]{16,64}$/.test(nonce)) {
+      throw new Error("REPLAY_STORE_REQUEST_INVALID");
+    }
+    const body = JSON.stringify({ nonce });
+    const signature = signProbeRequest(secret, timestamp, nonce, body);
+    let response;
+    try {
+      response = await fetcher(endpoint.href, {
+        method: "POST",
+        redirect: "error",
+        cache: "no-store",
+        credentials: "omit",
+        signal: AbortSignal.timeout(timeoutMs),
+        headers: {
+          "content-type": "application/json",
+          "x-zw-timestamp": timestamp,
+          "x-zw-nonce": nonce,
+          "x-zw-signature": signature
+        },
+        body
+      });
+    } catch {
+      throw new Error("REPLAY_STORE_UNAVAILABLE");
+    }
+    if (response.status === 204) return true;
+    if (response.status === 409) return false;
+    await response.body?.cancel().catch(() => undefined);
+    throw new Error("REPLAY_STORE_UNAVAILABLE");
+  };
 }
 
 function readBody(request, maxBytes) {
@@ -132,6 +191,8 @@ export function createProbeHandler(options = {}) {
   }
   const probe = options.probe ?? runProbe;
   const webhook = options.webhook ?? runWebhook;
+  const claimNonce = options.claimNonce;
+  if (claimNonce !== undefined && typeof claimNonce !== "function") throw new Error("REPLAY_GUARD_CONFIG_INVALID");
   const now = options.now ?? (() => Date.now());
   const nonces = new Map();
   const clock = createNonDecreasingClock(now);
@@ -190,21 +251,37 @@ export function createProbeHandler(options = {}) {
         return;
       }
 
-      pruneExpiredPrefix(nonces, currentTime, expiresAt => expiresAt);
-      if (nonces.has(nonce)) {
-        sendJson(response, 409, { error: "REPLAY_REJECTED" });
-        return;
+      if (claimNonce) {
+        let claimed = false;
+        try {
+          claimed = await claimNonce({ timestamp: timestampText, nonce });
+        } catch {
+          sendJson(response, 503, { error: "REPLAY_GUARD_UNAVAILABLE" });
+          return;
+        }
+        if (claimed !== true) {
+          sendJson(response, 409, { error: "REPLAY_REJECTED" });
+          return;
+        }
+      } else {
+        // The in-memory fallback is for isolated handler tests only. The
+        // standalone server always supplies the D1-backed claimer.
+        pruneExpiredPrefix(nonces, currentTime, expiresAt => expiresAt);
+        if (nonces.has(nonce)) {
+          sendJson(response, 409, { error: "REPLAY_REJECTED" });
+          return;
+        }
+        if (nonces.size >= MAX_NONCES) {
+          sendJson(response, 503, { error: "REPLAY_GUARD_FULL" });
+          return;
+        }
+        const nonceExpiresAt = currentTime + NONCE_TTL_MS;
+        if (!Number.isSafeInteger(nonceExpiresAt)) {
+          sendJson(response, 503, { error: "REPLAY_GUARD_UNAVAILABLE" });
+          return;
+        }
+        nonces.set(nonce, nonceExpiresAt);
       }
-      if (nonces.size >= MAX_NONCES) {
-        sendJson(response, 503, { error: "REPLAY_GUARD_FULL" });
-        return;
-      }
-      const nonceExpiresAt = currentTime + NONCE_TTL_MS;
-      if (!Number.isSafeInteger(nonceExpiresAt)) {
-        sendJson(response, 503, { error: "REPLAY_GUARD_UNAVAILABLE" });
-        return;
-      }
-      nonces.set(nonce, nonceExpiresAt);
 
       let job;
       try {
@@ -230,7 +307,9 @@ export function startServer(env = process.env) {
   const certPath = env.PROBE_TLS_CERT_FILE;
   const keyPath = env.PROBE_TLS_KEY_FILE;
   if (!certPath || !keyPath) throw new Error("PROBE_TLS_CERT_FILE_AND_KEY_REQUIRED");
-  const handler = createProbeHandler({ secret: env.PROBE_SHARED_SECRET });
+  if (!env.PROBE_REPLAY_URL) throw new Error("PROBE_REPLAY_URL_REQUIRED");
+  const claimNonce = createDurableNonceClaimer({ url: env.PROBE_REPLAY_URL, secret: env.PROBE_SHARED_SECRET });
+  const handler = createProbeHandler({ secret: env.PROBE_SHARED_SECRET, claimNonce });
   const server = createHttpsServer({
     cert: readFileSync(certPath),
     key: readFileSync(keyPath),

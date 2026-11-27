@@ -157,3 +157,10 @@ The existing focused Node runner/transport/client suite previously passed 18 tes
 - Migration validation checks the legacy `v1` default, accepted key-id syntax, rejected unsafe key ids and the key-rotation index.
 
 These tests use the isolated local D1/Workers runtime and test-only keys. They do not configure Cloudflare secrets, deploy a Worker, or exercise production key management. The new migration, keyring, rotation worker and integration tests must pass the complete pinned repository CI on the latest branch head before the feature is considered verified.
+
+
+## Durable probe-agent replay protection
+
+- The Worker/D1 integration suite verifies exact raw-body HMAC validation, timestamp freshness, nonce/header-body binding, browser-origin rejection, request-size bounds, expired-row pruning and atomic duplicate rejection under concurrent claims.
+- The Node agent suite verifies that production replay claims use the exact HTTPS Worker endpoint, sign the claim body with the shared secret, reject redirects, map D1 duplicate responses to replay rejection and fail closed when the Worker is unavailable. The standalone server requires `PROBE_REPLAY_URL`; the in-memory fallback is only for isolated handler tests.
+- The database stores only a SHA-256 nonce hash and expiry timestamp. These tests use isolated local D1 and test-only bindings; they do not prove a deployed Worker/agent network path or production secret configuration.

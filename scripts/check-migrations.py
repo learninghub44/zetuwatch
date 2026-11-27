@@ -19,7 +19,7 @@ def main() -> None:
         "audit_logs", "auth_tokens", "auth_sessions", "auth_rate_limits",
         "organization_invitations", "api_keys", "notification_deliveries",
         "maintenance_windows", "status_pages", "status_page_monitors", "webhook_endpoints",
-        "webhook_deliveries", "webhook_delivery_attempts",
+        "webhook_deliveries", "webhook_delivery_attempts", "probe_agent_replay_nonces",
     }
     existing = {row[0] for row in db.execute(
         "SELECT name FROM sqlite_master WHERE type = 'table'"
@@ -199,6 +199,45 @@ def main() -> None:
         WHERE delivery_id = (SELECT id FROM webhook_deliveries WHERE event_id = 'ev1')""").fetchone()
     if abandoned != ("abandoned", "ENDPOINT_DISABLED"):
         raise SystemExit(f"Endpoint disable did not close active attempt: {abandoned}")
+
+    replay_indexes = {row[1] for row in db.execute("PRAGMA index_list(probe_agent_replay_nonces)")}
+    if "idx_probe_agent_replay_nonces_expiry" not in replay_indexes:
+        raise SystemExit("Missing idx_probe_agent_replay_nonces_expiry")
+
+    replay_nonce = "a" * 64
+    replay_now = "2026-11-27T10:00:00.000Z"
+    replay_future = "2026-11-27T10:05:00.000Z"
+    db.execute(
+        "INSERT INTO probe_agent_replay_nonces (nonce_hash, expires_at, created_at) VALUES (?, ?, ?)",
+        (replay_nonce, replay_future, replay_now),
+    )
+    db.execute(
+        "INSERT OR IGNORE INTO probe_agent_replay_nonces (nonce_hash, expires_at, created_at) VALUES (?, ?, ?)",
+        (replay_nonce, replay_future, replay_now),
+    )
+    replay_count = db.execute(
+        "SELECT COUNT(*) FROM probe_agent_replay_nonces WHERE nonce_hash = ?", (replay_nonce,)
+    ).fetchone()[0]
+    if replay_count != 1:
+        raise SystemExit("Probe-agent replay nonce uniqueness is not enforced")
+    db.execute(
+        "INSERT INTO probe_agent_replay_nonces (nonce_hash, expires_at, created_at) VALUES (?, ?, ?)",
+        ("b" * 64, "2026-11-27T09:59:00.000Z", "2026-11-27T09:58:00.000Z"),
+    )
+    db.execute("DELETE FROM probe_agent_replay_nonces WHERE expires_at <= ?", (replay_now,))
+    expired_count = db.execute(
+        "SELECT COUNT(*) FROM probe_agent_replay_nonces WHERE nonce_hash = ?", ("b" * 64,)
+    ).fetchone()[0]
+    if expired_count != 0:
+        raise SystemExit("Expired probe-agent replay nonces were not pruned")
+    try:
+        db.execute(
+            "INSERT INTO probe_agent_replay_nonces (nonce_hash, expires_at, created_at) VALUES (?, ?, ?)",
+            ("not-a-hash", replay_future, replay_now),
+        )
+        raise SystemExit("Probe-agent replay nonce hash constraint was not enforced")
+    except sqlite3.IntegrityError:
+        pass
 
     violations = list(db.execute("PRAGMA foreign_key_check"))
     if violations:

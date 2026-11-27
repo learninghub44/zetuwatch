@@ -8,6 +8,7 @@ import { createWebhookSecret, decryptWebhookValue, encryptWebhookValue, normaliz
 import { getWebhookEncryptionKey, readWebhookKeyring, webhookEncryptionContext } from "../../../packages/notifications-core/src/webhook-keyring";
 import { rotateWebhookEncryptionBatch } from "../../../packages/notifications-core/src/webhook-key-rotation";
 import { signWebhookPayload } from "../../../packages/notifications-core/src/webhook-signing";
+import { verifyProbePayload } from "../../../packages/probe-client/src/client.mjs";
 
 interface Env {
   DB: D1Database;
@@ -70,7 +71,7 @@ function getMonitorState(monitor: MonitorStateRow, executionEnabled: boolean): s
 const encoder = new TextEncoder();
 const json = (data: unknown, status = 200, headers: HeadersInit = {}): Response =>
   Response.json(data, { status, headers: { "cache-control": "no-store", ...headers } });
-type JsonRecordResult = { ok: true; value: Record<string, unknown> } | { ok: false; error: "too_large" | "invalid" };
+type JsonRecordResult = { ok: true; value: Record<string, unknown>; raw: string } | { ok: false; error: "too_large" | "invalid" };
 async function readJsonRecord(request: Request, maxBytes = 8_192): Promise<JsonRecordResult> {
   const contentLength = request.headers.get("content-length");
   if (contentLength !== null && (!/^\d+$/.test(contentLength) || Number(contentLength) > maxBytes)) {
@@ -100,9 +101,10 @@ async function readJsonRecord(request: Request, maxBytes = 8_192): Promise<JsonR
   let offset = 0;
   for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
   try {
-    const value = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)) as unknown;
+    const raw = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    const value = JSON.parse(raw) as unknown;
     if (!value || typeof value !== "object" || Array.isArray(value)) return { ok: false, error: "invalid" };
-    return { ok: true, value: value as Record<string, unknown> };
+    return { ok: true, value: value as Record<string, unknown>, raw };
   } catch {
     return { ok: false, error: "invalid" };
   }
@@ -223,6 +225,58 @@ export default {
 
     if (request.method === "GET" && url.pathname === "/health") {
       return json({ service: "zetuwatch-api", status: "ok", environment: env.APP_ENV });
+    }
+
+    if (request.method === "POST" && url.pathname === "/internal/probe-agent/replay") {
+      // This endpoint is for the authenticated egress agent only. It is not a
+      // browser API and never returns nonce material or customer data.
+      if (request.headers.has("origin")) return json({ error: "ORIGIN_NOT_ALLOWED" }, 403);
+      if (!env.PROBE_SHARED_SECRET || encoder.encode(env.PROBE_SHARED_SECRET).byteLength < 32) {
+        return json({ error: "REPLAY_STORE_NOT_CONFIGURED" }, 503);
+      }
+      const contentType = request.headers.get("content-type") || "";
+      const contentEncoding = request.headers.get("content-encoding") || "identity";
+      if (!/^application\/json(?:\s*;|$)/i.test(contentType) || contentEncoding !== "identity") {
+        return json({ error: "UNSUPPORTED_MEDIA_TYPE" }, 415);
+      }
+      const parsed = await readJsonRecord(request, 256);
+      if (!parsed.ok) {
+        return json({ error: parsed.error === "too_large" ? "BODY_TOO_LARGE" : "INVALID_REQUEST" },
+          parsed.error === "too_large" ? 413 : 400);
+      }
+      if (!(await rateLimit(request, env, "probe-agent-replay", 5_000))) {
+        return json({ error: "RATE_LIMITED" }, 429);
+      }
+      const timestampText = request.headers.get("x-zw-timestamp") || "";
+      const nonce = request.headers.get("x-zw-nonce") || "";
+      const signature = request.headers.get("x-zw-signature") || "";
+      const timestamp = /^\d{10}$/.test(timestampText) ? Number(timestampText) : NaN;
+      const nowMs = Date.now();
+      if (!Number.isSafeInteger(timestamp) ||
+          Math.abs(Math.floor(nowMs / 1000) - timestamp) > 60 ||
+          !/^[A-Za-z0-9_-]{16,64}$/.test(nonce) ||
+          Object.keys(parsed.value).length !== 1 || parsed.value.nonce !== nonce ||
+          !(await verifyProbePayload(env.PROBE_SHARED_SECRET, timestampText, nonce, parsed.raw, signature))) {
+        return json({ error: "UNAUTHORIZED" }, 401);
+      }
+
+      // The unique hash is the durable replay guard. Cleanup and insert run in
+      // one D1 batch, so two agent instances cannot both claim the same nonce.
+      const now = new Date(nowMs).toISOString();
+      const expiresAt = new Date(Math.max(nowMs, timestamp * 1_000) + 300_000).toISOString();
+      const nonceHash = await sha256(nonce);
+      try {
+        const results = await env.DB.batch([
+          env.DB.prepare("DELETE FROM probe_agent_replay_nonces WHERE expires_at <= ?").bind(now),
+          env.DB.prepare(`INSERT INTO probe_agent_replay_nonces (nonce_hash, expires_at, created_at)
+            VALUES (?, ?, ?) ON CONFLICT(nonce_hash) DO NOTHING RETURNING nonce_hash`)
+            .bind(nonceHash, expiresAt, now)
+        ]);
+        const inserted = Array.isArray(results[1]?.results) && results[1].results.length === 1;
+        return new Response(null, { status: inserted ? 204 : 409, headers: { "cache-control": "no-store" } });
+      } catch {
+        return json({ error: "REPLAY_STORE_UNAVAILABLE" }, 503);
+      }
     }
 
     // Public status pages expose only explicitly published configuration and
