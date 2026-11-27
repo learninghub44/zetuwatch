@@ -995,11 +995,14 @@ export default {
         }
 
         let keyring;
+        try { keyring = readWebhookKeyring(env); }
+        catch {
+          return json({ error: "WEBHOOK_ENCRYPTION_UNAVAILABLE", message: "The operator has not configured a valid webhook encryption keyring." }, 503);
+        }
         let oldKey: ReturnType<typeof getWebhookEncryptionKey>;
         let destination: string;
         let oldSecret: string;
         try {
-          keyring = readWebhookKeyring(env);
           oldKey = getWebhookEncryptionKey(keyring, endpoint.encryptionKeyId);
           [destination, oldSecret] = await Promise.all([
             decryptWebhookValue(
