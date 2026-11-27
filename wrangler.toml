@@ -7,6 +7,7 @@ compatibility_flags = ["nodejs_compat"]
 APP_ENV = "development"
 PUBLIC_APP_URL = "http://localhost:8787"
 WEBHOOKS_ENABLED = "false"
+WEBHOOK_ENCRYPTION_KEY_ID = "v1"
 
 [[d1_databases]]
 binding = "DB"
