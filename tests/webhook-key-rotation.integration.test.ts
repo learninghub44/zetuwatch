@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { encryptWebhookValue, decryptWebhookValue, createWebhookSecret } from "../packages/notifications-core/src/webhook-secrets";
 import { rotateWebhookEncryptionBatch, type WebhookKeyRotationEnv } from "../packages/notifications-core/src/webhook-key-rotation";
 import { webhookEncryptionContext } from "../packages/notifications-core/src/webhook-keyring";
+import { dispatchWebhookBatch, type WebhookDispatchEnv } from "../packages/notifications-core/src/webhook-dispatch";
 
 const KEY_V1 = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 const KEY_V2 = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
@@ -70,6 +71,37 @@ function rotationEnv(overrides: Partial<WebhookKeyRotationEnv> = {}): WebhookKey
     WEBHOOK_ENCRYPTION_KEY_PREVIOUS: KEY_V1,
     WEBHOOK_ENCRYPTION_KEY_PREVIOUS_ID: "v1",
     ...overrides
+  };
+}
+
+async function createIncidentEvent(identity: Identity, endpointId: string): Promise<string> {
+  const monitorId = crypto.randomUUID();
+  const incidentId = crypto.randomUUID();
+  const eventId = crypto.randomUUID();
+  const createdAt = new Date(Date.now() - 60_000).toISOString();
+  await env.DB.batch([
+    env.DB.prepare("UPDATE webhook_endpoints SET is_enabled = 1 WHERE id = ? AND organization_id = ?")
+      .bind(endpointId, identity.organizationId),
+    env.DB.prepare("INSERT INTO monitors (id, organization_id, name, target_url) VALUES (?, ?, ?, ?)")
+      .bind(monitorId, identity.organizationId, "Rotation API", "https://api.example.com/health"),
+    env.DB.prepare("INSERT INTO incidents (id, monitor_id, started_at, status, summary) VALUES (?, ?, ?, 'investigating', ?)")
+      .bind(incidentId, monitorId, createdAt, "Private incident summary"),
+    env.DB.prepare("INSERT INTO incident_events (id, incident_id, event_type, message, created_at, visibility) VALUES (?, ?, 'incident.opened', ?, ?, 'internal')")
+      .bind(eventId, incidentId, "Private diagnostic", createdAt)
+  ]);
+  return eventId;
+}
+
+function dispatchEnv(): WebhookDispatchEnv {
+  return {
+    DB: env.DB,
+    WEBHOOKS_ENABLED: "true",
+    WEBHOOK_ENCRYPTION_KEY: KEY_V2,
+    WEBHOOK_ENCRYPTION_KEY_ID: "v2",
+    WEBHOOK_ENCRYPTION_KEY_PREVIOUS: KEY_V1,
+    WEBHOOK_ENCRYPTION_KEY_PREVIOUS_ID: "v1",
+    PROBE_AGENT_URL: "https://agent.example.test/v1/probe",
+    PROBE_SHARED_SECRET: "test-only-agent-shared-secret-with-32-bytes"
   };
 }
 
@@ -180,6 +212,41 @@ describe("webhook master-key rotation", () => {
       "SELECT encryption_key_id AS keyId FROM webhook_endpoints WHERE id = ?"
     ).bind(endpoint.id).first<{ keyId: string }>();
     expect(row?.keyId).toBe("orphan-v9");
+  });
+
+  it("continues delivering legacy endpoints through the previous key during rotation", async () => {
+    const identity = await createIdentity();
+    const endpoint = await createLegacyEndpoint(identity);
+    const eventId = await createIncidentEvent(identity, endpoint.id);
+    const result = await dispatchWebhookBatch(dispatchEnv(), {
+      sender: async (_url, _secret, job) => {
+        expect(job.destinationUrl).toBe(endpoint.destination);
+        expect(job.eventId).toBe(eventId);
+        return { delivered: true, responseStatus: 204, errorCode: null, retryAfterSeconds: null };
+      }
+    });
+    expect(result).toMatchObject({ skipped: false, claimed: 1, sent: 1, failed: 0 });
+  });
+
+  it("delivers a re-encrypted endpoint using only the new current key", async () => {
+    const identity = await createIdentity();
+    const endpoint = await createLegacyEndpoint(identity);
+    const rotated = await rotateWebhookEncryptionBatch(rotationEnv(), { limit: 1 });
+    expect(rotated.rotated).toBe(1);
+    const eventId = await createIncidentEvent(identity, endpoint.id);
+    const currentOnly: WebhookDispatchEnv = {
+      ...dispatchEnv(),
+      WEBHOOK_ENCRYPTION_KEY_PREVIOUS: undefined,
+      WEBHOOK_ENCRYPTION_KEY_PREVIOUS_ID: undefined
+    };
+    const result = await dispatchWebhookBatch(currentOnly, {
+      sender: async (_url, _secret, job) => {
+        expect(job.destinationUrl).toBe(endpoint.destination);
+        expect(job.eventId).toBe(eventId);
+        return { delivered: true, responseStatus: 202, errorCode: null, retryAfterSeconds: null };
+      }
+    });
+    expect(result).toMatchObject({ skipped: false, claimed: 1, sent: 1, failed: 0 });
   });
 
   it("fails closed when the configured previous key cannot authenticate a row", async () => {
