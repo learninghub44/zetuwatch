@@ -2,12 +2,12 @@ import { validateProbeAgentEndpoint } from "../../probe-client/src/client.mjs";
 import { sendWebhookJob, type WebhookJob, type WebhookResult } from "../../probe-client/src/webhook-client.mjs";
 import { claimDueWebhookDeliveries, settleWebhookDelivery, type WebhookDelivery } from "./webhook-outbox";
 import { decryptWebhookValue, WEBHOOK_ENCRYPTION_KEY_VERSION } from "./webhook-secrets";
+import { getWebhookEncryptionKey, readWebhookKeyring, webhookEncryptionContext, type WebhookKeyringEnvironment } from "./webhook-keyring";
 import { signWebhookPayload } from "./webhook-signing";
 
-export interface WebhookDispatchEnv {
+export interface WebhookDispatchEnv extends WebhookKeyringEnvironment {
   DB: D1Database;
   WEBHOOKS_ENABLED?: string;
-  WEBHOOK_ENCRYPTION_KEY?: string;
   PROBE_AGENT_URL?: string;
   PROBE_SHARED_SECRET?: string;
 }
@@ -15,7 +15,10 @@ export interface WebhookDispatchEnv {
 export interface WebhookDispatchSummary {
   skipped: boolean;
   reason?: "WEBHOOKS_DISABLED" | "WEBHOOK_ENCRYPTION_KEY_MISSING" |
-    "WEBHOOK_ENCRYPTION_KEY_INVALID" | "WEBHOOK_AGENT_CONFIGURATION_MISSING" |
+    "WEBHOOK_ENCRYPTION_KEY_INVALID" | "WEBHOOK_ENCRYPTION_KEY_ID_INVALID" |
+    "WEBHOOK_ENCRYPTION_KEY_PREVIOUS_INVALID" | "WEBHOOK_ENCRYPTION_KEY_PREVIOUS_ID_INVALID" |
+    "WEBHOOK_ENCRYPTION_KEY_IDS_MUST_DIFFER" | "WEBHOOK_PREVIOUS_KEY_ID_WITHOUT_KEY" |
+    "WEBHOOK_AGENT_CONFIGURATION_MISSING" |
     "WEBHOOK_AGENT_CONFIGURATION_INVALID";
   claimed: number;
   sent: number;
@@ -39,6 +42,7 @@ interface WebhookDeliveryContext {
   secretCiphertext: string;
   secretNonce: string;
   encryptionKeyVersion: number;
+  encryptionKeyId: string;
   organizationName: string;
   monitorName: string;
   incidentStatus: string;
@@ -71,6 +75,7 @@ const RETRYABLE_ERRORS = new Set([
   "REMOTE_SERVER_ERROR",
   "REMOTE_RESPONSE_INVALID",
   "WEBHOOK_DECRYPT_FAILED",
+  "WEBHOOK_ENCRYPTION_KEY_ID_UNAVAILABLE",
   "WEBHOOK_AGENT_UNAVAILABLE",
   "WEBHOOK_AGENT_AUTH_FAILED",
   "WEBHOOK_AGENT_INVALID_RESPONSE",
@@ -106,11 +111,24 @@ function isoTimestamp(value: string): string {
 }
 
 export function webhookDispatchDisabledReason(
-  env: Pick<WebhookDispatchEnv, "WEBHOOKS_ENABLED" | "WEBHOOK_ENCRYPTION_KEY" | "PROBE_AGENT_URL" | "PROBE_SHARED_SECRET">
+  env: Pick<WebhookDispatchEnv,
+    "WEBHOOKS_ENABLED" | "WEBHOOK_ENCRYPTION_KEY" | "WEBHOOK_ENCRYPTION_KEY_ID" |
+    "WEBHOOK_ENCRYPTION_KEY_PREVIOUS" | "WEBHOOK_ENCRYPTION_KEY_PREVIOUS_ID" |
+    "PROBE_AGENT_URL" | "PROBE_SHARED_SECRET">
 ): WebhookDispatchSummary["reason"] | undefined {
   if (env.WEBHOOKS_ENABLED !== "true") return "WEBHOOKS_DISABLED";
-  if (!env.WEBHOOK_ENCRYPTION_KEY) return "WEBHOOK_ENCRYPTION_KEY_MISSING";
-  if (!/^[A-Za-z0-9_-]{43}$/.test(env.WEBHOOK_ENCRYPTION_KEY)) return "WEBHOOK_ENCRYPTION_KEY_INVALID";
+  try {
+    readWebhookKeyring(env);
+  } catch (error) {
+    const code = error instanceof Error ? error.message : "";
+    if (code === "WEBHOOK_ENCRYPTION_KEY_MISSING") return "WEBHOOK_ENCRYPTION_KEY_MISSING";
+    if (code === "WEBHOOK_ENCRYPTION_KEY_ID_INVALID") return "WEBHOOK_ENCRYPTION_KEY_ID_INVALID";
+    if (code === "WEBHOOK_ENCRYPTION_KEY_PREVIOUS_INVALID") return "WEBHOOK_ENCRYPTION_KEY_PREVIOUS_INVALID";
+    if (code === "WEBHOOK_ENCRYPTION_KEY_PREVIOUS_ID_INVALID") return "WEBHOOK_ENCRYPTION_KEY_PREVIOUS_ID_INVALID";
+    if (code === "WEBHOOK_ENCRYPTION_KEY_IDS_MUST_DIFFER") return "WEBHOOK_ENCRYPTION_KEY_IDS_MUST_DIFFER";
+    if (code === "WEBHOOK_PREVIOUS_KEY_ID_WITHOUT_KEY") return "WEBHOOK_PREVIOUS_KEY_ID_WITHOUT_KEY";
+    return "WEBHOOK_ENCRYPTION_KEY_INVALID";
+  }
   if (!env.PROBE_AGENT_URL || !env.PROBE_SHARED_SECRET ||
       new TextEncoder().encode(env.PROBE_SHARED_SECRET).byteLength < 32) {
     return "WEBHOOK_AGENT_CONFIGURATION_MISSING";
@@ -139,6 +157,7 @@ async function loadDeliveryContext(
       e.secret_ciphertext AS secretCiphertext,
       e.secret_nonce AS secretNonce,
       e.encryption_key_version AS encryptionKeyVersion,
+      e.encryption_key_id AS encryptionKeyId,
       o.name AS organizationName,
       m.name AS monitorName,
       i.status AS incidentStatus,
@@ -191,6 +210,7 @@ async function isDeliveryCurrent(
       AND e.destination_ciphertext = ? AND e.destination_nonce = ?
       AND e.secret_ciphertext = ? AND e.secret_nonce = ?
       AND e.encryption_key_version = ?
+      AND e.encryption_key_id = ?
   `).bind(
     delivery.id,
     delivery.organizationId,
@@ -202,7 +222,8 @@ async function isDeliveryCurrent(
     context.destinationNonce,
     context.secretCiphertext,
     context.secretNonce,
-    context.encryptionKeyVersion
+    context.encryptionKeyVersion,
+    context.encryptionKeyId
   ).first<{ eligible: number }>();
   return row?.eligible === 1;
 }
@@ -305,7 +326,7 @@ export async function dispatchWebhookBatch(
   if (!deliveries.length) return summary;
 
   const sender = options.sender ?? sendWebhookJob;
-  const encryptionKey = env.WEBHOOK_ENCRYPTION_KEY as string;
+  const keyring = readWebhookKeyring(env);
   const agentUrl = env.PROBE_AGENT_URL as string;
   const agentSecret = env.PROBE_SHARED_SECRET as string;
 
@@ -346,16 +367,21 @@ export async function dispatchWebhookBatch(
     let signingSecret: string;
     let payload: string;
     try {
+      const endpointKey = getWebhookEncryptionKey(keyring, context.encryptionKeyId);
       const [destination, secret] = await Promise.all([
         decryptWebhookValue(
           { ciphertext: context.destinationCiphertext, nonce: context.destinationNonce },
-          encryptionKey,
-          `zetuwatch:webhook:v${context.encryptionKeyVersion}:${delivery.organizationId}:${delivery.endpointId}:url`
+          endpointKey.value,
+          webhookEncryptionContext(
+            context.encryptionKeyVersion, context.encryptionKeyId, delivery.organizationId, delivery.endpointId, "url"
+          )
         ),
         decryptWebhookValue(
           { ciphertext: context.secretCiphertext, nonce: context.secretNonce },
-          encryptionKey,
-          `zetuwatch:webhook:v${context.encryptionKeyVersion}:${delivery.organizationId}:${delivery.endpointId}:secret`
+          endpointKey.value,
+          webhookEncryptionContext(
+            context.encryptionKeyVersion, context.encryptionKeyId, delivery.organizationId, delivery.endpointId, "secret"
+          )
         )
       ]);
       destinationUrl = destination;
