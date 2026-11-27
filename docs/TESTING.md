@@ -147,3 +147,13 @@ The new `tests/webhook-endpoints.integration.test.ts` cases cover owner/admin ac
 Node tests cover strict webhook-job normalization, HTTPS/default-port destination policy, IP-literal and local/special-use hostname rejection, event-ID/body binding, timestamp freshness, canonical base64url and payload-size bounds, A/AAAA mixed-answer rejection, DNS pinning, original hostname/SNI and TLS verification, redirect non-following, bounded Retry-After, response classification, total-deadline enforcement, Worker-to-agent HMAC signing, route authentication/replay protection and separate webhook request-body limits.
 
 The existing focused Node runner/transport/client suite previously passed 18 tests on Node v22.16.0. That does not verify the newly added Worker dispatcher. The new Worker/D1 tests and current full repository typecheck, inline browser script check, migration validation, Vitest suite and Node suite must run on the latest branch head before webhook delivery can be considered verified. No production TLS handshake or live receiver delivery has been performed.
+
+
+## Webhook master-key rotation coverage
+
+- Unit tests verify legacy `v1` AAD compatibility, current/previous key selection, invalid key ids, missing/duplicate key configuration and unavailable-key fail-closed behavior.
+- D1 integration tests verify that both endpoint ciphertexts move to the current key while the destination, signing secret and suffix remain unchanged; bounded batches resume; concurrent rotation workers cannot overwrite one another; destination-hash/authentication failures leave rows untouched; and unknown key ids are reported as blocked rather than guessed.
+- Dispatcher integration tests verify that legacy rows remain deliverable through the previous key during rotation and that re-encrypted rows deliver with the new current key after the previous key is removed.
+- Migration validation checks the legacy `v1` default, accepted key-id syntax, rejected unsafe key ids and the key-rotation index.
+
+These tests use the isolated local D1/Workers runtime and test-only keys. They do not configure Cloudflare secrets, deploy a Worker, or exercise production key management. The new migration, keyring, rotation worker and integration tests must pass the complete pinned repository CI on the latest branch head before the feature is considered verified.
