@@ -269,10 +269,10 @@ export default {
         const results = await env.DB.batch([
           env.DB.prepare("DELETE FROM probe_agent_replay_nonces WHERE expires_at <= ?").bind(now),
           env.DB.prepare(`INSERT INTO probe_agent_replay_nonces (nonce_hash, expires_at, created_at)
-            VALUES (?, ?, ?) ON CONFLICT(nonce_hash) DO NOTHING RETURNING nonce_hash`)
+            VALUES (?, ?, ?) ON CONFLICT(nonce_hash) DO NOTHING`)
             .bind(nonceHash, expiresAt, now)
         ]);
-        const inserted = Array.isArray(results[1]?.results) && results[1].results.length === 1;
+        const inserted = (results[1]?.meta?.changes ?? 0) === 1;
         return new Response(null, { status: inserted ? 204 : 409, headers: { "cache-control": "no-store" } });
       } catch {
         return json({ error: "REPLAY_STORE_UNAVAILABLE" }, 503);
