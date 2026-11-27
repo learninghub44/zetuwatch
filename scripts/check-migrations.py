@@ -67,13 +67,13 @@ def main() -> None:
     webhook_columns = {row[1] for row in db.execute("PRAGMA table_info(webhook_endpoints)")}
     for column in (
         "destination_host", "destination_hash", "destination_ciphertext", "destination_nonce",
-        "secret_ciphertext", "secret_nonce", "secret_last4", "encryption_key_version",
+        "secret_ciphertext", "secret_nonce", "secret_last4", "encryption_key_version", "encryption_key_id",
         "is_enabled", "created_by", "deleted_at",
     ):
         if column not in webhook_columns:
             raise SystemExit(f"Missing webhook_endpoints.{column}")
     webhook_indexes = {row[1] for row in db.execute("PRAGMA index_list(webhook_endpoints)")}
-    for index in ("idx_webhook_endpoints_org_destination", "idx_webhook_endpoints_org_active"):
+    for index in ("idx_webhook_endpoints_org_destination", "idx_webhook_endpoints_org_active", "idx_webhook_endpoints_key_rotation"):
         if index not in webhook_indexes:
             raise SystemExit(f"Missing {index}")
 
@@ -132,6 +132,21 @@ def main() -> None:
         secret_last4, encryption_key_version, is_enabled, created_by
     ) VALUES ('we1', 'o1', 'Receiver', 'hooks.example.com', ?, 'cipher', 'nonce',
         'cipher', 'nonce', '1234', 1, 1, 'u1')""", ("a" * 64,))
+    legacy_key_id = db.execute(
+        "SELECT encryption_key_id FROM webhook_endpoints WHERE id = 'we1'"
+    ).fetchone()[0]
+    if legacy_key_id != "v1":
+        raise SystemExit(f"Existing webhook rows must default to legacy key id v1: {legacy_key_id}")
+    db.execute("UPDATE webhook_endpoints SET encryption_key_id = 'key-v2' WHERE id = 'we1'")
+    if db.execute("SELECT encryption_key_id FROM webhook_endpoints WHERE id = 'we1'").fetchone()[0] != "key-v2":
+        raise SystemExit("A valid rotated webhook key id was not persisted")
+    try:
+        db.execute("UPDATE webhook_endpoints SET encryption_key_id = 'bad/key' WHERE id = 'we1'")
+    except sqlite3.IntegrityError:
+        pass
+    else:
+        raise SystemExit("Invalid webhook encryption key id was accepted")
+    db.execute("UPDATE webhook_endpoints SET encryption_key_id = 'v1' WHERE id = 'we1'")
     db.execute("""INSERT INTO incident_events
         (id, incident_id, event_type, message, created_at)
         VALUES ('ev1', 'i1', 'incident.opened', 'Incident opened', '2026-11-25 06:00:00')""")
