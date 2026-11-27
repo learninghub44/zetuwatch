@@ -5,6 +5,8 @@ import { dispatchDueMonitors, isProbeExecutionEnabled } from "../../../packages/
 import { dispatchNotificationBatch } from "../../../packages/notifications-core/src/dispatch";
 import { dispatchWebhookBatch, isWebhookDeliveryConfigured } from "../../../packages/notifications-core/src/webhook-dispatch";
 import { createWebhookSecret, decryptWebhookValue, encryptWebhookValue, normalizeWebhookDestination, WEBHOOK_ENCRYPTION_KEY_VERSION } from "../../../packages/notifications-core/src/webhook-secrets";
+import { getWebhookEncryptionKey, readWebhookKeyring, webhookEncryptionContext } from "../../../packages/notifications-core/src/webhook-keyring";
+import { rotateWebhookEncryptionBatch } from "../../../packages/notifications-core/src/webhook-key-rotation";
 import { signWebhookPayload } from "../../../packages/notifications-core/src/webhook-signing";
 
 interface Env {
@@ -14,6 +16,9 @@ interface Env {
   RESEND_API_KEY?: string;
   EMAIL_FROM?: string;
   WEBHOOK_ENCRYPTION_KEY?: string;
+  WEBHOOK_ENCRYPTION_KEY_ID?: string;
+  WEBHOOK_ENCRYPTION_KEY_PREVIOUS?: string;
+  WEBHOOK_ENCRYPTION_KEY_PREVIOUS_ID?: string;
   WEBHOOKS_ENABLED?: string;
   PROBES_ENABLED?: string;
   PROBE_AGENT_URL?: string;
@@ -898,8 +903,10 @@ export default {
           const code = error instanceof Error ? error.message : "WEBHOOK_URL_INVALID";
           return json({ error: code }, 400);
         }
-        if (!env.WEBHOOK_ENCRYPTION_KEY) {
-          return json({ error: "WEBHOOK_ENCRYPTION_UNAVAILABLE", message: "The operator has not configured the webhook encryption secret." }, 503);
+        let keyring;
+        try { keyring = readWebhookKeyring(env); }
+        catch {
+          return json({ error: "WEBHOOK_ENCRYPTION_UNAVAILABLE", message: "The operator has not configured a valid webhook encryption keyring." }, 503);
         }
 
         const endpointId = id();
@@ -908,8 +915,10 @@ export default {
         let encryptedSecret: Awaited<ReturnType<typeof encryptWebhookValue>>;
         try {
           [encryptedUrl, encryptedSecret] = await Promise.all([
-            encryptWebhookValue(destination.url, env.WEBHOOK_ENCRYPTION_KEY, `zetuwatch:webhook:v${WEBHOOK_ENCRYPTION_KEY_VERSION}:${organizationId}:${endpointId}:url`),
-            encryptWebhookValue(secret, env.WEBHOOK_ENCRYPTION_KEY, `zetuwatch:webhook:v${WEBHOOK_ENCRYPTION_KEY_VERSION}:${organizationId}:${endpointId}:secret`)
+            encryptWebhookValue(destination.url, keyring.current.value,
+              webhookEncryptionContext(WEBHOOK_ENCRYPTION_KEY_VERSION, keyring.current.id, organizationId, endpointId, "url")),
+            encryptWebhookValue(secret, keyring.current.value,
+              webhookEncryptionContext(WEBHOOK_ENCRYPTION_KEY_VERSION, keyring.current.id, organizationId, endpointId, "secret"))
           ]);
         } catch {
           return json({ error: "WEBHOOK_ENCRYPTION_UNAVAILABLE" }, 503);
@@ -922,17 +931,17 @@ export default {
               INSERT INTO webhook_endpoints (
                 id, organization_id, name, destination_host, destination_hash,
                 destination_ciphertext, destination_nonce, secret_ciphertext,
-                secret_nonce, secret_last4, encryption_key_version, is_enabled,
+                secret_nonce, secret_last4, encryption_key_version, encryption_key_id, is_enabled,
                 created_by, created_at, updated_at
               )
-              SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?
+              SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?
               WHERE (SELECT COUNT(*) FROM webhook_endpoints
                 WHERE organization_id = ? AND deleted_at IS NULL) < 10
             `).bind(
               endpointId, organizationId, name, destination.hostname,
               await sha256(destination.url), encryptedUrl.ciphertext, encryptedUrl.nonce,
               encryptedSecret.ciphertext, encryptedSecret.nonce, secret.slice(-4),
-              WEBHOOK_ENCRYPTION_KEY_VERSION, user.id, now, now, organizationId
+              WEBHOOK_ENCRYPTION_KEY_VERSION, keyring.current.id, user.id, now, now, organizationId
             ),
             env.DB.prepare(`
               INSERT INTO audit_logs
@@ -962,33 +971,110 @@ export default {
       if (webhookRotateMatch && endpointId && request.method === "POST") {
         if (!canManageWebhooks) return json({ error: "FORBIDDEN" }, 403);
         if (!(await rateLimit(request, env, "webhook-endpoint-rotate", 20))) return json({ error: "RATE_LIMITED" }, 429);
-        const endpoint = await env.DB.prepare(
-          "SELECT id FROM webhook_endpoints WHERE id = ? AND organization_id = ? AND deleted_at IS NULL"
-        ).bind(endpointId, organizationId).first<{ id: string }>();
+        const endpoint = await env.DB.prepare(`
+          SELECT id, is_enabled AS isEnabled,
+            destination_hash AS destinationHash,
+            destination_ciphertext AS destinationCiphertext,
+            destination_nonce AS destinationNonce,
+            secret_ciphertext AS secretCiphertext,
+            secret_nonce AS secretNonce,
+            secret_last4 AS secretLast4,
+            encryption_key_version AS encryptionKeyVersion,
+            encryption_key_id AS encryptionKeyId
+          FROM webhook_endpoints
+          WHERE id = ? AND organization_id = ? AND deleted_at IS NULL
+        `).bind(endpointId, organizationId).first<{
+          id: string; isEnabled: number; destinationHash: string;
+          destinationCiphertext: string; destinationNonce: string;
+          secretCiphertext: string; secretNonce: string; secretLast4: string;
+          encryptionKeyVersion: number; encryptionKeyId: string;
+        }>();
         if (!endpoint) return json({ error: "NOT_FOUND" }, 404);
-        if (!env.WEBHOOK_ENCRYPTION_KEY) return json({ error: "WEBHOOK_ENCRYPTION_UNAVAILABLE" }, 503);
+        if (endpoint.encryptionKeyVersion !== WEBHOOK_ENCRYPTION_KEY_VERSION) {
+          return json({ error: "WEBHOOK_ENCRYPTION_FORMAT_UNSUPPORTED" }, 409);
+        }
+
+        let keyring;
+        let oldKey: ReturnType<typeof getWebhookEncryptionKey>;
+        let destination: string;
+        let oldSecret: string;
+        try {
+          keyring = readWebhookKeyring(env);
+          oldKey = getWebhookEncryptionKey(keyring, endpoint.encryptionKeyId);
+          [destination, oldSecret] = await Promise.all([
+            decryptWebhookValue(
+              { ciphertext: endpoint.destinationCiphertext, nonce: endpoint.destinationNonce },
+              oldKey.value,
+              webhookEncryptionContext(endpoint.encryptionKeyVersion, endpoint.encryptionKeyId, organizationId, endpointId, "url")
+            ),
+            decryptWebhookValue(
+              { ciphertext: endpoint.secretCiphertext, nonce: endpoint.secretNonce },
+              oldKey.value,
+              webhookEncryptionContext(endpoint.encryptionKeyVersion, endpoint.encryptionKeyId, organizationId, endpointId, "secret")
+            )
+          ]);
+          const normalized = normalizeWebhookDestination(destination);
+          if (normalized.url !== destination || await sha256(destination) !== endpoint.destinationHash ||
+              !/^whsec_[A-Za-z0-9_-]{43}$/.test(oldSecret) || oldSecret.slice(-4) !== endpoint.secretLast4) {
+            throw new Error("WEBHOOK_ENDPOINT_AUTHENTICATION_FAILED");
+          }
+        } catch {
+          return json({
+            error: "WEBHOOK_ENDPOINT_CONFIGURATION_INVALID",
+            message: "The endpoint could not be authenticated with the configured encryption keyring. No values were changed."
+          }, 409);
+        }
+
         const secret = createWebhookSecret();
+        let encryptedUrl: Awaited<ReturnType<typeof encryptWebhookValue>>;
         let encryptedSecret: Awaited<ReturnType<typeof encryptWebhookValue>>;
         try {
-          encryptedSecret = await encryptWebhookValue(
-            secret, env.WEBHOOK_ENCRYPTION_KEY,
-            `zetuwatch:webhook:v${WEBHOOK_ENCRYPTION_KEY_VERSION}:${organizationId}:${endpointId}:secret`
-          );
-        } catch { return json({ error: "WEBHOOK_ENCRYPTION_UNAVAILABLE" }, 503); }
+          [encryptedUrl, encryptedSecret] = await Promise.all([
+            encryptWebhookValue(destination, keyring.current.value,
+              webhookEncryptionContext(endpoint.encryptionKeyVersion, keyring.current.id, organizationId, endpointId, "url")),
+            encryptWebhookValue(secret, keyring.current.value,
+              webhookEncryptionContext(endpoint.encryptionKeyVersion, keyring.current.id, organizationId, endpointId, "secret"))
+          ]);
+        } catch {
+          return json({ error: "WEBHOOK_ENCRYPTION_UNAVAILABLE" }, 503);
+        }
+
         const now = new Date().toISOString();
         const results = await env.DB.batch([
           env.DB.prepare(`UPDATE webhook_endpoints
-            SET secret_ciphertext = ?, secret_nonce = ?, secret_last4 = ?, updated_at = ?
-            WHERE id = ? AND organization_id = ? AND deleted_at IS NULL`)
-            .bind(encryptedSecret.ciphertext, encryptedSecret.nonce, secret.slice(-4), now, endpointId, organizationId),
+            SET destination_ciphertext = ?, destination_nonce = ?,
+                secret_ciphertext = ?, secret_nonce = ?, secret_last4 = ?,
+                encryption_key_id = ?, updated_at = ?
+            WHERE id = ? AND organization_id = ? AND deleted_at IS NULL
+              AND encryption_key_version = ? AND encryption_key_id = ?
+              AND destination_ciphertext = ? AND destination_nonce = ?
+              AND secret_ciphertext = ? AND secret_nonce = ?`)
+            .bind(
+              encryptedUrl.ciphertext, encryptedUrl.nonce,
+              encryptedSecret.ciphertext, encryptedSecret.nonce, secret.slice(-4),
+              keyring.current.id, now, endpointId, organizationId,
+              endpoint.encryptionKeyVersion, endpoint.encryptionKeyId,
+              endpoint.destinationCiphertext, endpoint.destinationNonce,
+              endpoint.secretCiphertext, endpoint.secretNonce
+            ),
           env.DB.prepare(`INSERT INTO audit_logs
-            (id, organization_id, actor_user_id, action, resource_type, resource_id)
-            SELECT ?, ?, ?, 'notification.webhook_secret_rotated', 'webhook_endpoint', ?
+            (id, organization_id, actor_user_id, action, resource_type, resource_id, metadata_json)
+            SELECT ?, ?, ?, 'notification.webhook_secret_rotated', 'webhook_endpoint', ?, ?
             WHERE changes() = 1`)
-            .bind(id(), organizationId, user.id, endpointId)
+            .bind(id(), organizationId, user.id, endpointId, JSON.stringify({
+              encryptionKeyId: keyring.current.id,
+              signingSecretRotated: true
+            }))
         ]);
-        if ((results[0]?.meta?.changes ?? 0) !== 1) return json({ error: "NOT_FOUND" }, 404);
-        return json({ message: "Webhook signing secret rotated. Copy it now; it will not be shown again.", secret, deliveryEnabled: endpoint.isEnabled === 1 && isWebhookDeliveryConfigured(env), deliveryConfigured: isWebhookDeliveryConfigured(env) });
+        if ((results[0]?.meta?.changes ?? 0) !== 1) {
+          return json({ error: "WEBHOOK_ENDPOINT_CHANGED", message: "The endpoint changed during rotation. Retry the operation." }, 409);
+        }
+        return json({
+          message: "Webhook signing secret rotated and endpoint ciphertext re-encrypted. Copy the new secret now; it will not be shown again.",
+          secret,
+          deliveryEnabled: endpoint.isEnabled === 1 && isWebhookDeliveryConfigured(env),
+          deliveryConfigured: isWebhookDeliveryConfigured(env)
+        });
       }
 
       if (webhookItemMatch && endpointId && request.method === "PATCH") {
@@ -1019,12 +1105,14 @@ export default {
               destination_nonce AS destinationNonce,
               secret_ciphertext AS secretCiphertext,
               secret_nonce AS secretNonce,
-              encryption_key_version AS encryptionKeyVersion
+              encryption_key_version AS encryptionKeyVersion,
+              encryption_key_id AS encryptionKeyId
             FROM webhook_endpoints
             WHERE id = ? AND organization_id = ? AND deleted_at IS NULL
           `).bind(endpointId, organizationId).first<{
             destinationHash: string; destinationCiphertext: string; destinationNonce: string;
             secretCiphertext: string; secretNonce: string; encryptionKeyVersion: number;
+            encryptionKeyId: string;
           }>();
           if (!storedEndpoint) return json({ error: "NOT_FOUND" }, 404);
           if (!isWebhookDeliveryConfigured(env)) {
@@ -1033,20 +1121,25 @@ export default {
               message: "The operator must enable the webhook dispatcher and configure its encryption key and trusted egress agent before this endpoint can be enabled."
             }, 503);
           }
-          if (storedEndpoint.encryptionKeyVersion !== WEBHOOK_ENCRYPTION_KEY_VERSION || !env.WEBHOOK_ENCRYPTION_KEY) {
-            return json({ error: "WEBHOOK_ENCRYPTION_KEY_VERSION_UNSUPPORTED" }, 409);
+          if (storedEndpoint.encryptionKeyVersion !== WEBHOOK_ENCRYPTION_KEY_VERSION) {
+            return json({ error: "WEBHOOK_ENCRYPTION_FORMAT_UNSUPPORTED" }, 409);
           }
           try {
-            const context = `zetuwatch:webhook:v${storedEndpoint.encryptionKeyVersion}:${organizationId}:${endpointId}`;
+            const keyring = readWebhookKeyring(env);
+            const endpointKey = getWebhookEncryptionKey(keyring, storedEndpoint.encryptionKeyId);
             const [destination, signingSecret] = await Promise.all([
               decryptWebhookValue({
                 ciphertext: storedEndpoint.destinationCiphertext,
                 nonce: storedEndpoint.destinationNonce
-              }, env.WEBHOOK_ENCRYPTION_KEY, context + ":url"),
+              }, endpointKey.value, webhookEncryptionContext(
+                storedEndpoint.encryptionKeyVersion, storedEndpoint.encryptionKeyId, organizationId, endpointId, "url"
+              )),
               decryptWebhookValue({
                 ciphertext: storedEndpoint.secretCiphertext,
                 nonce: storedEndpoint.secretNonce
-              }, env.WEBHOOK_ENCRYPTION_KEY, context + ":secret")
+              }, endpointKey.value, webhookEncryptionContext(
+                storedEndpoint.encryptionKeyVersion, storedEndpoint.encryptionKeyId, organizationId, endpointId, "secret"
+              ))
             ]);
             const normalized = normalizeWebhookDestination(destination);
             if (normalized.url !== destination || await sha256(destination) !== storedEndpoint.destinationHash) {
@@ -1644,6 +1737,24 @@ export default {
       }
     } catch {
       console.error("webhook_dispatch_failed", { schedulerLagMs });
+    }
+
+    // Re-encrypt one endpoint per minute when an operator has configured a
+    // current and previous key. This maintenance is independent of delivery
+    // enablement and never performs network I/O.
+    try {
+      const rotation = await rotateWebhookEncryptionBatch(env, { limit: 1, now: new Date() });
+      if (!rotation.skipped && (rotation.scanned > 0 || rotation.remaining > 0)) {
+        console.info("webhook_key_rotation_completed", {
+          scanned: rotation.scanned, rotated: rotation.rotated,
+          conflicts: rotation.conflicts, failed: rotation.failed,
+          remaining: rotation.remaining, blocked: rotation.blocked, schedulerLagMs
+        });
+      } else if (rotation.skipped && rotation.reason !== "PREVIOUS_KEY_NOT_CONFIGURED") {
+        console.warn("webhook_key_rotation_skipped", { reason: rotation.reason, schedulerLagMs });
+      }
+    } catch {
+      console.error("webhook_key_rotation_failed", { schedulerLagMs });
     }
 
     try {
