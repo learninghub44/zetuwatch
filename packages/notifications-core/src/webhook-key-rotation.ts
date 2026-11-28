@@ -40,11 +40,31 @@ interface EndpointRow {
   secretLast4: string;
   encryptionKeyVersion: number;
   encryptionKeyId: string;
+  failureAttempts: number;
 }
 
 const DEFAULT_BATCH_LIMIT = 1;
 const MAX_BATCH_LIMIT = 3;
+const MAX_ROTATION_FAILURE_ATTEMPTS = 20;
+const ROTATION_RETRY_BASE_MS = 60 * 60 * 1_000;
+const ROTATION_RETRY_MAX_MS = 24 * 60 * 60 * 1_000;
 const SECRET_PATTERN = /^whsec_[A-Za-z0-9_-]{43}$/;
+
+/** Exponential retry delay for a quarantined row, capped at one day. */
+export function webhookRotationRetryDelayMs(attemptNumber: number): number {
+  if (!Number.isInteger(attemptNumber) || attemptNumber < 1 ||
+      attemptNumber > MAX_ROTATION_FAILURE_ATTEMPTS) {
+    throw new Error("WEBHOOK_KEY_ROTATION_ATTEMPT_INVALID");
+  }
+  return Math.min(ROTATION_RETRY_BASE_MS * (2 ** (attemptNumber - 1)), ROTATION_RETRY_MAX_MS);
+}
+
+function safeRotationFailureCode(error: unknown): string {
+  const code = error instanceof Error ? error.message : "";
+  if (code === "WEBHOOK_ENCRYPTION_FORMAT_UNSUPPORTED" ||
+      code === "WEBHOOK_ENDPOINT_AUTHENTICATION_FAILED") return code;
+  return "ROW_ROTATION_FAILED";
+}
 
 function emptySummary(
   reason?: WebhookKeyRotationSummary["reason"],
@@ -147,16 +167,20 @@ export async function rotateWebhookEncryptionBatch(
       secret_nonce AS secretNonce,
       secret_last4 AS secretLast4,
       encryption_key_version AS encryptionKeyVersion,
-      encryption_key_id AS encryptionKeyId
-    FROM webhook_endpoints
-    WHERE deleted_at IS NULL AND encryption_key_id = ?
-    ORDER BY created_at ASC, id ASC
+      encryption_key_id AS encryptionKeyId,
+      COALESCE(f.attempts, 0) AS failureAttempts
+    FROM webhook_endpoints e
+    LEFT JOIN webhook_key_rotation_failures f
+      ON f.endpoint_id = e.id AND f.encryption_key_id = e.encryption_key_id
+    WHERE e.deleted_at IS NULL AND e.encryption_key_id = ?
+      AND (f.endpoint_id IS NULL OR f.retry_after <= ?)
+    ORDER BY e.created_at ASC, e.id ASC
     LIMIT ?
-  `).bind(keyring.previous.id, limit).all<EndpointRow>();
+  `).bind(keyring.previous.id, now.toISOString(), limit).all<EndpointRow>();
 
   const summary = emptySummary(undefined, keyring.current.id, keyring.previous.id);
   summary.scanned = selected.results.length;
-  const statements: D1PreparedStatement[] = [];
+  const statements: { statement: D1PreparedStatement; kind: "rotate" | "failure" | "clear" }[] = [];
 
   for (const row of selected.results) {
     try {
@@ -199,7 +223,7 @@ export async function rotateWebhookEncryptionBatch(
         encryptWebhookValue(secret, keyring.current.value, newSecretContext)
       ]);
 
-      statements.push(env.DB.prepare(`
+      statements.push({ kind: "rotate", statement: env.DB.prepare(`
         UPDATE webhook_endpoints
         SET destination_ciphertext = ?,
             destination_nonce = ?,
@@ -226,19 +250,55 @@ export async function rotateWebhookEncryptionBatch(
         row.destinationNonce,
         row.secretCiphertext,
         row.secretNonce
-      ));
-    } catch {
-      // Do not mutate a row whose old key, authenticated data, destination
-      // hash, or one-time secret suffix cannot be verified.
+      ) });
+      // Clear any prior quarantine only after the compare-and-swap rotation
+      // has run. If it conflicts, clearing lets a changed row retry promptly.
+      statements.push({
+        kind: "clear",
+        statement: env.DB.prepare(`
+          DELETE FROM webhook_key_rotation_failures
+          WHERE endpoint_id = ? AND encryption_key_id = ?
+        `).bind(row.id, row.encryptionKeyId)
+      });
+    } catch (error) {
+      // Quarantine corrupt/unreadable rows so one poison record cannot occupy
+      // every bounded batch forever. The stored code is an allowlisted label,
+      // never an exception string that might contain sensitive data.
       summary.failed += 1;
+      const attempt = Math.min(Number(row.failureAttempts ?? 0) + 1, MAX_ROTATION_FAILURE_ATTEMPTS);
+      const retryAfter = new Date(now.getTime() + webhookRotationRetryDelayMs(attempt)).toISOString();
+      statements.push({
+        kind: "failure",
+        statement: env.DB.prepare(`
+          INSERT INTO webhook_key_rotation_failures
+            (endpoint_id, organization_id, encryption_key_id, attempts,
+             retry_after, last_error_code, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(endpoint_id) DO UPDATE SET
+            organization_id = excluded.organization_id,
+            encryption_key_id = excluded.encryption_key_id,
+            attempts = MIN(webhook_key_rotation_failures.attempts + 1, ?),
+            retry_after = excluded.retry_after,
+            last_error_code = excluded.last_error_code,
+            updated_at = excluded.updated_at
+        `).bind(
+          row.id, row.organizationId, row.encryptionKeyId, attempt,
+          retryAfter, safeRotationFailureCode(error), updatedAt,
+          MAX_ROTATION_FAILURE_ATTEMPTS
+        )
+      });
     }
   }
 
   if (statements.length) {
-    const results = await env.DB.batch(statements);
-    for (const result of results) {
-      if ((result.meta?.changes ?? 0) === 1) summary.rotated += 1;
-      else summary.conflicts += 1;
+    const results = await env.DB.batch(statements.map(item => item.statement));
+    for (let index = 0; index < results.length; index += 1) {
+      const item = statements[index];
+      const result = results[index];
+      if (item.kind === "rotate") {
+        if ((result.meta?.changes ?? 0) === 1) summary.rotated += 1;
+        else summary.conflicts += 1;
+      }
     }
   }
 
