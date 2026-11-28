@@ -20,6 +20,7 @@ def main() -> None:
         "organization_invitations", "api_keys", "notification_deliveries",
         "maintenance_windows", "status_pages", "status_page_monitors", "webhook_endpoints",
         "webhook_deliveries", "webhook_delivery_attempts", "probe_agent_replay_nonces",
+        "webhook_key_rotation_failures",
     }
     existing = {row[0] for row in db.execute(
         "SELECT name FROM sqlite_master WHERE type = 'table'"
@@ -76,6 +77,14 @@ def main() -> None:
     for index in ("idx_webhook_endpoints_org_destination", "idx_webhook_endpoints_org_active", "idx_webhook_endpoints_key_rotation"):
         if index not in webhook_indexes:
             raise SystemExit(f"Missing {index}")
+
+    rotation_failure_columns = {row[1] for row in db.execute("PRAGMA table_info(webhook_key_rotation_failures)")}
+    for column in ("endpoint_id", "organization_id", "encryption_key_id", "attempts", "retry_after", "last_error_code", "updated_at"):
+        if column not in rotation_failure_columns:
+            raise SystemExit(f"Missing webhook_key_rotation_failures.{column}")
+    rotation_failure_indexes = {row[1] for row in db.execute("PRAGMA index_list(webhook_key_rotation_failures)")}
+    if "idx_webhook_key_rotation_failures_retry" not in rotation_failure_indexes:
+        raise SystemExit("Missing idx_webhook_key_rotation_failures_retry")
 
     webhook_delivery_info = {row[1]: row for row in db.execute("PRAGMA table_info(webhook_deliveries)")}
     if webhook_delivery_info.get("next_attempt_at", (None, None, None, 1))[3] != 0:
