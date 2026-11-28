@@ -43,7 +43,7 @@ The product is built in vertical slices. A slice is complete only when UI, API, 
 - [ ] Plan/usage enforcement and transparent upgrade UX
 - [ ] Payment provider integration after merchant activation and callback verification
 - [ ] Receipts, renewals, failed-payment and cancellation workflows
-- [ ] Webhook alerts (tenant-scoped encrypted endpoint configuration, HMAC signing, incident-event D1 outbox, bounded leases/retries, dedicated DNS-pinned agent, scheduled Worker dispatcher, endpoint activation gate, delivery-history API/UI and versioned master-key rotation are implemented on the integration branch; remain launch-blocked pending current-head CI, production-like DNS/TLS/SSRF/idempotency verification and operator configuration)
+- [ ] Webhook alerts (tenant-scoped encrypted endpoint configuration, HMAC signing, incident-event D1 outbox, bounded leases/retries, dedicated DNS-pinned agent, scheduled Worker dispatcher, endpoint activation gate, delivery-history API/UI and versioned master-key rotation are implemented on the integration branch; master-key rotation now quarantines malformed rows with sanitized errors and exponential 1h–24h retry so one poison endpoint cannot starve later rows. A D1 regression test covers quarantine, progress, and retry. Remains launch-blocked pending current-head CI, production-like DNS/TLS/SSRF/idempotency verification and operator configuration)
 - [ ] SMS credits/add-ons only after cost and provider validation
 
 ## Phase 5 — advanced monitoring and scale
