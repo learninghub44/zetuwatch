@@ -249,6 +249,56 @@ describe("webhook master-key rotation", () => {
     expect(result).toMatchObject({ skipped: false, claimed: 1, sent: 1, failed: 0 });
   });
 
+  it("quarantines a bad oldest row so later endpoints still rotate and retries it with backoff", async () => {
+    const identity = await createIdentity();
+    const firstEndpoint = await createLegacyEndpoint(identity);
+    const secondEndpoint = await createLegacyEndpoint(identity);
+    const oldest = await env.DB.prepare(`
+      SELECT id FROM webhook_endpoints
+      WHERE organization_id = ? AND deleted_at IS NULL
+      ORDER BY created_at ASC, id ASC LIMIT 1
+    `).bind(identity.organizationId).first<{ id: string }>();
+    expect(oldest).toBeTruthy();
+    await env.DB.prepare("UPDATE webhook_endpoints SET destination_hash = ? WHERE id = ?")
+      .bind("f".repeat(64), oldest!.id).run();
+
+    const now = new Date("2026-11-28T06:00:00.000Z");
+    const failed = await rotateWebhookEncryptionBatch(rotationEnv(), { limit: 1, now });
+    expect(failed).toMatchObject({ scanned: 1, rotated: 0, failed: 1, remaining: 2 });
+
+    const quarantined = await env.DB.prepare(`
+      SELECT attempts, retry_after AS retryAfter, last_error_code AS errorCode
+      FROM webhook_key_rotation_failures WHERE endpoint_id = ?
+    `).bind(oldest!.id).first<{ attempts: number; retryAfter: string; errorCode: string }>();
+    expect(quarantined).toMatchObject({
+      attempts: 1,
+      retryAfter: new Date(now.getTime() + 60 * 60 * 1_000).toISOString(),
+      errorCode: "WEBHOOK_ENDPOINT_AUTHENTICATION_FAILED"
+    });
+
+    const next = await rotateWebhookEncryptionBatch(rotationEnv(), { limit: 1, now });
+    expect(next).toMatchObject({ scanned: 1, rotated: 1, failed: 0, remaining: 1 });
+    const healthyId = oldest!.id === firstEndpoint.id ? secondEndpoint.id : firstEndpoint.id;
+    const healthy = await env.DB.prepare(
+      "SELECT encryption_key_id AS keyId FROM webhook_endpoints WHERE id = ?"
+    ).bind(healthyId).first<{ keyId: string }>();
+    expect(healthy?.keyId).toBe("v2");
+
+    const noDueRows = await rotateWebhookEncryptionBatch(rotationEnv(), { limit: 1, now });
+    expect(noDueRows).toMatchObject({ scanned: 0, rotated: 0, failed: 0, remaining: 1 });
+
+    const retryNow = new Date(now.getTime() + 60 * 60 * 1_000);
+    const retried = await rotateWebhookEncryptionBatch(rotationEnv(), { limit: 1, now: retryNow });
+    expect(retried).toMatchObject({ scanned: 1, rotated: 0, failed: 1, remaining: 1 });
+    const retriedFailure = await env.DB.prepare(
+      "SELECT attempts, retry_after AS retryAfter FROM webhook_key_rotation_failures WHERE endpoint_id = ?"
+    ).bind(oldest!.id).first<{ attempts: number; retryAfter: string }>();
+    expect(retriedFailure).toMatchObject({
+      attempts: 2,
+      retryAfter: new Date(retryNow.getTime() + 2 * 60 * 60 * 1_000).toISOString()
+    });
+  });
+
   it("fails closed when the configured previous key cannot authenticate a row", async () => {
     const identity = await createIdentity();
     const endpoint = await createLegacyEndpoint(identity);
