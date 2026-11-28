@@ -158,16 +158,16 @@ export async function rotateWebhookEncryptionBatch(
 
   const selected = await env.DB.prepare(`
     SELECT
-      id,
-      organization_id AS organizationId,
-      destination_hash AS destinationHash,
-      destination_ciphertext AS destinationCiphertext,
-      destination_nonce AS destinationNonce,
-      secret_ciphertext AS secretCiphertext,
-      secret_nonce AS secretNonce,
-      secret_last4 AS secretLast4,
-      encryption_key_version AS encryptionKeyVersion,
-      encryption_key_id AS encryptionKeyId,
+      e.id,
+      e.organization_id AS organizationId,
+      e.destination_hash AS destinationHash,
+      e.destination_ciphertext AS destinationCiphertext,
+      e.destination_nonce AS destinationNonce,
+      e.secret_ciphertext AS secretCiphertext,
+      e.secret_nonce AS secretNonce,
+      e.secret_last4 AS secretLast4,
+      e.encryption_key_version AS encryptionKeyVersion,
+      e.encryption_key_id AS encryptionKeyId,
       COALESCE(f.attempts, 0) AS failureAttempts
     FROM webhook_endpoints e
     LEFT JOIN webhook_key_rotation_failures f
