@@ -16,6 +16,10 @@ export default defineConfig(async () => {
             PUBLIC_APP_URL: "https://app.zetuwatch.test",
             RESEND_API_KEY: "test-only-resend-key",
             EMAIL_FROM: "ZetuWatch Tests <noreply@example.test>",
+            WEBHOOK_ENCRYPTION_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            WEBHOOK_ENCRYPTION_KEY_ID: "v1",
+            // Test-only shared secret for the D1-backed probe-agent replay endpoint.
+            PROBE_SHARED_SECRET: "test-only-probe-agent-shared-secret-32-bytes",
             TEST_MIGRATIONS: migrations
           }
         }

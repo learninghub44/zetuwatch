@@ -1,6 +1,14 @@
 import { validateMonitorUrl } from "../../../packages/monitoring-core/src/url-safety";
 import { hashPassword, verifyPassword } from "../../../packages/auth-core/src/password";
 import { canDeleteMonitors, canWriteMonitors, canAssignRole, canInviteRole, canRemoveMember, isOrganizationRole } from "../../../packages/auth-core/src/authorization";
+import { dispatchDueMonitors, isProbeExecutionEnabled } from "../../../packages/scheduler-core/src/dispatch";
+import { dispatchNotificationBatch } from "../../../packages/notifications-core/src/dispatch";
+import { dispatchWebhookBatch, isWebhookDeliveryConfigured } from "../../../packages/notifications-core/src/webhook-dispatch";
+import { createWebhookSecret, decryptWebhookValue, encryptWebhookValue, normalizeWebhookDestination, WEBHOOK_ENCRYPTION_KEY_VERSION } from "../../../packages/notifications-core/src/webhook-secrets";
+import { getWebhookEncryptionKey, readWebhookKeyring, webhookEncryptionContext } from "../../../packages/notifications-core/src/webhook-keyring";
+import { rotateWebhookEncryptionBatch } from "../../../packages/notifications-core/src/webhook-key-rotation";
+import { signWebhookPayload } from "../../../packages/notifications-core/src/webhook-signing";
+import { verifyProbePayload } from "../../../packages/probe-client/src/client.mjs";
 
 interface Env {
   DB: D1Database;
@@ -8,12 +16,99 @@ interface Env {
   PUBLIC_APP_URL: string;
   RESEND_API_KEY?: string;
   EMAIL_FROM?: string;
+  WEBHOOK_ENCRYPTION_KEY?: string;
+  WEBHOOK_ENCRYPTION_KEY_ID?: string;
+  WEBHOOK_ENCRYPTION_KEY_PREVIOUS?: string;
+  WEBHOOK_ENCRYPTION_KEY_PREVIOUS_ID?: string;
+  WEBHOOKS_ENABLED?: string;
+  PROBES_ENABLED?: string;
+  PROBE_AGENT_URL?: string;
+  PROBE_SHARED_SECRET?: string;
 }
 
 type UserRow = { id: string; email: string; display_name: string | null; email_verified_at: string | null; authMethod?: "api_key"; apiKeyOrganizationId?: string; apiKeyScopes?: string[] };
+type MonitorStateRow = {
+  is_enabled: number;
+  interval_seconds?: number;
+  next_check_at?: string | null;
+  last_checked_at?: string | null;
+  consecutive_failures?: number;
+  last_check_is_up?: number | null;
+  open_incident_status?: string | null;
+};
+function parseMonitorTimestamp(value: unknown): number | null {
+  if (typeof value !== "string" || !value.trim()) return null;
+  const raw = value.trim();
+  // D1 CURRENT_TIMESTAMP values have no zone suffix; treat those as UTC.
+  const normalized = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?$/.test(raw)
+    ? raw.replace(" ", "T") + "Z"
+    : raw;
+  const parsed = Date.parse(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+function isMonitorCheckDelayed(monitor: MonitorStateRow, nowMs = Date.now()): boolean {
+  const nextCheckAt = parseMonitorTimestamp(monitor.next_check_at);
+  const intervalSeconds = Number(monitor.interval_seconds);
+  if (nextCheckAt === null || !Number.isInteger(intervalSeconds) ||
+      intervalSeconds < 60 || intervalSeconds > 3600) return true;
+  // Allow two configured intervals (at least two minutes) for Cron jitter,
+  // transient provider failures and bounded scheduler retries.
+  const graceMs = Math.max(120_000, intervalSeconds * 2_000);
+  return nowMs > nextCheckAt + graceMs;
+}
+function getMonitorState(monitor: MonitorStateRow, executionEnabled: boolean): string {
+  if (Number(monitor.is_enabled) !== 1) return "paused";
+  if (monitor.open_incident_status) return monitor.open_incident_status === "monitoring" ? "recovering" : "down";
+  if (!executionEnabled) return "execution_disabled";
+  if (!monitor.last_checked_at) return isMonitorCheckDelayed(monitor) ? "check_delayed" : "awaiting_first_check";
+  const lastCheckFailed = monitor.last_check_is_up !== null && monitor.last_check_is_up !== undefined &&
+    Number(monitor.last_check_is_up) === 0;
+  if (Number(monitor.consecutive_failures ?? 0) > 0 || lastCheckFailed) return "suspect";
+  if (isMonitorCheckDelayed(monitor)) return "check_delayed";
+  if (Number(monitor.last_check_is_up) === 1) return "healthy";
+  return "unknown";
+}
 const encoder = new TextEncoder();
 const json = (data: unknown, status = 200, headers: HeadersInit = {}): Response =>
   Response.json(data, { status, headers: { "cache-control": "no-store", ...headers } });
+type JsonRecordResult = { ok: true; value: Record<string, unknown>; raw: string } | { ok: false; error: "too_large" | "invalid" };
+async function readJsonRecord(request: Request, maxBytes = 8_192): Promise<JsonRecordResult> {
+  const contentLength = request.headers.get("content-length");
+  if (contentLength !== null && (!/^\d+$/.test(contentLength) || Number(contentLength) > maxBytes)) {
+    return { ok: false, error: "too_large" };
+  }
+  const reader = request.body?.getReader();
+  if (!reader) return { ok: false, error: "invalid" };
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const part = await reader.read();
+      if (part.done) break;
+      total += part.value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel().catch(() => undefined);
+        return { ok: false, error: "too_large" };
+      }
+      chunks.push(part.value);
+    }
+  } catch {
+    return { ok: false, error: "invalid" };
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+  try {
+    const raw = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    const value = JSON.parse(raw) as unknown;
+    if (!value || typeof value !== "object" || Array.isArray(value)) return { ok: false, error: "invalid" };
+    return { ok: true, value: value as Record<string, unknown>, raw };
+  } catch {
+    return { ok: false, error: "invalid" };
+  }
+}
 const id = () => crypto.randomUUID();
 const b64url = (bytes: Uint8Array) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 const randomToken = () => b64url(crypto.getRandomValues(new Uint8Array(32)));
@@ -94,6 +189,30 @@ function htmlEscape(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
+
+function enqueueNotificationDeliveries(env: Env, eventId: string, eventType: string, now: string): D1PreparedStatement {
+  return env.DB.prepare(`
+    INSERT OR IGNORE INTO notification_deliveries
+      (id, organization_id, incident_id, channel_id, provider, status,
+       attempt_count, next_attempt_at, event_id, event_type, recipient_email, channel_created_by, updated_at)
+    SELECT ? || ':' || c.id, m.organization_id, i.id, c.id, 'resend', 'queued',
+      0, ?, e.id, e.event_type, c.destination, c.created_by, ?
+    FROM incident_events e
+    JOIN incidents i ON i.id = e.incident_id
+    JOIN monitors m ON m.id = i.monitor_id
+    JOIN notification_channels c ON c.organization_id = m.organization_id
+    JOIN users u ON u.id = c.created_by
+      AND u.email_verified_at IS NOT NULL
+      AND lower(u.email) = lower(c.destination)
+    JOIN organization_members om
+      ON om.organization_id = m.organization_id AND om.user_id = u.id
+    WHERE e.id = ? AND e.event_type = ?
+      AND (e.event_type NOT IN ('incident.update', 'incident.status_changed') OR e.visibility = 'public')
+      AND c.channel_type = 'email' AND c.is_enabled = 1
+      AND c.verified_at IS NOT NULL
+  `).bind(eventId, now, now, eventId, eventType);
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const response = await (async (): Promise<Response> => {
@@ -106,6 +225,58 @@ export default {
 
     if (request.method === "GET" && url.pathname === "/health") {
       return json({ service: "zetuwatch-api", status: "ok", environment: env.APP_ENV });
+    }
+
+    if (request.method === "POST" && url.pathname === "/internal/probe-agent/replay") {
+      // This endpoint is for the authenticated egress agent only. It is not a
+      // browser API and never returns nonce material or customer data.
+      if (request.headers.has("origin")) return json({ error: "ORIGIN_NOT_ALLOWED" }, 403);
+      if (!env.PROBE_SHARED_SECRET || encoder.encode(env.PROBE_SHARED_SECRET).byteLength < 32) {
+        return json({ error: "REPLAY_STORE_NOT_CONFIGURED" }, 503);
+      }
+      const contentType = request.headers.get("content-type") || "";
+      const contentEncoding = request.headers.get("content-encoding") || "identity";
+      if (!/^application\/json(?:\s*;|$)/i.test(contentType) || contentEncoding !== "identity") {
+        return json({ error: "UNSUPPORTED_MEDIA_TYPE" }, 415);
+      }
+      const parsed = await readJsonRecord(request, 256);
+      if (!parsed.ok) {
+        return json({ error: parsed.error === "too_large" ? "BODY_TOO_LARGE" : "INVALID_REQUEST" },
+          parsed.error === "too_large" ? 413 : 400);
+      }
+      const timestampText = request.headers.get("x-zw-timestamp") || "";
+      const nonce = request.headers.get("x-zw-nonce") || "";
+      const signature = request.headers.get("x-zw-signature") || "";
+      const timestamp = /^\d{10}$/.test(timestampText) ? Number(timestampText) : NaN;
+      const nowMs = Date.now();
+      if (!Number.isSafeInteger(timestamp) ||
+          Math.abs(Math.floor(nowMs / 1000) - timestamp) > 60 ||
+          !/^[A-Za-z0-9_-]{16,64}$/.test(nonce) ||
+          Object.keys(parsed.value).length !== 1 || parsed.value.nonce !== nonce ||
+          !(await verifyProbePayload(env.PROBE_SHARED_SECRET, timestampText, nonce, parsed.raw, signature))) {
+        return json({ error: "UNAUTHORIZED" }, 401);
+      }
+
+      if (!(await rateLimit(request, env, "probe-agent-replay", 5_000))) {
+        return json({ error: "RATE_LIMITED" }, 429);
+      }
+      // The unique hash is the durable replay guard. Cleanup and insert run in
+      // one D1 batch, so two agent instances cannot both claim the same nonce.
+      const now = new Date(nowMs).toISOString();
+      const expiresAt = new Date(Math.max(nowMs, timestamp * 1_000) + 300_000).toISOString();
+      const nonceHash = await sha256(nonce);
+      try {
+        const results = await env.DB.batch([
+          env.DB.prepare("DELETE FROM probe_agent_replay_nonces WHERE expires_at <= ?").bind(now),
+          env.DB.prepare(`INSERT INTO probe_agent_replay_nonces (nonce_hash, expires_at, created_at)
+            VALUES (?, ?, ?) ON CONFLICT(nonce_hash) DO NOTHING`)
+            .bind(nonceHash, expiresAt, now)
+        ]);
+        const inserted = (results[1]?.meta?.changes ?? 0) === 1;
+        return new Response(null, { status: inserted ? 204 : 409, headers: { "cache-control": "no-store" } });
+      } catch {
+        return json({ error: "REPLAY_STORE_UNAVAILABLE" }, 503);
+      }
     }
 
     // Public status pages expose only explicitly published configuration and
@@ -564,6 +735,545 @@ export default {
       return json({ error: "METHOD_NOT_ALLOWED" }, 405);
     }
 
+    // Email notification channels are bound to the signed-in user's own verified address.
+    const notificationChannelsCollectionMatch = url.pathname.match(/^\/v1\/organizations\/([0-9a-f-]{36})\/notification-channels$/i);
+    const notificationChannelItemMatch = url.pathname.match(/^\/v1\/organizations\/([0-9a-f-]{36})\/notification-channels\/([0-9a-f-]{36})$/i);
+    const notificationDeliveriesMatch = url.pathname.match(/^\/v1\/organizations\/([0-9a-f-]{36})\/notification-deliveries$/i);
+    if (notificationChannelsCollectionMatch || notificationChannelItemMatch || notificationDeliveriesMatch) {
+      const user = await currentUser(request, env);
+      if (!user) return json({ error: "UNAUTHENTICATED" }, 401);
+      if (user.authMethod === "api_key") return json({ error: "FORBIDDEN" }, 403);
+      const organizationId = (notificationChannelsCollectionMatch || notificationChannelItemMatch || notificationDeliveriesMatch)![1];
+      const channelId = notificationChannelItemMatch?.[2];
+      const membership = await env.DB.prepare("SELECT role FROM organization_members WHERE organization_id = ? AND user_id = ?")
+        .bind(organizationId, user.id).first<{ role: string }>();
+      if (!membership) return json({ error: "FORBIDDEN" }, 403);
+      const canManageAllChannels = membership.role === "owner" || membership.role === "admin";
+
+      if (notificationChannelsCollectionMatch && request.method === "GET") {
+        const rows = await env.DB.prepare(`
+          SELECT id, channel_type AS channelType, destination,
+            is_enabled AS isEnabled, created_by AS createdBy,
+            verified_at AS verifiedAt, created_at AS createdAt
+          FROM notification_channels
+          WHERE organization_id = ? AND (? = 1 OR created_by = ?)
+          ORDER BY created_at DESC, id ASC
+          LIMIT 50
+        `).bind(organizationId, canManageAllChannels ? 1 : 0, user.id).all();
+        return json({ channels: rows.results });
+      }
+
+      if (notificationChannelsCollectionMatch && request.method === "POST") {
+        if (!canWriteMonitors(membership.role)) return json({ error: "FORBIDDEN" }, 403);
+        if (!(await rateLimit(request, env, "notification-channel-create", 10))) return json({ error: "RATE_LIMITED" }, 429);
+        const body = await request.json().catch(() => null) as Record<string, unknown> | null;
+        const channelType = cleanText(body?.channelType, 16) || "email";
+        const suppliedEmail = body?.email === undefined ? user.email : cleanText(body.email, 254).toLowerCase();
+        if (channelType !== "email") return json({ error: "WEBHOOK_CHANNEL_NOT_AVAILABLE", message: "Webhook delivery will be enabled after the SSRF-safe outbound transport is complete." }, 409);
+        if (!emailPattern.test(user.email) || suppliedEmail.toLowerCase() !== user.email.toLowerCase() || !user.email_verified_at) {
+          return json({ error: "EMAIL_MUST_MATCH_VERIFIED_ACCOUNT" }, 400);
+        }
+        const newChannelId = id();
+        const verifiedAt = new Date().toISOString();
+        try {
+          await env.DB.batch([
+            env.DB.prepare("INSERT INTO notification_channels (id, organization_id, channel_type, destination, is_enabled, created_by, verified_at, updated_at) VALUES (?, ?, 'email', ?, 1, ?, ?, ?)")
+              .bind(newChannelId, organizationId, user.email, user.id, verifiedAt, verifiedAt),
+            env.DB.prepare("INSERT INTO audit_logs (id, organization_id, actor_user_id, action, resource_type, resource_id, metadata_json) VALUES (?, ?, ?, 'notification.email_channel_created', 'notification_channel', ?, ?)")
+              .bind(id(), organizationId, user.id, newChannelId, JSON.stringify({ channelType: "email" }))
+          ]);
+        } catch {
+          return json({ error: "EMAIL_CHANNEL_ALREADY_EXISTS" }, 409);
+        }
+        return json({ message: "Verified email alert channel added.", channel: {
+          id: newChannelId, channelType: "email", destination: user.email,
+          isEnabled: true, verifiedAt, createdAt: verifiedAt
+        } }, 201);
+      }
+
+      if (notificationDeliveriesMatch && request.method === "GET") {
+        const rows = await env.DB.prepare(`
+          SELECT d.id, d.event_type AS eventType, d.recipient_email AS recipientEmail,
+            d.status, d.attempt_count AS attemptCount, d.last_error_code AS lastErrorCode,
+            d.created_at AS createdAt, d.delivered_at AS deliveredAt,
+            d.next_attempt_at AS nextAttemptAt, m.name AS monitorName
+          FROM notification_deliveries d
+          LEFT JOIN incidents i ON i.id = d.incident_id
+          LEFT JOIN monitors m ON m.id = i.monitor_id
+          WHERE d.organization_id = ? AND (? = 1 OR d.channel_created_by = ?)
+          ORDER BY d.created_at DESC, d.id DESC
+          LIMIT 100
+        `).bind(organizationId, canManageAllChannels ? 1 : 0, user.id).all();
+        return json({ deliveries: rows.results });
+      }
+
+      if (notificationChannelItemMatch && channelId && (request.method === "PATCH" || request.method === "DELETE")) {
+        if (!(await rateLimit(request, env, "notification-channel-update", 30))) return json({ error: "RATE_LIMITED" }, 429);
+        const channel = await env.DB.prepare("SELECT id, created_by AS createdBy, is_enabled AS isEnabled FROM notification_channels WHERE id = ? AND organization_id = ? AND channel_type = 'email'")
+          .bind(channelId, organizationId).first<{ id: string; createdBy: string | null; isEnabled: number }>();
+        if (!channel) return json({ error: "NOT_FOUND" }, 404);
+        if (!canManageAllChannels && channel.createdBy !== user.id) return json({ error: "FORBIDDEN" }, 403);
+
+        if (request.method === "PATCH") {
+          const body = await request.json().catch(() => null) as Record<string, unknown> | null;
+          if (typeof body?.enabled !== "boolean") return json({ error: "INVALID_CHANNEL_STATE" }, 400);
+          const enabled = body.enabled ? 1 : 0;
+          const now = new Date().toISOString();
+          const results = await env.DB.batch([
+            env.DB.prepare("UPDATE notification_channels SET is_enabled = ?, updated_at = ? WHERE id = ? AND organization_id = ? AND is_enabled <> ?")
+              .bind(enabled, now, channelId, organizationId, enabled),
+            env.DB.prepare("INSERT INTO audit_logs (id, organization_id, actor_user_id, action, resource_type, resource_id, metadata_json) SELECT ?, ?, ?, ?, 'notification_channel', ?, ? WHERE changes() = 1")
+              .bind(id(), organizationId, user.id, enabled ? "notification.email_channel_enabled" : "notification.email_channel_disabled", channelId, JSON.stringify({ enabled: Boolean(enabled) })),
+            env.DB.prepare("UPDATE notification_deliveries SET status = 'failed', next_attempt_at = NULL, last_error_code = 'CHANNEL_DISABLED', lease_token = NULL, lease_until = NULL, updated_at = ? WHERE channel_id = ? AND status = 'queued' AND ? = 0")
+              .bind(now, channelId, enabled)
+          ]);
+          return json({ message: enabled ? "Email alerts enabled." : "Email alerts disabled.", changed: (results[0]?.meta?.changes ?? 0) === 1 });
+        }
+
+        const now = new Date().toISOString();
+        await env.DB.batch([
+          env.DB.prepare("UPDATE notification_deliveries SET status = 'failed', next_attempt_at = NULL, last_error_code = 'CHANNEL_REMOVED', lease_token = NULL, lease_until = NULL, updated_at = ? WHERE channel_id = ? AND status = 'queued'")
+            .bind(now, channelId),
+          env.DB.prepare("DELETE FROM notification_channels WHERE id = ? AND organization_id = ?")
+            .bind(channelId, organizationId),
+          env.DB.prepare("INSERT INTO audit_logs (id, organization_id, actor_user_id, action, resource_type, resource_id) SELECT ?, ?, ?, 'notification.email_channel_removed', 'notification_channel', ? WHERE changes() = 1")
+            .bind(id(), organizationId, user.id, channelId)
+        ]);
+        return json({ message: "Email alert channel removed. Pending deliveries were cancelled." });
+      }
+      return json({ error: "METHOD_NOT_ALLOWED" }, 405);
+    }
+
+
+    // Webhook endpoint configuration is encrypted at rest. No outbound request
+    // is made here; dispatch stays disabled until DNS-pinned transport is ready.
+    const webhookCollectionMatch = url.pathname.match(/^\/v1\/organizations\/([0-9a-f-]{36})\/webhooks$/i);
+    const webhookItemMatch = url.pathname.match(/^\/v1\/organizations\/([0-9a-f-]{36})\/webhooks\/([0-9a-f-]{36})$/i);
+    const webhookRotateMatch = url.pathname.match(/^\/v1\/organizations\/([0-9a-f-]{36})\/webhooks\/([0-9a-f-]{36})\/rotate$/i);
+    const webhookHistoryMatch = url.pathname.match(/^\/v1\/organizations\/([0-9a-f-]{36})\/webhooks\/([0-9a-f-]{36})\/deliveries$/i);
+    if (webhookCollectionMatch || webhookItemMatch || webhookRotateMatch || webhookHistoryMatch) {
+      const user = await currentUser(request, env);
+      if (!user) return json({ error: "UNAUTHENTICATED" }, 401);
+      if (user.authMethod === "api_key") return json({ error: "FORBIDDEN" }, 403);
+      const organizationId = (webhookCollectionMatch || webhookItemMatch || webhookRotateMatch || webhookHistoryMatch)![1];
+      const endpointId = webhookItemMatch?.[2] || webhookRotateMatch?.[2] || webhookHistoryMatch?.[2];
+      const membership = await env.DB.prepare(
+        "SELECT role FROM organization_members WHERE organization_id = ? AND user_id = ?"
+      ).bind(organizationId, user.id).first<{ role: string }>();
+      if (!membership) return json({ error: "FORBIDDEN" }, 403);
+      const canManageWebhooks = membership.role === "owner" || membership.role === "admin";
+
+      if (webhookCollectionMatch && request.method === "GET") {
+        const rows = await env.DB.prepare(`
+          SELECT id, name, destination_host AS destinationHost,
+            secret_last4 AS secretLast4, is_enabled AS isEnabled,
+            created_at AS createdAt, updated_at AS updatedAt
+          FROM webhook_endpoints
+          WHERE organization_id = ? AND deleted_at IS NULL
+          ORDER BY created_at DESC, id ASC
+          LIMIT 10
+        `).bind(organizationId).all();
+        return json({ endpoints: rows.results, deliveryConfigured: isWebhookDeliveryConfigured(env) });
+      }
+
+      if (webhookHistoryMatch && endpointId && request.method === "GET") {
+        if (!(await rateLimit(request, env, "webhook-delivery-history", 60))) return json({ error: "RATE_LIMITED" }, 429);
+        const endpoint = await env.DB.prepare(
+          "SELECT id, is_enabled AS isEnabled FROM webhook_endpoints WHERE id = ? AND organization_id = ? AND deleted_at IS NULL"
+        ).bind(endpointId, organizationId).first<{ id: string; isEnabled: number }>();
+        if (!endpoint) return json({ error: "NOT_FOUND" }, 404);
+        const requestedLimit = Number(url.searchParams.get("limit") ?? "25");
+        const limit = Number.isInteger(requestedLimit) ? Math.min(50, Math.max(1, requestedLimit)) : 25;
+        const rows = await env.DB.prepare(`
+          SELECT d.id, ev.event_type AS eventType,
+            COALESCE(m.name, 'Monitor removed') AS monitorName,
+            d.status, d.attempt_count AS attemptCount,
+            d.response_status AS responseStatus,
+            d.last_error_code AS lastErrorCode,
+            d.created_at AS createdAt, d.delivered_at AS deliveredAt,
+            d.next_attempt_at AS nextAttemptAt, d.updated_at AS updatedAt
+          FROM webhook_deliveries d
+          JOIN incident_events ev ON ev.id = d.event_id AND ev.incident_id = d.incident_id
+          JOIN incidents i ON i.id = d.incident_id
+          LEFT JOIN monitors m ON m.id = i.monitor_id AND m.organization_id = d.organization_id
+          WHERE d.organization_id = ? AND d.endpoint_id = ?
+          ORDER BY d.created_at DESC, d.id DESC
+          LIMIT ?
+        `).bind(organizationId, endpointId, limit).all<{
+          id: string; eventType: string; monitorName: string; status: string;
+          attemptCount: number; responseStatus: number | null; lastErrorCode: string | null;
+          createdAt: string; deliveredAt: string | null; nextAttemptAt: string | null; updatedAt: string;
+        }>();
+        if (!rows.results.length) return json({ deliveries: [] });
+        const deliveryIds = rows.results.map(row => row.id);
+        const placeholders = deliveryIds.map(() => "?").join(",");
+        const attempts = await env.DB.prepare(`
+          SELECT id, delivery_id AS deliveryId, attempt_number AS attemptNumber,
+            status, response_status AS responseStatus, error_code AS errorCode,
+            started_at AS startedAt, completed_at AS completedAt
+          FROM webhook_delivery_attempts
+          WHERE delivery_id IN (${placeholders})
+          ORDER BY started_at DESC, attempt_number DESC
+        `).bind(...deliveryIds).all<{
+          id: string; deliveryId: string; attemptNumber: number; status: string;
+          responseStatus: number | null; errorCode: string | null;
+          startedAt: string; completedAt: string | null;
+        }>();
+        const attemptsByDelivery = new Map<string, Array<{
+          id: string; attemptNumber: number; status: string;
+          responseStatus: number | null; errorCode: string | null;
+          startedAt: string; completedAt: string | null;
+        }>>();
+        for (const attempt of attempts.results) {
+          const items = attemptsByDelivery.get(attempt.deliveryId) ?? [];
+          items.push({
+            id: attempt.id, attemptNumber: attempt.attemptNumber, status: attempt.status,
+            responseStatus: attempt.responseStatus, errorCode: attempt.errorCode,
+            startedAt: attempt.startedAt, completedAt: attempt.completedAt
+          });
+          attemptsByDelivery.set(attempt.deliveryId, items);
+        }
+        return json({
+          deliveries: rows.results.map(row => ({
+            ...row,
+            attempts: attemptsByDelivery.get(row.id) ?? []
+          }))
+        });
+      }
+
+      if (webhookCollectionMatch && request.method === "POST") {
+        if (!canManageWebhooks) return json({ error: "FORBIDDEN" }, 403);
+        if (!(await rateLimit(request, env, "webhook-endpoint-create", 10))) return json({ error: "RATE_LIMITED" }, 429);
+        const parsedBody = await readJsonRecord(request);
+        if (!parsedBody.ok) return json({ error: parsedBody.error === "too_large" ? "REQUEST_TOO_LARGE" : "INVALID_JSON" }, parsedBody.error === "too_large" ? 413 : 400);
+        const body = parsedBody.value;
+        const name = typeof body?.name === "string" ? body.name.trim() : "";
+        if (!name || name.length > 80 || /[\u0000-\u001f\u007f]/.test(name)) {
+          return json({ error: "WEBHOOK_NAME_INVALID" }, 400);
+        }
+        let destination: { url: string; hostname: string };
+        try { destination = normalizeWebhookDestination(body?.url); }
+        catch (error) {
+          const code = error instanceof Error ? error.message : "WEBHOOK_URL_INVALID";
+          return json({ error: code }, 400);
+        }
+        let keyring;
+        try { keyring = readWebhookKeyring(env); }
+        catch {
+          return json({ error: "WEBHOOK_ENCRYPTION_UNAVAILABLE", message: "The operator has not configured a valid webhook encryption keyring." }, 503);
+        }
+
+        const endpointId = id();
+        const secret = createWebhookSecret();
+        let encryptedUrl: Awaited<ReturnType<typeof encryptWebhookValue>>;
+        let encryptedSecret: Awaited<ReturnType<typeof encryptWebhookValue>>;
+        try {
+          [encryptedUrl, encryptedSecret] = await Promise.all([
+            encryptWebhookValue(destination.url, keyring.current.value,
+              webhookEncryptionContext(WEBHOOK_ENCRYPTION_KEY_VERSION, keyring.current.id, organizationId, endpointId, "url")),
+            encryptWebhookValue(secret, keyring.current.value,
+              webhookEncryptionContext(WEBHOOK_ENCRYPTION_KEY_VERSION, keyring.current.id, organizationId, endpointId, "secret"))
+          ]);
+        } catch {
+          return json({ error: "WEBHOOK_ENCRYPTION_UNAVAILABLE" }, 503);
+        }
+
+        const now = new Date().toISOString();
+        try {
+          const results = await env.DB.batch([
+            env.DB.prepare(`
+              INSERT INTO webhook_endpoints (
+                id, organization_id, name, destination_host, destination_hash,
+                destination_ciphertext, destination_nonce, secret_ciphertext,
+                secret_nonce, secret_last4, encryption_key_version, encryption_key_id, is_enabled,
+                created_by, created_at, updated_at
+              )
+              SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?
+              WHERE (SELECT COUNT(*) FROM webhook_endpoints
+                WHERE organization_id = ? AND deleted_at IS NULL) < 10
+            `).bind(
+              endpointId, organizationId, name, destination.hostname,
+              await sha256(destination.url), encryptedUrl.ciphertext, encryptedUrl.nonce,
+              encryptedSecret.ciphertext, encryptedSecret.nonce, secret.slice(-4),
+              WEBHOOK_ENCRYPTION_KEY_VERSION, keyring.current.id, user.id, now, now, organizationId
+            ),
+            env.DB.prepare(`
+              INSERT INTO audit_logs
+                (id, organization_id, actor_user_id, action, resource_type, resource_id, metadata_json)
+              SELECT ?, ?, ?, 'notification.webhook_endpoint_created', 'webhook_endpoint', ?, ?
+              WHERE changes() = 1
+            `).bind(id(), organizationId, user.id, endpointId, JSON.stringify({ destinationHost: destination.hostname }))
+          ]);
+          if ((results[0]?.meta?.changes ?? 0) !== 1) {
+            return json({ error: "WEBHOOK_ENDPOINT_LIMIT_REACHED", message: "A workspace can configure up to 10 webhook endpoints." }, 409);
+          }
+        } catch {
+          return json({ error: "WEBHOOK_ENDPOINT_ALREADY_EXISTS", message: "This destination is already configured in the workspace." }, 409);
+        }
+        return json({
+          message: "Webhook endpoint saved. Delivery remains disabled until secure outbound transport is enabled.",
+          endpoint: {
+            id: endpointId, name, destinationHost: destination.hostname,
+            secretLast4: secret.slice(-4), isEnabled: 0, createdAt: now
+          },
+          secret,
+          deliveryEnabled: false,
+          deliveryConfigured: isWebhookDeliveryConfigured(env)
+        }, 201);
+      }
+
+      if (webhookRotateMatch && endpointId && request.method === "POST") {
+        if (!canManageWebhooks) return json({ error: "FORBIDDEN" }, 403);
+        if (!(await rateLimit(request, env, "webhook-endpoint-rotate", 20))) return json({ error: "RATE_LIMITED" }, 429);
+        const endpoint = await env.DB.prepare(`
+          SELECT id, is_enabled AS isEnabled,
+            destination_hash AS destinationHash,
+            destination_ciphertext AS destinationCiphertext,
+            destination_nonce AS destinationNonce,
+            secret_ciphertext AS secretCiphertext,
+            secret_nonce AS secretNonce,
+            secret_last4 AS secretLast4,
+            encryption_key_version AS encryptionKeyVersion,
+            encryption_key_id AS encryptionKeyId
+          FROM webhook_endpoints
+          WHERE id = ? AND organization_id = ? AND deleted_at IS NULL
+        `).bind(endpointId, organizationId).first<{
+          id: string; isEnabled: number; destinationHash: string;
+          destinationCiphertext: string; destinationNonce: string;
+          secretCiphertext: string; secretNonce: string; secretLast4: string;
+          encryptionKeyVersion: number; encryptionKeyId: string;
+        }>();
+        if (!endpoint) return json({ error: "NOT_FOUND" }, 404);
+        if (endpoint.encryptionKeyVersion !== WEBHOOK_ENCRYPTION_KEY_VERSION) {
+          return json({ error: "WEBHOOK_ENCRYPTION_FORMAT_UNSUPPORTED" }, 409);
+        }
+
+        let keyring;
+        try { keyring = readWebhookKeyring(env); }
+        catch {
+          return json({ error: "WEBHOOK_ENCRYPTION_UNAVAILABLE", message: "The operator has not configured a valid webhook encryption keyring." }, 503);
+        }
+        let oldKey: ReturnType<typeof getWebhookEncryptionKey>;
+        let destination: string;
+        let oldSecret: string;
+        try {
+          oldKey = getWebhookEncryptionKey(keyring, endpoint.encryptionKeyId);
+          [destination, oldSecret] = await Promise.all([
+            decryptWebhookValue(
+              { ciphertext: endpoint.destinationCiphertext, nonce: endpoint.destinationNonce },
+              oldKey.value,
+              webhookEncryptionContext(endpoint.encryptionKeyVersion, endpoint.encryptionKeyId, organizationId, endpointId, "url")
+            ),
+            decryptWebhookValue(
+              { ciphertext: endpoint.secretCiphertext, nonce: endpoint.secretNonce },
+              oldKey.value,
+              webhookEncryptionContext(endpoint.encryptionKeyVersion, endpoint.encryptionKeyId, organizationId, endpointId, "secret")
+            )
+          ]);
+          const normalized = normalizeWebhookDestination(destination);
+          if (normalized.url !== destination || await sha256(destination) !== endpoint.destinationHash ||
+              !/^whsec_[A-Za-z0-9_-]{43}$/.test(oldSecret) || oldSecret.slice(-4) !== endpoint.secretLast4) {
+            throw new Error("WEBHOOK_ENDPOINT_AUTHENTICATION_FAILED");
+          }
+        } catch {
+          return json({
+            error: "WEBHOOK_ENDPOINT_CONFIGURATION_INVALID",
+            message: "The endpoint could not be authenticated with the configured encryption keyring. No values were changed."
+          }, 409);
+        }
+
+        const secret = createWebhookSecret();
+        let encryptedUrl: Awaited<ReturnType<typeof encryptWebhookValue>>;
+        let encryptedSecret: Awaited<ReturnType<typeof encryptWebhookValue>>;
+        try {
+          [encryptedUrl, encryptedSecret] = await Promise.all([
+            encryptWebhookValue(destination, keyring.current.value,
+              webhookEncryptionContext(endpoint.encryptionKeyVersion, keyring.current.id, organizationId, endpointId, "url")),
+            encryptWebhookValue(secret, keyring.current.value,
+              webhookEncryptionContext(endpoint.encryptionKeyVersion, keyring.current.id, organizationId, endpointId, "secret"))
+          ]);
+        } catch {
+          return json({ error: "WEBHOOK_ENCRYPTION_UNAVAILABLE" }, 503);
+        }
+
+        const now = new Date().toISOString();
+        const results = await env.DB.batch([
+          env.DB.prepare(`UPDATE webhook_endpoints
+            SET destination_ciphertext = ?, destination_nonce = ?,
+                secret_ciphertext = ?, secret_nonce = ?, secret_last4 = ?,
+                encryption_key_id = ?, updated_at = ?
+            WHERE id = ? AND organization_id = ? AND deleted_at IS NULL
+              AND encryption_key_version = ? AND encryption_key_id = ?
+              AND destination_ciphertext = ? AND destination_nonce = ?
+              AND secret_ciphertext = ? AND secret_nonce = ?`)
+            .bind(
+              encryptedUrl.ciphertext, encryptedUrl.nonce,
+              encryptedSecret.ciphertext, encryptedSecret.nonce, secret.slice(-4),
+              keyring.current.id, now, endpointId, organizationId,
+              endpoint.encryptionKeyVersion, endpoint.encryptionKeyId,
+              endpoint.destinationCiphertext, endpoint.destinationNonce,
+              endpoint.secretCiphertext, endpoint.secretNonce
+            ),
+          env.DB.prepare(`INSERT INTO audit_logs
+            (id, organization_id, actor_user_id, action, resource_type, resource_id, metadata_json)
+            SELECT ?, ?, ?, 'notification.webhook_secret_rotated', 'webhook_endpoint', ?, ?
+            WHERE changes() = 1`)
+            .bind(id(), organizationId, user.id, endpointId, JSON.stringify({
+              encryptionKeyId: keyring.current.id,
+              signingSecretRotated: true
+            }))
+        ]);
+        if ((results[0]?.meta?.changes ?? 0) !== 1) {
+          return json({ error: "WEBHOOK_ENDPOINT_CHANGED", message: "The endpoint changed during rotation. Retry the operation." }, 409);
+        }
+        return json({
+          message: "Webhook signing secret rotated and endpoint ciphertext re-encrypted. Copy the new secret now; it will not be shown again.",
+          secret,
+          deliveryEnabled: endpoint.isEnabled === 1 && isWebhookDeliveryConfigured(env),
+          deliveryConfigured: isWebhookDeliveryConfigured(env)
+        });
+      }
+
+      if (webhookItemMatch && endpointId && request.method === "PATCH") {
+        if (!canManageWebhooks) return json({ error: "FORBIDDEN" }, 403);
+        if (!(await rateLimit(request, env, "webhook-endpoint-update", 30))) return json({ error: "RATE_LIMITED" }, 429);
+        const parsedBody = await readJsonRecord(request);
+        if (!parsedBody.ok) return json({ error: parsedBody.error === "too_large" ? "REQUEST_TOO_LARGE" : "INVALID_JSON" }, parsedBody.error === "too_large" ? 413 : 400);
+        const body = parsedBody.value;
+        const allowedKeys = new Set(["name", "enabled"]);
+        if (Object.keys(body).some(key => !allowedKeys.has(key)) ||
+            (body.name === undefined && body.enabled === undefined)) {
+          return json({ error: "INVALID_WEBHOOK_UPDATE" }, 400);
+        }
+        let name: string | undefined;
+        if (body.name !== undefined) {
+          name = typeof body.name === "string" ? body.name.trim() : "";
+          if (!name || name.length > 80 || /[\\u0000-\\u001f\\u007f]/.test(name)) {
+            return json({ error: "WEBHOOK_NAME_INVALID" }, 400);
+          }
+        }
+        if (body.enabled !== undefined && typeof body.enabled !== "boolean") {
+          return json({ error: "INVALID_WEBHOOK_STATE" }, 400);
+        }
+        if (body.enabled === true) {
+          const storedEndpoint = await env.DB.prepare(`
+            SELECT destination_hash AS destinationHash,
+              destination_ciphertext AS destinationCiphertext,
+              destination_nonce AS destinationNonce,
+              secret_ciphertext AS secretCiphertext,
+              secret_nonce AS secretNonce,
+              encryption_key_version AS encryptionKeyVersion,
+              encryption_key_id AS encryptionKeyId
+            FROM webhook_endpoints
+            WHERE id = ? AND organization_id = ? AND deleted_at IS NULL
+          `).bind(endpointId, organizationId).first<{
+            destinationHash: string; destinationCiphertext: string; destinationNonce: string;
+            secretCiphertext: string; secretNonce: string; encryptionKeyVersion: number;
+            encryptionKeyId: string;
+          }>();
+          if (!storedEndpoint) return json({ error: "NOT_FOUND" }, 404);
+          if (!isWebhookDeliveryConfigured(env)) {
+            return json({
+              error: "WEBHOOK_DELIVERY_NOT_CONFIGURED",
+              message: "The operator must enable the webhook dispatcher and configure its encryption key and trusted egress agent before this endpoint can be enabled."
+            }, 503);
+          }
+          if (storedEndpoint.encryptionKeyVersion !== WEBHOOK_ENCRYPTION_KEY_VERSION) {
+            return json({ error: "WEBHOOK_ENCRYPTION_FORMAT_UNSUPPORTED" }, 409);
+          }
+          try {
+            const keyring = readWebhookKeyring(env);
+            const endpointKey = getWebhookEncryptionKey(keyring, storedEndpoint.encryptionKeyId);
+            const [destination, signingSecret] = await Promise.all([
+              decryptWebhookValue({
+                ciphertext: storedEndpoint.destinationCiphertext,
+                nonce: storedEndpoint.destinationNonce
+              }, endpointKey.value, webhookEncryptionContext(
+                storedEndpoint.encryptionKeyVersion, storedEndpoint.encryptionKeyId, organizationId, endpointId, "url"
+              )),
+              decryptWebhookValue({
+                ciphertext: storedEndpoint.secretCiphertext,
+                nonce: storedEndpoint.secretNonce
+              }, endpointKey.value, webhookEncryptionContext(
+                storedEndpoint.encryptionKeyVersion, storedEndpoint.encryptionKeyId, organizationId, endpointId, "secret"
+              ))
+            ]);
+            const normalized = normalizeWebhookDestination(destination);
+            if (normalized.url !== destination || await sha256(destination) !== storedEndpoint.destinationHash) {
+              throw new Error("WEBHOOK_ENDPOINT_DATA_MISMATCH");
+            }
+            await signWebhookPayload(signingSecret, "{}", Math.floor(Date.now() / 1000));
+          } catch {
+            return json({
+              error: "WEBHOOK_ENDPOINT_CONFIGURATION_INVALID",
+              message: "The endpoint could not be decrypted or authenticated with the currently configured encryption key."
+            }, 409);
+          }
+        }
+        const enabled = body.enabled === undefined ? null : body.enabled ? 1 : 0;
+        const action = body.enabled === true
+          ? "notification.webhook_endpoint_enabled"
+          : body.enabled === false
+            ? "notification.webhook_endpoint_disabled"
+            : "notification.webhook_endpoint_renamed";
+        const metadata: Record<string, unknown> = {};
+        if (name !== undefined) metadata.name = name;
+        if (body.enabled !== undefined) metadata.enabled = body.enabled;
+        const now = new Date().toISOString();
+        const results = await env.DB.batch([
+          env.DB.prepare(`UPDATE webhook_endpoints
+            SET name = COALESCE(?, name), is_enabled = COALESCE(?, is_enabled), updated_at = ?
+            WHERE id = ? AND organization_id = ? AND deleted_at IS NULL
+              AND (? IS NULL OR ? = 0 OR (
+                destination_ciphertext <> '' AND secret_ciphertext <> ''
+                AND encryption_key_version = ?
+              ))`)
+            .bind(name ?? null, enabled, now, endpointId, organizationId,
+              enabled, enabled, WEBHOOK_ENCRYPTION_KEY_VERSION),
+          env.DB.prepare(`INSERT INTO audit_logs
+            (id, organization_id, actor_user_id, action, resource_type, resource_id, metadata_json)
+            SELECT ?, ?, ?, ?, 'webhook_endpoint', ?, ?
+            WHERE changes() = 1`)
+            .bind(id(), organizationId, user.id, action, endpointId, JSON.stringify(metadata))
+        ]);
+        if ((results[0]?.meta?.changes ?? 0) !== 1) return json({ error: "NOT_FOUND_OR_UNAVAILABLE" }, 404);
+        return json({
+          message: body.enabled === true ? "Webhook endpoint enabled." :
+            body.enabled === false ? "Webhook endpoint disabled and pending deliveries cancelled." :
+            "Webhook endpoint renamed.",
+          isEnabled: body.enabled === undefined ? undefined : body.enabled ? 1 : 0,
+          deliveryConfigured: isWebhookDeliveryConfigured(env)
+        });
+      }
+
+      if (webhookItemMatch && endpointId && request.method === "DELETE") {
+        if (!canManageWebhooks) return json({ error: "FORBIDDEN" }, 403);
+        if (!(await rateLimit(request, env, "webhook-endpoint-delete", 30))) return json({ error: "RATE_LIMITED" }, 429);
+        const endpoint = await env.DB.prepare(
+          "SELECT destination_host AS destinationHost FROM webhook_endpoints WHERE id = ? AND organization_id = ? AND deleted_at IS NULL"
+        ).bind(endpointId, organizationId).first<{ destinationHost: string }>();
+        if (!endpoint) return json({ error: "NOT_FOUND" }, 404);
+        const now = new Date().toISOString();
+        const results = await env.DB.batch([
+          env.DB.prepare(`UPDATE webhook_endpoints
+            SET destination_ciphertext = '', destination_nonce = '',
+                secret_ciphertext = '', secret_nonce = '', secret_last4 = '----',
+                is_enabled = 0, deleted_at = ?, updated_at = ?
+            WHERE id = ? AND organization_id = ? AND deleted_at IS NULL`)
+            .bind(now, now, endpointId, organizationId),
+          env.DB.prepare(`INSERT INTO audit_logs
+            (id, organization_id, actor_user_id, action, resource_type, resource_id, metadata_json)
+            SELECT ?, ?, ?, 'notification.webhook_endpoint_removed', 'webhook_endpoint', ?, ?
+            WHERE changes() = 1`)
+            .bind(id(), organizationId, user.id, endpointId, JSON.stringify({ destinationHost: endpoint.destinationHost }))
+        ]);
+        if ((results[0]?.meta?.changes ?? 0) !== 1) return json({ error: "NOT_FOUND" }, 404);
+        return json({ message: "Webhook endpoint removed and encrypted destination/secret material scrubbed." });
+      }
+
+      return json({ error: "METHOD_NOT_ALLOWED" }, 405);
+    }
+
     // Team management: all routes are scoped through a verified organization membership.
     const teamMatch = url.pathname.match(/^\/v1\/organizations\/([0-9a-f-]{36})\/(members|invitations)(?:\/([0-9a-f-]{36}))?$/i);
     if (teamMatch) {
@@ -698,10 +1408,21 @@ export default {
       const membership = await env.DB.prepare("SELECT role FROM organization_members WHERE organization_id = ? AND user_id = ?")
         .bind(organizationId, user.id).first<{ role: string }>();
       if (!membership) return json({ error: "FORBIDDEN" }, 403);
-      const result = await env.DB.prepare(`SELECT id, name, monitor_type, target_url, method, expected_status,
-        interval_seconds, timeout_ms, is_enabled, consecutive_failures, last_checked_at, next_check_at, created_at, updated_at
-        FROM monitors WHERE organization_id = ? AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 100`).bind(organizationId).all();
-      return json({ monitors: result.results, executionEnabled: false, note: "Scheduled checks are not enabled yet; monitors are saved but have not been probed." });
+      const executionEnabled = isProbeExecutionEnabled(env);
+      const result = await env.DB.prepare(`SELECT m.id, m.name, m.monitor_type, m.target_url, m.method, m.expected_status,
+        m.interval_seconds, m.timeout_ms, m.is_enabled, m.consecutive_failures, m.last_checked_at, m.next_check_at, m.created_at, m.updated_at,
+        (SELECT c.is_up FROM monitor_checks c WHERE c.monitor_id = m.id ORDER BY c.checked_at DESC, c.id DESC LIMIT 1) AS last_check_is_up,
+        (SELECT i.status FROM incidents i WHERE i.monitor_id = m.id AND i.resolved_at IS NULL ORDER BY i.started_at DESC, i.id DESC LIMIT 1) AS open_incident_status
+        FROM monitors m WHERE m.organization_id = ? AND m.deleted_at IS NULL ORDER BY m.created_at DESC LIMIT 100`).bind(organizationId).all();
+      const monitors = result.results.map(row => ({
+        ...row,
+        state: getMonitorState(row as MonitorStateRow, executionEnabled)
+      }));
+      return json({
+        monitors,
+        executionEnabled,
+        ...(executionEnabled ? {} : { note: "Scheduled probes are disabled; monitors are saved but have not been probed." })
+      });
     }
 
     if (request.method === "POST" && url.pathname === "/v1/monitors") {
@@ -740,7 +1461,15 @@ export default {
         env.DB.prepare("INSERT INTO audit_logs (id, organization_id, actor_user_id, action, resource_type, resource_id) VALUES (?, ?, ?, 'monitor.created', 'monitor', ?)")
           .bind(id(), organizationId, user.id, monitorId)
       ]);
-      return json({ monitor: { id: monitorId, organizationId, name, monitorType, targetUrl: target, method, expectedStatus, intervalSeconds, timeoutMs, state: "awaiting_first_check" }, executionEnabled: false }, 201);
+      const executionEnabled = isProbeExecutionEnabled(env);
+      return json({
+        monitor: {
+          id: monitorId, organizationId, name, monitorType, targetUrl: target, method, expectedStatus,
+          intervalSeconds, timeoutMs, state: executionEnabled ? "awaiting_first_check" : "execution_disabled"
+        },
+        executionEnabled,
+        ...(executionEnabled ? {} : { note: "Scheduled probes are disabled; the target has not been contacted." })
+      }, 201);
     }
 
     const monitorMatch = url.pathname.match(/^\/v1\/monitors\/([0-9a-f-]{36})(\/checks|\/pause|\/resume)?$/i);
@@ -748,8 +1477,18 @@ export default {
       const user = await currentUser(request, env);
       if (!user) return json({ error: "UNAUTHENTICATED" }, 401);
       const monitorId = monitorMatch[1];
-      const monitor = await env.DB.prepare("SELECT id, organization_id, name, target_url, monitor_type, method, expected_status, interval_seconds, timeout_ms, is_enabled FROM monitors WHERE id = ? AND deleted_at IS NULL")
-        .bind(monitorId).first<{ id: string; organization_id: string; name: string; target_url: string; monitor_type: string; method: string; expected_status: number; interval_seconds: number; timeout_ms: number; is_enabled: number }>();
+      const monitor = await env.DB.prepare(`SELECT m.id, m.organization_id, m.name, m.target_url, m.monitor_type, m.method,
+        m.expected_status, m.interval_seconds, m.timeout_ms, m.is_enabled, m.last_checked_at, m.next_check_at,
+        m.consecutive_failures,
+        (SELECT c.is_up FROM monitor_checks c WHERE c.monitor_id = m.id ORDER BY c.checked_at DESC, c.id DESC LIMIT 1) AS last_check_is_up,
+        (SELECT i.status FROM incidents i WHERE i.monitor_id = m.id AND i.resolved_at IS NULL ORDER BY i.started_at DESC, i.id DESC LIMIT 1) AS open_incident_status
+        FROM monitors m WHERE m.id = ? AND m.deleted_at IS NULL`)
+        .bind(monitorId).first<{
+          id: string; organization_id: string; name: string; target_url: string; monitor_type: string;
+          method: string; expected_status: number; interval_seconds: number; timeout_ms: number;
+          is_enabled: number; last_checked_at: string | null; next_check_at: string | null;
+          consecutive_failures: number; last_check_is_up: number | null; open_incident_status: string | null;
+        }>();
       if (!monitor) return json({ error: "NOT_FOUND" }, 404);
       if (!apiKeyAllows(user, monitor.organization_id, "read")) return json({ error: "FORBIDDEN" }, 403);
       const membership = await env.DB.prepare("SELECT role FROM organization_members WHERE organization_id = ? AND user_id = ?")
@@ -778,21 +1517,38 @@ export default {
         if (!current) return json({ error: "NOT_FOUND" }, 404);
         const changed = (results[0]?.meta?.changes ?? 0) === 1;
         const isEnabled = Number(current.is_enabled) === 1;
+        const executionEnabled = isProbeExecutionEnabled(env);
         return json({
           message: isEnabled ? "Monitor resumed." : "Monitor paused.",
           changed,
           monitor: { id: monitorId, isEnabled },
-          executionEnabled: false,
-          note: "Monitor scheduling is not active yet; this action does not run a probe."
+          executionEnabled,
+          note: executionEnabled
+            ? "The scheduler will honor this enabled/paused state on its next pass."
+            : "Probe execution is disabled; this action only changes the saved monitor state."
         });
       }
 
       if (request.method === "GET" && monitorMatch[2] === "/checks") {
         const checks = await env.DB.prepare(`SELECT id, checked_at, is_up, status_code, response_time_ms, error_code
           FROM monitor_checks WHERE monitor_id = ? ORDER BY checked_at DESC LIMIT 100`).bind(monitorId).all();
-        return json({ checks: checks.results, executionEnabled: false });
+        const executionEnabled = isProbeExecutionEnabled(env);
+        return json({
+          checks: checks.results,
+          executionEnabled,
+          ...(executionEnabled ? {} : { note: "Scheduled probes are disabled; no new checks are being recorded." })
+        });
       }
-      if (request.method === "GET") return json({ monitor, state: Number(monitor.is_enabled) === 1 ? "awaiting_first_check" : "paused", executionEnabled: false });
+      if (request.method === "GET") {
+        const executionEnabled = isProbeExecutionEnabled(env);
+        const state = getMonitorState(monitor, executionEnabled);
+        return json({
+          monitor: { ...monitor, state },
+          state,
+          executionEnabled,
+          ...(executionEnabled ? {} : { note: "Scheduled probes are disabled; this view only reads stored monitoring records." })
+        });
+      }
       if (request.method === "PATCH") {
         if (!canWriteMonitors(membership.role)) return json({ error: "FORBIDDEN" }, 403);
         const body = await request.json().catch(() => null) as Record<string, unknown> | null;
@@ -816,7 +1572,7 @@ export default {
           env.DB.prepare("INSERT INTO audit_logs (id, organization_id, actor_user_id, action, resource_type, resource_id) VALUES (?, ?, ?, 'monitor.updated', 'monitor', ?)")
             .bind(id(), monitor.organization_id, user.id, monitorId)
         ]);
-        return json({ message: "Monitor updated.", executionEnabled: false });
+        return json({ message: "Monitor updated.", executionEnabled: isProbeExecutionEnabled(env) });
       }
       if (request.method === "DELETE") {
         if (!canDeleteMonitors(membership.role)) return json({ error: "FORBIDDEN" }, 403);
@@ -935,15 +1691,17 @@ export default {
         }
         const message = suppliedMessage || ("Status changed from " + incident.status + " to " + nextStatus + ".");
         const changedAt = new Date().toISOString();
+        const statusEventId = id();
         const results = await env.DB.batch([
           env.DB.prepare("UPDATE incidents SET status = ?, resolved_at = CASE WHEN ? = 'resolved' THEN ? ELSE NULL END WHERE id = ? AND status = ? AND resolved_at IS NULL")
             .bind(nextStatus, nextStatus, changedAt, incidentId, incident.status),
           env.DB.prepare("INSERT INTO incident_events (id, incident_id, event_type, message, created_at, actor_user_id, visibility) SELECT ?, ?, 'incident.status_changed', ?, ?, ?, ? WHERE changes() = 1")
-            .bind(id(), incidentId, message, changedAt, user.id, visibility),
+            .bind(statusEventId, incidentId, message, changedAt, user.id, visibility),
           env.DB.prepare("INSERT INTO audit_logs (id, organization_id, actor_user_id, action, resource_type, resource_id, metadata_json) SELECT ?, ?, ?, 'incident.status_changed', 'incident', ?, ? WHERE changes() = 1")
             .bind(id(), incident.organizationId, user.id, incidentId, JSON.stringify({
               from: incident.status, to: nextStatus, visibility
-            }))
+            })),
+          enqueueNotificationDeliveries(env, statusEventId, "incident.status_changed", changedAt)
         ]);
         if ((results[0] as D1Result).meta?.changes !== 1) {
           return json({ error: "INCIDENT_CHANGED" }, 409);
@@ -975,7 +1733,8 @@ export default {
           env.DB.prepare("INSERT INTO incident_events (id, incident_id, event_type, message, created_at, actor_user_id, visibility) SELECT ?, ?, 'incident.update', ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM incidents WHERE id = ? AND resolved_at IS NULL)")
             .bind(eventId, incidentId, message, createdAt, user.id, visibility, incidentId),
           env.DB.prepare("INSERT INTO audit_logs (id, organization_id, actor_user_id, action, resource_type, resource_id, metadata_json) SELECT ?, ?, ?, 'incident.update_added', 'incident', ?, ? WHERE changes() = 1")
-            .bind(id(), incident.organizationId, user.id, incidentId, JSON.stringify({ visibility }))
+            .bind(id(), incident.organizationId, user.id, incidentId, JSON.stringify({ visibility })),
+            enqueueNotificationDeliveries(env, eventId, "incident.update", createdAt)
         ]);
         if ((results[0] as D1Result).meta?.changes !== 1) {
           return json({ error: "INCIDENT_ALREADY_RESOLVED" }, 409);
@@ -1005,5 +1764,68 @@ export default {
       headers.append("vary", "Origin");
     }
     return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+  },
+  async scheduled(controller: ScheduledController, env: Env, _ctx: ExecutionContext): Promise<void> {
+    if (controller.cron !== "*/1 * * * *") return;
+    const startedAt = new Date();
+    const schedulerLagMs = Math.max(0, startedAt.getTime() - controller.scheduledTime);
+
+    // Run the bounded email and webhook batches before monitor probes. Each
+    // workload is sequential at the Worker level and has its own concurrency cap.
+    try {
+      const notifications = await dispatchNotificationBatch(env, { now: startedAt, limit: 5 });
+      if (notifications.skipped) {
+        console.info("notification_dispatch_skipped", { reason: "NOTIFICATION_CONFIGURATION_MISSING", schedulerLagMs });
+      } else if (notifications.claimed > 0) {
+        console.info("notification_dispatch_completed", { ...notifications, schedulerLagMs });
+      }
+    } catch {
+      console.error("notification_dispatch_failed", { schedulerLagMs });
+    }
+
+    try {
+      const webhooks = await dispatchWebhookBatch(env, { now: startedAt, limit: 3, concurrency: 2 });
+      if (webhooks.skipped) {
+        if (webhooks.reason !== "WEBHOOKS_DISABLED") {
+          console.info("webhook_dispatch_skipped", { reason: webhooks.reason, schedulerLagMs });
+        }
+      } else if (webhooks.claimed > 0) {
+        console.info("webhook_dispatch_completed", { ...webhooks, schedulerLagMs });
+      }
+    } catch {
+      console.error("webhook_dispatch_failed", { schedulerLagMs });
+    }
+
+    // Re-encrypt one endpoint per minute when an operator has configured a
+    // current and previous key. This maintenance is independent of delivery
+    // enablement and never performs network I/O.
+    try {
+      const rotation = await rotateWebhookEncryptionBatch(env, { limit: 1, now: new Date() });
+      if (!rotation.skipped && (rotation.scanned > 0 || rotation.remaining > 0)) {
+        console.info("webhook_key_rotation_completed", {
+          scanned: rotation.scanned, rotated: rotation.rotated,
+          conflicts: rotation.conflicts, failed: rotation.failed,
+          remaining: rotation.remaining, blocked: rotation.blocked, schedulerLagMs
+        });
+      } else if (rotation.skipped && rotation.reason !== "PREVIOUS_KEY_NOT_CONFIGURED") {
+        console.warn("webhook_key_rotation_skipped", { reason: rotation.reason, schedulerLagMs });
+      }
+    } catch {
+      console.error("webhook_key_rotation_failed", { schedulerLagMs });
+    }
+
+    try {
+      const probes = await dispatchDueMonitors(env);
+      if (probes.skipped) {
+        console.info("monitor_dispatch_skipped", { reason: probes.reason, schedulerLagMs });
+      } else {
+        console.info("monitor_dispatch_completed", {
+          claimed: probes.claimed, finalized: probes.finalized, deferred: probes.deferred,
+          stale: probes.stale, dispatchErrors: probes.dispatchErrors, schedulerLagMs
+        });
+      }
+    } catch {
+      console.error("monitor_dispatch_failed", { schedulerLagMs });
+    }
   }
 };

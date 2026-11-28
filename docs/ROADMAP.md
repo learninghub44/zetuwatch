@@ -22,12 +22,13 @@ The product is built in vertical slices. A slice is complete only when UI, API, 
 
 ## Phase 2 — first working monitoring loop
 - [ ] Basic tenant-scoped monitor create/list/read/update/delete API and responsive setup screen implemented; 18 D1-backed API tests now cover monitor/team boundaries, member/viewer permissions, invitation/owner concurrency, tenant-scoped incident reads, soft deletion, persisted check-history reads and idempotent pause/resume controls, while the full route matrix and browser acceptance remain
-- [ ] Safe URL/egress policy: syntactic validation, dependency-free IPv4/IPv6 classification, mixed-answer rejection and a bounded Cloudflare DoH A/AAAA resolver are implemented as unit-testable components; the resolver is not connected to monitor execution, and validated-address pinning, redirect-hop checks and rebinding defense remain unimplemented
+- [ ] Safe URL/egress policy: shared IPv4/IPv6 classification, Node A/AAAA resolution, mixed-answer rejection, custom lookup address pinning, TLS SNI/verification defaults, per-hop redirect validation, downgrade/loop rejection, GET/HEAD-only requests, scheme-default ports, 2.5s DNS bound, 30s total probe bound, 64 KiB response cap, 16 KiB header/body caps and an HMAC-signed Worker client are implemented on feat/secure-probe-agent; the latest branch's complete Node suite and repository CI, trusted-certificate TLS handshake, live DNS behavior and production egress verification remain unverified
+- [ ] Probe-agent deployment and Worker integration: the gated D1 scheduler uses the signed client, per-workspace claim quotas, bounded concurrency, infrastructure retry deferral and lease-token finalization; a one-minute Cron Trigger is declared for the shared handler, but probe secrets are absent, the agent now claims signed nonces in shared D1 before egress, while per-process source-IP rate limits and active-egress caps still require a single instance, and trusted TLS/DNS plus production-like Worker-to-agent-to-D1 verification remain launch blockers
 - [x] Atomic due-work claim leases and D1-backed check finalization primitive (bounded batches, lease expiry/reclaim, token ownership and check-history persistence are integration-tested; no Cron execution or real probes are enabled)
-- [ ] Bounded scheduled runner / Cron Trigger integration (load, lag and retry behavior remain untested; real execution is blocked on hardened DNS-pinned egress)
+- [ ] Bounded scheduled runner / Cron Trigger integration (the shared one-minute handler and bounded D1 dispatch are implemented; probes remain gated off without explicit bindings, while full CI, live load/lag/retry and end-to-end behavior remain unverified)
 - [ ] HTTP/HTTPS checks, history and latency
-- [ ] Incident confirmation, deduplication and recovery (D1-backed finalization confirms, deduplicates, monitors, resolves and reopens incidents; tenant-scoped incident list/detail APIs now return the timeline to workspace members. Member/admin/owner incident status transitions, internal/public customer-authored timeline notes, actor attribution, audit writes and responsive controls are implemented; seven D1-backed Worker API integration tests were added. Public updates are stored but not published, browser E2E/accessibility and notifications remain. Monitor deletion now soft-deletes and retains check, incident and timeline rows; retention and hard-purge workflows remain.)
-- [ ] Verified email alerts and delivery history
+- [ ] Incident confirmation, deduplication and recovery (D1-backed finalization confirms, deduplicates, monitors, resolves and reopens incidents; tenant-scoped incident list/detail APIs now return the timeline to workspace members. Member/admin/owner incident status transitions, internal/public customer-authored timeline notes, actor attribution, audit writes and responsive controls are implemented; seven D1-backed Worker API integration tests were added. Public updates are stored but not published; email lifecycle events now enter the durable outbox, while full CI, browser E2E/accessibility and live provider delivery remain. Monitor deletion now soft-deletes and retains check, incident and timeline rows; retention and hard-purge workflows remain.)
+- [ ] Verified email alerts and delivery history (verified-self-email channels, durable outbox, bounded retries, delivery-log API and responsive Alerts UI are implemented in this integration branch; full CI, browser acceptance and live Resend delivery remain)
 
 ## Phase 3 — complete customer experience
 - [ ] Public marketing website, docs and pricing
@@ -42,7 +43,7 @@ The product is built in vertical slices. A slice is complete only when UI, API, 
 - [ ] Plan/usage enforcement and transparent upgrade UX
 - [ ] Payment provider integration after merchant activation and callback verification
 - [ ] Receipts, renewals, failed-payment and cancellation workflows
-- [ ] Webhook alert channel with signing and retries
+- [ ] Webhook alerts (tenant-scoped encrypted endpoint configuration, HMAC signing, incident-event D1 outbox, bounded leases/retries, dedicated DNS-pinned agent, scheduled Worker dispatcher, endpoint activation gate, delivery-history API/UI and versioned master-key rotation are implemented on the integration branch; master-key rotation now quarantines malformed rows with sanitized errors and exponential 1h–24h retry so one poison endpoint cannot starve later rows. A D1 regression test covers quarantine, progress, and retry. Remains launch-blocked pending current-head CI, production-like DNS/TLS/SSRF/idempotency verification and operator configuration)
 - [ ] SMS credits/add-ons only after cost and provider validation
 
 ## Phase 5 — advanced monitoring and scale
@@ -62,7 +63,7 @@ The product is built in vertical slices. A slice is complete only when UI, API, 
 - [ ] Privacy, terms, retention and deletion workflows published
 - [ ] Billing webhooks tested against duplicate, delayed and invalid events
 - [ ] Accessibility and mobile QA completed
-- [ ] Cloudflare quotas, limits and costs validated against target load
+- [ ] Cloudflare quotas, limits and costs validated against target load, including the 10 ms Workers Free Cron CPU limit versus 30 seconds on Workers Paid for sub-hour schedules; the 10-job probe batch has not yet been measured against either plan
 - [ ] Production deployment and smoke tests completed
 
 Do not mark a phase complete because files or mock screens exist. Verify behavior.
@@ -182,7 +183,7 @@ No Cloudflare resources were created and no deployment was attempted. This is fe
 - Added six isolated-D1 integration tests for due/disabled/future selection, batch bounds, overlapping claims, lease expiry/reclaim, stale token rejection, failure persistence and recovery of the failure streak.
 - GitHub Actions [CI run #112](https://github.com/learninghub44/zetuwatch/actions/runs/42767560283) completed successfully on commit `8a682c85b4fdeafb8e55efc5d5de531b4de76a44`.
 - Verified: TypeScript typecheck; SQLite migration validation (3 migrations, 16 required tables); Vitest (11 files, 95 tests), including six D1-backed scheduler integration tests.
-- This is the durable claim/finalization layer only. No Cron Trigger is configured, no probe is executed and no live measurement is written. Scheduled execution remains disabled until the DNS-pinned HTTP/HTTPS transport and complete SSRF/redirect/abuse controls are implemented and verified.
+- This durable claim/finalization layer is now connected to the DNS-pinned probe agent and shared scheduled handler. The one-minute Cron Trigger is declared, but customer probes remain disabled unless the operator explicitly configures `PROBES_ENABLED`, the HTTPS agent endpoint and shared secret. Live Worker-to-agent-to-D1 execution and full CI remain unverified.
 
 
 ## Incident lifecycle implementation and CI verification (2026-11-10)
@@ -263,3 +264,123 @@ No Cloudflare resources were created and no deployment was attempted. This is fe
 - GitHub Actions [CI run #182](https://github.com/learninghub44/zetuwatch/actions/runs/43568666409) completed successfully on head commit `612533f31ca69f058e07211b40ed7c643949a974` after a regression fix for monitor-deletion trigger side effects. Verified: TypeScript typecheck, inline browser JavaScript syntax across five HTML files, SQLite validation (7 migrations, 16 previously required tables; status-page tables were exercised by the new D1 integration tests), and Vitest (13 files, 129 tests).
 - Browser E2E, responsive/keyboard/screen-reader acceptance, custom domains, subscriptions and public-page cache behavior remain future work. Status pages are implemented and CI-verified but not launch-complete.
 - Follow-up main commit `a3bcb10bd7033d0ef8a93dd0d09020d8dbb25d59` adds `status_pages` and `status_page_monitors` to the migration validator's required-table set (18 total). The post-merge main-branch CI result for that validator change has not yet been observed.
+
+
+### Probe-agent DNS resource-bound hardening (2026-11-18)
+
+- Replaced the uncancelled DNS Promise timeout wrapper with a per-hostname Node resolver, one-attempt query policy and explicit cancellation when the shared A/AAAA deadline expires.
+- Added tests for timeout cancellation, A-only/AAAA-only answers, resolver failures, mixed public/private answers, empty answers and invalid bounds.
+- This is a security hardening slice only. The agent remains separate from the scheduler; full PR CI, real DNS/TLS tests, shared global rate limits/active-egress controls, per-tenant quotas and production Worker-to-agent integration remain open.
+
+
+### Probe-agent total deadline enforcement (2026-11-18)
+
+- Recomputed the remaining total probe budget after DNS resolution and before every outbound socket.
+- Skip the connection when DNS consumes the remaining budget; pass only the post-DNS remainder to the transport.
+- Added deterministic tests proving a slow DNS adapter cannot extend the overall probe deadline. Full PR CI and live network/TLS verification remain pending.
+
+
+### Probe-agent source-IP rate-limit memory bound (2026-11-20)
+
+- Replaced the cleanup-only source-IP rate limiter with a hard 5,000-bucket cap. Expired entries are reclaimed before admitting a new IP; if all entries are still live, new IPs are rejected rather than allowing attacker-controlled source cardinality to grow memory without bound.
+- Added an injectable-clock unit test for capacity rejection, expired-bucket reclamation and invalid limiter configuration.
+- No dependency or deployment change. A standalone Node 22.16.0 harness for the limiter logic passed two focused tests; the committed repository test file and full probe-agent/repository CI still require execution on this branch, so do not treat this change as CI-verified.
+
+
+## Gated scheduler dispatch implementation (2026-11-22)
+
+- Added a D1 scheduler dispatcher that checks configuration before claiming work, claims at most 10 monitors per tick by default (hard dispatch maximum 15) and at most two per workspace, and executes no more than five probes concurrently by default to stay below Cloudflare Workers' six simultaneous outbound-connection limit.
+- Added per-workspace fairness to the atomic claim query with a window-function rank and a count of unexpired leases across overlapping invocations. Each workspace is capped at two in-flight probes by default; the global claim helper maximum remains 25 and the dispatcher hard maximum is 15.
+- Added migration `0008_scheduler_workspace_quota_index.sql` and a query-plan assertion in `scripts/check-migrations.py`; SQLite uses the covering index for per-workspace active-lease counts instead of scanning the monitor table.
+- The dispatcher uses a 180-second lease. With at most five concurrent requests, a 15-job batch requires at most three 35-second Worker request waves (105 seconds) plus D1 finalization overhead, leaving a bounded recovery margin.
+- Added token-checked retry deferral for probe-agent/network/configuration failures. These infrastructure failures do not create false target-down checks; valid agent results alone enter check history and the existing incident state machine.
+- Extended the signed client/agent deadline consistently to the monitor API's 30-second maximum, with a 35-second Worker request bound.
+- Added nine D1 integration tests for disabled and invalid configuration, workspace fairness across overlapping invocations, bounded concurrency/batch limits, real failed-result persistence, infrastructure retry deferral, malformed responses and stale lease ownership. Added Node tests for the 30-second upper bound.
+- A one-minute Cron Trigger is declared in `wrangler.toml` for the shared notification/monitor handler. It dispatches at most five email deliveries first; the monitor dispatcher runs only when `PROBES_ENABLED=true` and valid HTTPS agent URL/shared-secret bindings are present. Those probe bindings are not set in the repository, so no customer probes run by default.
+- These new tests have not yet run in GitHub Actions. The latest branch is not CI-verified; the monitoring loop and production launch gates remain unchecked.
+
+
+## Email notification integration update (2026-11-22)
+
+- Integrated the verified-self-email channel APIs, responsive Alerts UI, D1 outbox, retry/lease dispatcher and delivery history with the DNS-pinned probe-agent branch.
+- Renumbered the notification migration to `0009_notification_outbox.sql`; `0008_scheduler_workspace_quota_index.sql` remains reserved for the scheduler index.
+- Scheduler finalization now enqueues email deliveries in the same D1 batch as immutable incident lifecycle events (opened, monitoring, resolved and reopened). Customer-authored status changes and timeline notes enqueue only when explicitly public; the dispatcher rechecks visibility before sending.
+- The shared one-minute scheduled handler dispatches up to five emails first, then conditionally runs bounded probes. The two batches execute sequentially to stay below the six simultaneous-open-connection limit.
+- The Cron Trigger is declared in `wrangler.toml`, but no external resource has been created. Monitor probes remain disabled unless `PROBES_ENABLED=true` and valid HTTPS agent URL/shared-secret bindings are configured. Resend delivery is skipped without its sender/API configuration.
+- Full CI, browser acceptance, live DNS/TLS verification and controlled Resend delivery remain outstanding. Do not mark email or monitoring launch gates complete.
+
+## Probe-client timeout contract correction (2026-11-22)
+
+- Aligned the Worker-compatible probe client with the scheduler and Node agent's 1,000–30,000 ms monitor timeout range. The previous 10,000 ms client ceiling caused monitors configured above 10 seconds to be rejected before dispatch and repeatedly deferred as infrastructure failures.
+- Added a regression boundary: 30,000 ms is accepted, while 30,001 ms is rejected before any network request. The Worker-to-agent request deadline remains bounded to 35 seconds.
+- The complete GitHub Actions run for the updated integration head is still required; this correction is not marked CI-verified.
+
+## Scheduler lease-expiry finalization hardening (2026-11-22)
+
+- Check finalization now requires both the original lease token and an unexpired lease at the recorded check timestamp. A worker returning after lease expiry cannot persist a check even if no later invocation has reclaimed the row yet.
+- Recovery-monitoring, incident resolution and incident reopening transitions require the check row inserted by the same finalization batch. Expired or superseded results therefore cannot change incident state or enqueue lifecycle notifications.
+- Added D1 integration coverage for expired successful and failed results against an existing recovery incident; both must leave the lease, check history, incident state and timeline unchanged.
+- The exact SQL sequence was independently exercised against SQLite for both stale-success and stale-failure paths. The full Cloudflare Vitest/Worker CI run for the updated branch remains pending.
+
+## Customer monitor execution-state accuracy (2026-11-22)
+
+- Centralized the probe configuration gate and exposed it to the customer API. `executionEnabled` is true only when the operator explicitly enables probes and supplies a valid HTTPS agent endpoint plus a 32-byte shared secret; this reports configuration, not agent reachability or successful target health.
+- Monitor list/detail APIs now derive paused, execution-disabled, awaiting-first-check, healthy, suspect, down and recovering states from persisted check rows and unresolved incidents. The UI displays these states and no longer tells customers that probes are disabled when the operator has configured the runner.
+- Added a D1-backed API integration test covering list/detail/check-history/create responses, seven monitor states (including unknown when a timestamp has no check row), and enabled, disabled and invalid probe configuration. Unresolved down/recovering incidents remain visible when probe dispatch is disabled. Full GitHub Actions verification remains pending.
+
+
+## Monitor freshness state correction (2026-11-23)
+
+- Added a derived `check_delayed` state when an enabled monitor's persisted `next_check_at` is overdue by more than the greater of two minutes or two configured intervals. This prevents an old successful check from being displayed as current health when the scheduler is delayed.
+- The state remains distinct from a confirmed incident: open incidents still take precedence, recent failed checks remain suspect, paused/disabled monitors retain their existing states, and no synthetic check or incident is created.
+- Updated monitor list/detail UI with an amber "Check delayed" label and an explanation that the last stored result may be old.
+- Added D1-backed API coverage for a delayed monitor with an old successful check, a delayed monitor awaiting its first check, and the monitor-detail response. Existing fresh healthy/awaiting, suspect, incident, disabled and paused states remain covered.
+- The change has been committed to the monitoring integration pull request. The full GitHub Actions suite and browser E2E/accessibility checks must still pass before this state logic is treated as launch-verified.
+
+
+## Secure webhook egress operation (2026-11-26)
+
+- Added a separate authenticated \`POST /v1/webhook\` route to the Node agent and a Worker-side \`sendWebhookJob\` client. The route has a strict destination/event/payload/signature schema and shares the existing outer HMAC, timestamp/nonce replay protection, rate limiting and bounded active-egress quota.
+- The agent revalidates HTTPS/default-port URLs and blocks IP literals, credentials, fragments, localhost/metadata hosts and special-use suffixes; resolves A and AAAA records on each attempt; rejects any non-public answer; pins the selected public IP through the HTTPS socket lookup; preserves the original hostname for SNI and certificate verification; requires normal TLS certificate validation; and never follows redirects.
+- Added bounded request/response handling (256 KiB payload, 16 KiB response headers, 8 KiB discarded response body), 2.5-second DNS and 15-second total deadlines, bounded Retry-After parsing, normalized error results and regression tests for URL policy, mixed DNS answers, pinning, redirects, timeouts, response classification and agent request signing.
+- The focused Node runner/transport/client tests passed locally (18 tests) on Node v22.16.0. Additional server-route tests cover the separate body limit, invalid job rejection and replay protection across probe/webhook routes, but have not yet run in the full repository test command.
+- The scheduled Worker dispatcher, endpoint activation gate, immediate preflight recheck and delivery-history API/UI are now implemented in the integration branch (see the next section). Webhook delivery is still not complete: current-head repository CI, trusted-certificate/TLS, DNS-rebinding, tenant-isolation and production-like Worker-to-agent-to-D1 tests remain outstanding. All endpoints remain disabled by default; no customer request has been sent.
+
+
+## Webhook Worker dispatch integration (2026-11-26)
+
+- Added `packages/notifications-core/src/webhook-dispatch.ts`. It checks the explicit `WEBHOOKS_ENABLED` flag and encryption/agent bindings before claiming work; decrypts tenant-bound endpoint values only inside the Worker; builds a bounded payload that excludes target URLs and private timeline text; signs the exact body with timestamped HMAC-SHA256; and sends only through the dedicated authenticated `/v1/webhook` agent client.
+- The dispatcher claims at most three deliveries per Cron invocation with two concurrent agent requests and 90-second leases. It uses a live clock for lease preflight and settlement, rechecks the lease, endpoint enabled/deleted state and encrypted configuration immediately before network I/O, and maps transient DNS/TLS/network/429/5xx/agent errors and temporary endpoint-decryption failures to bounded retries. Delivery remains at-least-once with a stable event ID for receiver deduplication.
+- The scheduled Worker now runs the bounded email batch, webhook batch and monitor-probe batch sequentially. `wrangler.toml` explicitly sets `WEBHOOKS_ENABLED=false`; no production secrets or external resources were configured.
+- Added owner/admin endpoint activation with a global configuration gate and per-endpoint decrypt/hash/signing-key verification. Added tenant-scoped delivery history and attempt-log API. The Alerts UI now exposes endpoint enable/disable controls and separate webhook history without displaying payloads or secrets.
+- Added `tests/webhook-dispatch.integration.test.ts` for exact-body signatures, payload privacy, public update handling, transient retries, disable-during-send behavior and the default-off gate. Extended endpoint integration tests for activation authorization, operator configuration blocking and delivery-history tenant isolation.
+- The new D1/Vitest tests and the full pinned TypeScript 5.9.3, browser inline-JS, migration-validator and Node agent suites have **not yet run on this head**. Keep the roadmap item unchecked and keep `WEBHOOKS_ENABLED=false` until current-head CI and production-like DNS/TLS/SSRF/idempotency tests pass. No customer webhook has been sent.
+
+
+### Webhook lease acquisition clock correction (2026-11-26)
+
+- Fixed a lease-duration bug in the sequential Cron pipeline: the webhook dispatcher previously used the Cron invocation timestamp both as the due-work cutoff and as the start of its 90-second lease. Because email delivery runs first, a slow email batch could consume part of the webhook lease before any webhook was claimed.
+- Split the claim clock into a due-work cutoff and an actual lease-acquisition time. The dispatcher keeps the invocation timestamp for selecting work that was due when the Cron run began, but starts the lease and checks expired leases against the live time when webhook dispatch actually begins. Preflight and settlement continue to use the live clock.
+- Added a D1-backed regression test that simulates an 80-second delay between Cron start and webhook claim and asserts that the claimed delivery receives the full 90-second lease from actual claim time.
+- This is a scheduling correctness fix, not evidence of successful external delivery. The full current-head TypeScript/Vitest/migration/browser/probe-agent CI and production-like DNS/TLS/SSRF/Worker-to-agent verification remain outstanding. Keep webhook delivery disabled until those launch gates pass.
+
+
+## Webhook master-key rotation implementation update (2026-11-27)
+
+- Added migration `0012_webhook_encryption_key_ids.sql`. It separates the AES-GCM format version from an operator-managed `encryption_key_id`; existing rows default to legacy id `v1` and preserve the original AAD context.
+- Added a validated current/previous keyring. New endpoint values use the current key; dispatch can decrypt the current or previous key without falling back when a stored id is unavailable. Key ids other than legacy `v1` are bound into AES-GCM AAD.
+- Added `rotateWebhookEncryptionBatch`, a scheduled, no-network maintenance operation bounded to one active endpoint per minute. It decrypts and authenticates both fields, verifies the normalized destination/hash and signing-secret suffix, re-encrypts both fields with the current key, and uses compare-and-swap conditions to avoid overwriting concurrent endpoint changes. It reports scanned/rotated/conflict/failed/remaining/blocked counts without logging key material or ciphertext.
+- Updated endpoint creation and signing-secret rotation to write with the current key id. Signing-secret rotation also re-encrypts the destination in the same guarded update. Endpoint activation and scheduled delivery resolve the stored key id through the keyring.
+- Added keyring unit tests, D1 integration tests for bounded/resumable rotation, concurrent-worker safety, corrupt/hash-mismatched rows, unknown key ids, legacy/current-key delivery, and migration-validator checks.
+- Updated webhook operator/security/testing documentation. Rotation requires a reviewed Worker version containing the current and previous secrets plus matching non-secret key ids; do not stage these values through sequential immediate-deploy secret commands.
+- **Verification pending:** the full repository TypeScript 5.9.3, Vitest/D1, migration, inline-browser-JS and Node probe-agent suites have not yet completed on this head. The migration and new integration tests are committed but not claimed as passed. Keep production webhook delivery disabled and do not remove the previous key until the live rotation counters report zero remaining, blocked and failed rows after a verified deployment.
+
+
+## Durable probe-agent replay protection update (2026-11-27)
+
+- Added migration `0013_probe_agent_replay_nonces.sql` with a unique SHA-256 nonce hash and indexed expiry timestamp. Raw nonces and signed request bodies are not persisted.
+- Added the internal Worker endpoint `POST /internal/probe-agent/replay`. It rejects browser origins, enforces a small JSON body, verifies the exact raw-body HMAC and a 60-second timestamp window, binds the JSON nonce to the signed nonce header, applies an IP rate limit, and atomically prunes expired hashes and inserts the new hash using D1 batch semantics.
+- The standalone Node agent now requires `PROBE_REPLAY_URL` and claims the nonce through the Worker before parsing/executing a probe or webhook job. Duplicate claims fail with 409; replay-store outages fail closed with 503. The in-memory nonce map remains only as the isolated `createProbeHandler` test fallback.
+- Added Worker/D1 integration tests for concurrent duplicate claims, raw-body tampering, header/body mismatch, stale timestamps, origin rejection, oversized bodies and expiry cleanup; added Node tests for endpoint validation, HMAC signing, duplicate handling and fail-closed behavior.
+- Updated probe-agent and test runbooks. This removes the process-local replay-cache limitation across restarts and shared-agent replicas, but does **not** make horizontal scaling safe: source-IP rate limiting and active-egress capacity remain per-process.
+- **Verification pending:** complete pinned TypeScript 5.9.3, Vitest/D1, migration-validator, browser-script and Node probe-agent CI on this new head; production-like Worker-to-agent connectivity, TLS and D1 replay tests remain outstanding. No production secrets, Cloudflare resources or deployment were created.

@@ -1,0 +1,117 @@
+# Dedicated probe agent
+
+ZetuWatch uses Cloudflare Workers and D1 for the customer API and control plane. A Worker does not expose the DNS answer used by its ordinary outbound fetch in a way that lets application code pin the validated address to the exact socket. The customer-target network request therefore belongs in a separately operated egress process, not in an ordinary Worker fetch.
+
+## Components
+
+- The shared URL and IP policy lives in packages/monitoring-core as dependency-free ESM. The existing TypeScript entrypoints re-export that exact implementation so the Worker and agent do not maintain separate address-classification rules.
+- The agent lives in apps/probe-agent and uses only Node.js built-in modules. It does not use an HTTP proxy, browser cookies, customer-supplied request headers or a third-party networking package.
+- The Worker-compatible signed client lives in packages/probe-client. It uses Web Crypto and fetch to call only the configured HTTPS agent endpoint.
+- A bounded D1 scheduler dispatcher now claims due monitors fairly (default 10 per tick, at most 2 per workspace), runs at most five requests concurrently and finalizes only validated agent results under the original lease token. It remains disabled by default: the shared one-minute Cron Trigger dispatches email notifications first, while monitor probes require `PROBES_ENABLED=true` plus the HTTPS agent URL and secret.
+- No customer target is probed by the current repository configuration, and customer-facing `executionEnabled` remains false.
+
+## Request and trust boundary
+
+1. The control plane sends a bounded job containing targetUrl, GET or HEAD, expected status, timeout and redirect limit. Additional fields are rejected.
+2. The Worker client requires an HTTPS endpoint at the exact /v1/probe path, omits credentials, disables redirects and signs the exact JSON body.
+3. The signature is HMAC-SHA-256 over the version, Unix timestamp, nonce and SHA-256 body digest. The agent compares signatures in constant time, accepts only a 60-second clock window and claims each nonce in shared D1 for a five-minute replay window before executing the job.
+4. The agent validates the URL again. It rejects ASCII control characters before parsing (WHATWG URL parsing strips tabs/newlines), credentials, unsupported protocols, non-default ports, blocked/local suffixes, non-canonical numeric IPv4 spellings (including shortened, integer-only, octal and hexadecimal forms), and non-public IP literals. Only GET and HEAD are accepted.
+5. For a hostname, the agent resolves A and AAAA records. Only an empty answer for one address family is tolerated; other resolver errors fail closed. The combined set is capped at 16 and rejected if any address is non-public.
+6. The agent chooses a validated address and passes it to Node HTTP(S) through a custom lookup callback. The callback returns that address instead of performing a second DNS lookup. HTTPS retains the original hostname as SNI and leaves certificate verification enabled. Connection pooling is disabled so a later job cannot reuse a socket established under a different validation decision.
+7. Redirects are manual. Each next URL is parsed and revalidated, then independently resolved and pinned. HTTPS-to-HTTP downgrade, private destinations, non-default ports, loops and excess hops are rejected.
+8. The response body is discarded. The agent returns only a normalized status, elapsed time, error category and redirect count.
+
+## Bounds
+
+- DNS A/AAAA resolution: 2.5 seconds.
+- Total probe deadline: at most 30 seconds, including DNS and redirect hops.
+- Redirects: disabled by default; maximum 3 when explicitly requested.
+- Response body: 64 KiB maximum.
+- Response headers: 16 KiB maximum.
+- Agent request body: 16 KiB maximum.
+- Agent request rate: 300 requests per source IP per minute; source-IP bucket state is capped at 5,000 entries and new IPs fail closed while all buckets are live.
+- Concurrent in-flight agent requests/probes: 20 maximum.
+- Worker-to-agent response: 4 KiB maximum.
+- Only ports 80 for HTTP and 443 for HTTPS are accepted.
+
+## Running the agent
+
+Requires Node.js 22.12 or later. There are no additional runtime npm dependencies.
+
+Configure these environment variables outside source control:
+
+- PROBE_TLS_CERT_FILE: path to the agent HTTPS certificate chain.
+- PROBE_TLS_KEY_FILE: path to the matching private key.
+- PROBE_SHARED_SECRET: a random secret of at least 32 bytes, shared with the Worker secret store. The same secret authenticates Worker-to-agent jobs and agent-to-Worker replay claims.
+- PROBE_REPLAY_URL: required HTTPS URL for the Worker endpoint `https://<api-host>/internal/probe-agent/replay`. It must use the default port and exact path; the agent refuses to start without it.
+- PROBE_PORT: optional listener port; defaults to 8788.
+- PROBE_HOST: optional bind address; defaults to 0.0.0.0.
+
+The Worker requires `PROBES_ENABLED=true`, `PROBE_AGENT_URL=https://<agent-host>/v1/probe` and `PROBE_SHARED_SECRET` in its environment/secret store before it will claim any monitor. The repository does not set these probe values; the Cron Trigger only schedules the shared handler and probe dispatch remains skipped without them. Never place the shared secret in Wrangler vars or source control.
+
+Generate a secret locally with a cryptographically secure generator such as openssl rand -hex 32, then place it in the host's secret manager and the Worker secret store. Never put the value in wrangler.toml, a checked-in .env file, CI logs or this repository.
+
+Start the service with node apps/probe-agent/src/server.mjs. It requires TLS files and the shared secret at startup. GET /healthz returns only a minimal status value. POST /v1/probe requires the signed request headers.
+
+The standalone agent now claims each signed request nonce through the Worker endpoint configured by `PROBE_REPLAY_URL`. The Worker verifies the exact raw-body HMAC and timestamp, hashes the nonce with SHA-256, then atomically deletes expired rows and inserts the new hash into D1 under a unique key. Duplicate claims return 409; D1/network failures fail closed before any customer-target socket is opened. Only nonce hashes and expiry timestamps are stored—never raw nonces, signed bodies or customer URLs. This shared D1 guard survives agent restarts and prevents the same nonce from being accepted by two agents using the same control-plane database.
+
+The source-IP rate limiter and active-egress cap remain per-process. Keep one agent instance until shared global rate-limit and concurrency controls are implemented and verified; the durable nonce store alone does not make horizontal scaling safe. The source-IP rate limit is an additional abuse control, not a tenant quota. Its in-memory bucket map is hard-capped at 5,000 entries: expired buckets are reclaimed, and new source IPs are rejected while all slots remain live. The D1 scheduler enforces a two-in-flight-probe workspace quota across overlapping invocations; plan/usage quotas remain separate launch work.
+
+## Tests and verified limits
+
+Run npm run test:probe-agent. The suite covers IP classification, mixed DNS answer rejection, address pinning, redirect re-resolution, private/downgrade/loop rejection, non-canonical numeric host spellings and control-character rejection, response bounds, TLS SNI and certificate-verification options, HMAC compatibility, stale timestamps, replay rejection, malformed jobs and response validation.
+
+These tests use injected DNS answers and a local HTTP server. They do not perform live public DNS resolution or a trusted-certificate TLS handshake. The TLS test verifies the Node request options (original SNI hostname and rejectUnauthorized enabled), not a production certificate chain. The Worker client is tested with an injected fetcher; it has not been connected to the production scheduler or a deployed agent.
+
+## Scheduler dispatch implementation (feature branch; not launch-verified)
+
+- The Worker scheduled handler calls the D1 dispatcher only for the exact `*/1 * * * *` event and only when `PROBES_ENABLED=true` plus a valid HTTPS agent endpoint and 32-byte shared secret are present. `wrangler.toml` declares a one-minute Cron Trigger for the shared notification/probe handler. It dispatches email first and probes only when the probe bindings are explicitly configured.
+- Migration `0008_scheduler_workspace_quota_index.sql` adds a covering index for the workspace active-lease count; the migration validator checks that SQLite selects it for the quota query.
+- Due-work claims use a window-function rank and count unexpired leases across all invocations, so overlapping Cron runs cannot exceed two in-flight monitors per workspace by default. The global dispatch default is 10 with a hard maximum of 15. The dispatcher runs at most five jobs concurrently by default, leaving one of Cloudflare Workers' six simultaneous outbound-connection slots available (see [Cloudflare Workers limits](https://developers.cloudflare.com/workers/platform/limits/)). The dispatcher uses a 180-second lease; the 15-job ceiling keeps three 30-second probe waves plus request overhead within that lease. Cloudflare's current limits also give Workers Free only 10 ms of CPU per Cron invocation, while Workers Paid allows 30 seconds for a sub-hour Cron. The 10-job batch is not assumed to fit the Free CPU budget; measure CPU with real bindings and select/validate the plan before enabling probes.
+- Only a normalized, schema-validated signed-agent result can be persisted through `finalizeMonitorCheck`. A stale lease cannot write a result. Agent/network/auth/invalid-response failures are deferred for 30 seconds under the original lease token and do not create false customer downtime.
+- Redirects remain disabled for scheduled jobs because monitor-level redirect policy is not yet persisted in the monitor model.
+- Nine D1 integration tests have been added for disabled/config-invalid no-claim behavior, workspace fairness, overlapping-invocation in-flight quotas, bounded concurrency, real result persistence, infrastructure retry deferral, malformed results, stale-lease rejection and safe bounds. The feature-branch D1 suite and Node suite have not yet been run in GitHub Actions; do not count these tests as passing.
+
+## Launch blockers
+
+- Run the full repository CI and probe-agent Node suite for the latest feature branch.
+- Exercise a real HTTPS handshake using a trusted test certificate and verify hostname mismatch/expiry failures.
+- Verify DNS behavior and outbound network restrictions in the intended host environment.
+- Add shared global source-IP rate limiting and active-egress capacity controls before multi-instance agent operation; signed nonce replay is now claimed in D1.
+- Deploy the agent and configure its URL/TLS/secret only after explicit deployment authorization.
+- Automatic incident lifecycle transitions now enqueue email deliveries in the same D1 batch; complete full CI and a production-like Worker-to-agent-to-D1/notification end-to-end test before enabling customer probes.
+
+Until those gates pass, scheduled monitoring stays disabled and public status pages must continue to report health as unknown.
+
+## DNS query cancellation
+
+The agent creates an isolated Node `dns/promises.Resolver` for each hostname, limits the resolver to one attempt per query, and uses one shared deadline for the A/AAAA pair. If that deadline expires, it calls `resolver.cancel()` before returning `DNS_TIMEOUT`; a timed-out target therefore cannot leave DNS queries running after the probe slot has been released. This uses the documented Node resolver timeout, retry and cancellation APIs: https://nodejs.org/api/dns.html#class-dnspromisesresolver.
+
+The total deadline is recomputed after every DNS resolution. If DNS consumes the remaining budget, no HTTP socket is opened; otherwise the transport receives only the remaining time, not the stale pre-DNS budget.
+
+
+## Authenticated webhook egress operation
+
+The agent now exposes a separate \`POST /v1/webhook\` operation. It is not a general-purpose proxy and does not accept arbitrary methods, headers or redirect policies. It shares the existing Worker-to-agent HMAC authentication, timestamp window, nonce replay guard, source-IP rate limit and bounded active-egress quota with \`/v1/probe\`.
+
+The normalized job contains only:
+- \`destinationUrl\`: one HTTPS destination on the default port;
+- \`eventId\`: a stable UUID/hex event identifier;
+- \`payloadBase64\`: canonical base64url for the exact JSON payload bytes (maximum 256 KiB);
+- \`signatureHeader\`: the workspace HMAC header, \`t=<10-digit timestamp>,v1=<64 lowercase hex>\`.
+
+For each attempt the agent:
+1. Revalidates the destination URL, rejects IP literals, credentials, fragments, non-default ports, local/special-use hostnames and blocked suffixes.
+2. Resolves A and AAAA records with the existing isolated, cancellable Node resolver (2.5-second DNS budget).
+3. Rejects the entire answer set if any returned address is non-public.
+4. Pins the selected public address through \`https.request\`'s custom \`lookup\` callback while preserving the original hostname for Host, SNI and certificate-name verification (\`rejectUnauthorized: true\`).
+5. Sends one POST only. Redirects are never followed; a 3xx response is returned as \`REDIRECT_BLOCKED\`.
+6. Enforces a 15-second total operation deadline, 256 KiB request payload, 16 KiB response-header limit and 8 KiB discarded response-body limit. Only status and a bounded Retry-After hint are returned; response bodies and Location values are not persisted or exposed.
+
+The Worker-side \`sendWebhookJob\` client targets only the fixed \`/v1/webhook\` path on the already validated agent origin, signs the agent request with the existing shared secret, disables redirects/credentials/cache, and validates a small response schema.
+
+This is an egress primitive, not an enabled product integration: the scheduled Worker does not call it yet, endpoint activation remains unavailable, and the D1 outbox is not being drained. Do not enable customer delivery until the Worker dispatcher, endpoint-state recheck, durable delivery logs, retry settlement and production-like TLS/DNS/SSRF tests are connected and verified.
+
+Implementation relies on Node's documented \`https.request()\` TLS options (\`servername\`, \`rejectUnauthorized\`, custom lookup via request options) and isolated \`dns/promises.Resolver\` timeout/cancellation behavior:
+- https://nodejs.org/download/release/latest-jod/docs/api/https.html#httpsrequestoptions-callback
+- https://nodejs.org/download/release/v22.18.0/docs/api/dns.html#class-dnspromisesresolver

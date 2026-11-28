@@ -6,9 +6,14 @@ compatibility_flags = ["nodejs_compat"]
 [vars]
 APP_ENV = "development"
 PUBLIC_APP_URL = "http://localhost:8787"
+WEBHOOKS_ENABLED = "false"
+WEBHOOK_ENCRYPTION_KEY_ID = "v1"
 
 [[d1_databases]]
 binding = "DB"
 database_name = "zetuwatch"
 database_id = "REPLACE_WITH_CLOUDFLARE_D1_DATABASE_ID"
 migrations_dir = "database/migrations"
+
+[triggers]
+crons = ["*/1 * * * *"]

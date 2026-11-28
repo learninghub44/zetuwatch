@@ -50,6 +50,8 @@ After save: take user to monitor detail with live/pending state; do not fabricat
 
 ## Monitor detail
 - Current state, target, interval, last/next check and actions.
+- State is derived only from persisted observations, the next due time and unresolved incidents: paused, execution disabled, awaiting first check, healthy, suspect, check delayed, down or recovering. If the next scheduled check is overdue by more than the greater of two minutes or two configured intervals, show **Check delayed** rather than implying that an old successful result is current. This is a scheduler-freshness warning, not a confirmed outage.
+- A valid probe configuration is a dispatch-availability signal, not evidence of a successful check or live agent connectivity.
 - Time-range selector and response-time chart.
 - Check history with error categories and expandable sanitized diagnostics.
 - Incidents and maintenance history.
@@ -90,3 +92,16 @@ After save: take user to monitor detail with live/pending state; do not fabricat
 - Never use color alone to communicate health; include text and iconography.
 - Avoid empty dashboard cards; guide the user to the next useful action.
 - Keep forms short, group related fields, preserve input on errors and show validation beside the field.
+
+
+## Alerts and webhook delivery
+
+- Workspace Alerts separates verified-email channels from webhook endpoints and keeps their delivery histories separate.
+- Owners/admins can create, rename, enable/disable, rotate and remove webhook endpoints. All workspace members can inspect safe endpoint metadata and per-endpoint delivery/attempt history.
+- The generated signing secret is displayed once on creation/rotation. The UI never writes it to localStorage or returns it in endpoint-list responses.
+- Endpoint URLs and secrets are encrypted before persistence. Creating or rotating an endpoint does not send a test request or perform DNS resolution.
+- New endpoints remain disabled. The Enable action is available only when the operator has explicitly configured the webhook dispatcher, encryption key and trusted agent. A configuration indicator is not a reachability check.
+- Delivery history shows event type, monitor, status, attempt count, response status, last sanitized error and bounded attempt details. It never displays the payload, URL, ciphertext or secret.
+- Disabling/removing an endpoint cancels queued deliveries. A request already opened cannot be recalled; a stale worker cannot settle a cancelled lease.
+- Webhook events use timestamped HMAC-SHA256 over the exact body and a stable event ID. Receivers must verify the signature before parsing and deduplicate event IDs durably because delivery is at-least-once.
+- Show an explicit paused/configuration-pending state while `WEBHOOKS_ENABLED` is false. Do not imply a receiver has been contacted or a delivery succeeded until a persisted attempt reports a 2xx response.

@@ -11,48 +11,46 @@
 
 ## Current implementation boundary
 
-The monitoring-core URL validator currently provides a syntactic first gate:
+The URL and IP policy is shared as dependency-free ESM between the Worker and the standalone Node probe agent. The TypeScript entrypoints re-export that implementation so the two runtimes do not carry separate address-classification rules.
+
+The URL gate:
 - permits only HTTP and HTTPS;
 - rejects embedded URL credentials;
-- restricts ports to 80 and 443;
-- rejects localhost, internal/test suffixes and single-label hostnames;
+- permits only the scheme's default port (80 for HTTP, 443 for HTTPS);
+- rejects localhost and localhost.localdomain, local/internal/test/example/onion and reverse-DNS suffixes, common home/LAN suffixes, and single-label hostnames;
 - rejects non-public IPv4 literals, including private, loopback, link-local, carrier-grade NAT, benchmarking, documentation, multicast and reserved ranges;
-- rejects all IPv6 URL literals until a pinned IPv6 transport is implemented;
+- rejects IPv6 URL literals; IPv6 DNS answers are classified and can be selected/pinned by the agent;
 - caps URL length.
 
-A dependency-free address classifier parses canonical IPv4 and IPv6 records and permits only conservative global-unicast ranges. Its DNS answer-set helper rejects empty, malformed, oversized or mixed public/private A/AAAA sets rather than selecting only the first apparently safe record. IPv6 DNS answers are classified even though IPv6 monitor destinations remain disabled.
+The dedicated agent in apps/probe-agent uses Node's built-in DNS and HTTP(S) modules. It resolves A and AAAA records, tolerates only ENODATA for an absent address family, caps the combined answer set at 16 and rejects the entire set if any address is non-public. DNS resolution is bounded to 2.5 seconds.
 
-A DNS adapter now queries Cloudflare's documented DNS-over-HTTPS JSON endpoint for A and AAAA records in parallel. It bounds each response to 16 KiB and each query to at most five seconds, rejects redirects and non-success DNS responses, and validates the combined answer set. This adapter is not yet called by monitor execution and does not pin the resolved address to a socket.
+For each hop, the transport selects one validated address and supplies it through Node's custom lookup callback. The connection therefore uses that exact address instead of performing a second hostname lookup. HTTPS keeps the original hostname for SNI and leaves certificate verification enabled. Connection pooling is disabled. Redirects are manual; each next hop is parsed, revalidated, independently resolved and pinned. HTTPS downgrade, private destinations, disallowed ports, loops and excess hops are rejected.
 
-The HTTP probe currently:
-- permits GET and HEAD only;
-- disables automatic redirects;
-- sets a bounded timeout;
-- measures time to response headers and cancels the response body;
-- does not accept arbitrary customer headers or credentials.
+The probe accepts GET and HEAD only and no caller-supplied headers or body. A total deadline of at most 30 seconds covers DNS and redirects. Response bodies are discarded and capped at 64 KiB; response headers are capped at 16 KiB. The signed Worker client requires the configured HTTPS agent endpoint, disables redirects, omits credentials and caps the normalized response at 4 KiB.
 
-This is not a production SSRF boundary. Cloudflare Workers ordinary fetch() does not expose a DNS answer that application code can validate and pin to the exact outbound socket. The new resolver is a separate policy component; it is not yet connected to the probe transport. The project has not demonstrated a complete DNS-resolution, address-pinning, TLS hostname-verification and redirect-validation flow on the target runtime.
+Worker-to-agent requests use HMAC-SHA-256 over a version, timestamp, nonce and body digest. The agent uses constant-time signature comparison, a 60-second clock window, five-minute D1-backed nonce replay protection using SHA-256 hashes and a unique claim key, a 16 KiB request-body limit, a 300-request-per-source-IP-per-minute limit and a 20-request concurrency bound.
 
-Do not expose monitor execution in production until one of these approaches is implemented and independently tested:
+This is a scheduler/egress implementation slice, not a launched monitoring service. The signed client is now integrated with a bounded D1 dispatcher on the secure-probe feature branch. Dispatch defaults to 10 claims per tick (hard maximum 15), counts unexpired leases across overlapping invocations to cap each workspace at two in-flight probes, and runs five concurrent agent requests; infrastructure failures defer work without recording a customer outage, and stale or expired lease tokens cannot finalize results. Finalization requires the original lease to remain unexpired at the check timestamp; recovery, resolution and reopening statements are additionally gated on the check row inserted by that same finalization batch, so an expired or superseded result cannot mutate incident state or enqueue lifecycle alerts. The Worker scheduled handler is gated by `PROBES_ENABLED=true` and validated agent configuration. `wrangler.toml` declares the shared one-minute Cron Trigger; email dispatch runs only when Resend sender/API configuration is present, while monitor probes remain skipped unless the operator explicitly supplies the probe bindings. The customer API continues to report `executionEnabled: false` until live execution is deliberately enabled. The agent has not been deployed or tested against a production DNS resolver or trusted public TLS certificate chain. Nonce replay protection is shared through D1, but source-IP rate limiting and active-egress capacity remain per-process; keep one agent instance until shared global controls are implemented.
 
-1. A dedicated egress/probe service that resolves all A/AAAA records, rejects the destination if any answer is non-public, pins the validated address to the actual connection while preserving TLS SNI/Host verification, validates every redirect hop, and enforces connection/read/total timeouts and response-size limits; or
-2. A Cloudflare-supported outbound networking primitive that provides equivalent address validation and connection pinning, verified against current platform documentation and tests.
+Do not enable scheduled execution until the latest feature branch passes the full CI suite, the agent is deployed with operator-managed TLS and secret configuration, automatic incident transitions are connected to notification delivery, and a production-like Worker-to-agent-to-D1 test verifies DNS pinning, certificate failures, redirects, timeouts, response limits, retry deferral and persistence.
 
-The egress service must not become an unauthenticated general-purpose proxy. It should accept only authenticated, signed, bounded monitor jobs from the scheduler, enforce per-tenant and global quotas, and return a small normalized result.
+The agent must not become an unauthenticated general-purpose proxy. It accepts only signed, bounded monitor jobs and returns a small normalized result. It has no arbitrary headers, cookies, request body, custom ports, proxy support or caller-selected network route.
 
 ## Required egress test matrix
 
 - IPv4 loopback, RFC1918, link-local, carrier-grade NAT, documentation, benchmarking, multicast and reserved ranges.
 - IPv6 loopback, unique-local, link-local, IPv4-mapped IPv6, multicast and documentation ranges.
 - IPv4-in-IPv6 and unusual numeric host representations.
-- DNS answers containing a mixture of public and private addresses.
-- DNS rebinding between validation and connect.
-- Redirect chains to private, loopback, metadata and non-standard-port destinations.
-- Redirect loops and excessive hop counts.
-- Slow headers, slow body, oversized body, connection errors and abort behavior.
-- Attempts to access cloud metadata endpoints and internal service names.
+- DNS A/AAAA answers containing a mixture of public and private addresses; absent-family ENODATA versus resolver failures.
+- DNS rebinding between validation and connect, proving the custom lookup uses the selected address.
+- Redirect chains to private, loopback, metadata, non-default-port and blocked-host destinations.
+- Redirect loops, HTTPS downgrade and excessive hop counts.
+- Slow DNS, slow headers, slow body, oversized headers/body, connection errors and abort behavior.
+- TLS SNI uses the original hostname; trusted-certificate success, hostname mismatch and expired-certificate failures.
+- Signed request tampering, stale timestamps, nonce replay, malformed jobs, body bounds, concurrency and rate limits.
+- Worker client rejects insecure endpoints, redirects, oversized responses and malformed result shapes.
 
-The pure IP classifier, mixed-answer-set policy and DNS-over-HTTPS adapter have unit coverage. The adapter's timeout, response-size and fail-closed behavior are tested with injected responses; live resolver behavior and DNS rebinding between validation and connection remain unverified. Redirect transport, HTTP response limits and abuse controls remain unimplemented.
+The Node probe-agent suite currently covers IP classification, mixed-answer rejection, injected DNS answers, pinned lookup behavior against a local HTTP server, redirect-hop validation, response-size bounds, TLS request-option defaults, HMAC compatibility, replay/stale request rejection and response validation. It does not yet perform live public DNS or a trusted-certificate TLS handshake. The Worker client is tested with an injected fetcher. The suite must pass in GitHub Actions before this implementation is treated as verified by CI.
 
 ## Operational requirements before public launch
 
@@ -65,8 +63,9 @@ The pure IP classifier, mixed-answer-set policy and DNS-over-HTTPS adapter have 
 
 ## Current status
 
-The URL policy, fail-closed HTTP probe, pure IP classifier and bounded DNS resolver component have unit tests. No DNS-pinned transport or complete production-grade egress layer exists yet. Treat outbound monitor execution as blocked for public production use until that gap is closed.
+The URL/IP policy, Node DNS resolver, pinned HTTP(S) transport, manual redirect handling, signed Worker client and bounded agent HTTP server are implemented on the feature branch. Local Node tests and an isolated TypeScript declaration-resolution check passed during development. The CI workflow now runs the Node suite on feature branches, but a successful GitHub Actions run for this branch is still required.
 
+The D1 scheduler integration and shared one-minute scheduled handler are implemented on the integration branch, but no customer-target probe has been enabled, the probe agent has not been deployed, and production-like Worker-to-agent-to-D1 verification has not been performed. Per-process source-IP rate limiting and active-egress capacity limit the current agent to one instance. Keep monitor execution disabled and public status-page health unknown until the remaining integration and operational launch gates pass.
 
 ## Workspace API key boundary
 
@@ -88,3 +87,37 @@ The URL policy, fail-closed HTTP probe, pure IP classifier and bounded DNS resol
 - The public renderer uses `textContent`/DOM nodes for all database-backed strings. It does not interpolate page content into HTML or execute scripts from stored values.
 
 This is a public information surface, not a live service-health assertion. Do not remove the explicit unknown-state notice until the secure outbound runner and real measurements are enabled and independently verified.
+
+
+- The standalone probe agent uses a per-hostname Node DNS resolver with a shared A/AAAA deadline and cancels outstanding DNS queries on timeout. This keeps timed-out resolver work within the same bounded probe lifetime instead of allowing abandoned DNS requests to accumulate after an active slot is released.
+
+## Email notification boundary
+
+- An email channel can target only the creating user's own verified account address. The channel is tied to a current verified workspace member; arbitrary recipient addresses are rejected.
+- Owners/admins can manage all workspace channels. Members can manage only their own channel; viewers are read-only. Read-only API keys cannot access channel or delivery-log routes.
+- Email templates HTML-escape organization, monitor, incident and timeline text. They contain no monitor target URL, response body, customer headers or stored credentials. Provider errors are reduced to fixed error codes; response bodies and API credentials are not logged.
+- Incident event enqueue is idempotent per immutable event/channel through a unique database index. Delivery claims are bounded (maximum 10, default 5) and use expiring leases. Settlement and context loading require the lease to remain active, so an expired worker cannot overwrite a later claim.
+- Resend receives a stable event/channel idempotency key on every retry. Its documented idempotency retention is 24 hours; the local retry schedule ends in under eight hours. The provider's concurrent-idempotency 409 response is retried; a payload/idempotency conflict is terminal.
+- Transient network, timeout, rate-limit and provider 5xx failures use bounded retries. Retry-After is parsed as delta-seconds or an HTTP date and capped at six hours. Six total attempts are allowed.
+- Disabling/removing a channel cancels queued deliveries. It cannot recall a request already accepted by the provider; this limitation is disclosed in the UI.
+- The dispatcher skips sending when Resend credentials or sender configuration are missing. No real provider delivery has been verified. Never add provider secrets to source control, client code, logs or API responses.
+- Delivery rows retain a non-secret channel-creator identifier independently of the nullable channel foreign key. Removing a channel preserves the creator's delivery history while they remain in the workspace.
+- Email subjects strip control characters, plain text is normalized, and application links are constructed only from HTTPS origins (localhost HTTP only for development); URL credentials and unsafe protocols are rejected.
+- Customer-authored `incident.update` and `incident.status_changed` events are emailed only when visibility is explicitly public. Internal notes/status transitions are excluded at enqueue and checked again before provider delivery.
+
+
+
+## Webhook delivery security boundary
+
+- Endpoint URL and signing secret values are encrypted in the Worker before D1 writes using AES-256-GCM, a fresh 96-bit nonce and a 128-bit authentication tag. Additional authenticated data binds each ciphertext to organization ID, endpoint ID, schema version and field purpose.
+- D1 stores encrypted URL/secret values, a non-secret hostname label, destination uniqueness hash and secret suffix. List/history APIs never return ciphertext, URL, payload or secret. Removal scrubs encrypted material and records an audit event.
+- The Worker requires a 32-byte base64url `WEBHOOK_ENCRYPTION_KEY`. The test-only key in Vitest configuration must never be reused in production. Ciphertext format version 1 is distinct from `encryption_key_id`; the legacy id `v1` preserves the original AAD, while later ids are authenticated in AAD. The keyring accepts one current key and one decrypt-only previous key. A bounded scheduled worker re-encrypts one active endpoint per minute with compare-and-swap updates; it never logs keys/ciphertext or performs network I/O. Operators must keep the previous key until the sanitized rotation counters report zero remaining, blocked and failed rows.
+- `WEBHOOKS_ENABLED` defaults to false. Endpoint activation requires operator configuration, successful decryption of both endpoint values with tenant-bound AAD, normalized URL/hash consistency and a valid signing secret. Activation performs no DNS query or test request.
+- Migration 0011 adds an event outbox with a unique event/endpoint key, tenant/event ownership guard and per-attempt history. Internal customer-authored notes and internal status changes are excluded. Outbox rows contain references only.
+- The scheduled Worker drains at most three webhook deliveries with two concurrent agent requests after the email batch and before monitor probes. Claims use 90-second leases and at most eight attempts. Settlement uses a live clock and rejects stale/expired lease tokens.
+- The Worker decrypts only inside the trusted dispatcher, signs the exact body with timestamped HMAC-SHA256, and rechecks endpoint enabled/deleted state, current lease and encrypted configuration immediately before the agent request. A concurrent disable cancels queued work and prevents stale settlement; it cannot recall an already-open socket.
+- The dedicated agent `/v1/webhook` operation is separate from `/v1/probe`. It revalidates HTTPS/default-port URLs, resolves every A/AAAA answer, rejects any non-public answer, pins the selected public address while preserving hostname/SNI/TLS verification, disables redirects, and enforces bounded DNS/total timeouts, request size, response headers and discarded response body. Never call ordinary `fetch(customerUrl)` or expose a generic proxy.
+- Delivery is at-least-once. Stable event IDs are included in signed payloads; receivers must durably deduplicate them and verify the exact raw body, timestamp and HMAC before parsing.
+- Focused agent tests exist, and new Worker/D1 dispatcher and API history tests have been added. The complete Vitest/D1 suite, repository TypeScript check, browser script check and production-like trusted-TLS/DNS-rebinding/idempotency run remain outstanding. No production secrets or endpoints are enabled.
+
+The agent's nonce replay guard is shared through D1. Multi-instance operation still requires shared global source-IP rate limiting and active-egress capacity controls, or a verified single-instance deployment policy.

@@ -114,3 +114,56 @@ The static `apps/web/status.html` renderer is included in the existing inline-sc
 
 
 The status-page implementation passed GitHub Actions run [#182](https://github.com/learninghub44/zetuwatch/actions/runs/43568666409): TypeScript, inline browser JavaScript syntax (five HTML files), SQLite migration validation (seven migrations) and the full Vitest suite (13 files, 129 tests). This does not replace browser E2E or accessibility testing.
+
+
+## Email notification integration coverage
+
+The notification suite runs against the actual Worker entrypoint and isolated local D1. It covers verified-self-email channel creation, role and tenant restrictions, channel disable cancellation, scheduler-finalizer event enqueue, exactly-once event/channel rows, provider success and stable idempotency keys, rate-limit retries, concurrent scheduled invocations, expired lease rejection/reclaim, concurrent Resend idempotency 409 retry, and workspace-scoped delivery-log reads. Unit tests cover bounded retry delays, Retry-After delta-seconds/HTTP-date parsing, strict ISO timestamp input and lease-token whitespace rejection.
+
+All provider calls are intercepted with an injected/mock fetch. These tests do not send real email, verify a Resend domain, validate a production API key, or prove mailbox delivery. The notification feature branch still requires full GitHub Actions verification and browser acceptance.
+
+
+Additional notification regression cases verify that delivery history remains visible to the channel creator after channel removal (the channel foreign key becomes null), application links reject unsafe protocols and embedded credentials, subject CR/LF control characters are removed, and dispatch does not claim queued work when provider/sender/application configuration is absent.
+
+The combined one-minute scheduled handler is covered by a D1 integration test that fires the Cron event without probe bindings and verifies no monitor lease or check is created. Email delivery is skipped when provider/sender configuration is absent.
+
+
+## Webhook endpoint, dispatcher and history coverage
+
+The webhook endpoint integration suite uses the actual Worker entrypoint and isolated D1. It covers owner/admin mutation permissions, member/viewer denial, API-key denial, cross-tenant isolation, HTTPS destination syntax rejection, duplicate and ten-endpoint limits, encrypted URL/secret persistence, tenant/endpoint/field-bound AAD, one-time secret responses, secret rotation, rename, removal scrubbing and audit records. New cases cover operator-gated activation and tenant-scoped delivery history/attempt metadata without exposing endpoint secrets.
+
+The test encryption key is a deterministic, non-production Miniflare binding in `vitest.config.mts`. It must never be reused in a deployed environment. Endpoint creation, rename, rotation and activation make no DNS or HTTP request.
+
+Webhook HMAC unit tests verify exact raw-body signing, tamper detection, wrong-secret rejection, malformed headers, stale/future timestamps, invalid tolerance and payload-size bounds.
+
+The webhook outbox suite verifies tenant-safe event fan-out, public/internal visibility filtering, unique event/endpoint idempotency, lease claims/reclaims, attempt logging, retry scheduling, stale settlement rejection, terminal success, endpoint-disable cancellation and append-only attempt history.
+
+The new `tests/webhook-dispatch.integration.test.ts` injects a fake sender while exercising the actual D1 dispatcher. It covers successful signed-body delivery, event ID and payload shape, exclusion of private notes, incident summaries and target URLs, inclusion of explicitly public update text, transient 503 retry scheduling, endpoint disable during an in-flight request, and the default-off operator gate. It does not open an external socket or resolve customer DNS. A delayed-Cron regression case also proves the 90-second lease starts when the webhook batch actually claims work, not at the earlier invocation timestamp used for the due-work cutoff.
+
+The new `tests/webhook-endpoints.integration.test.ts` cases cover owner/admin activation policy, a 503 when operator configuration is absent, and delivery/attempt history tenant isolation. The history response is checked for absence of ciphertext, secrets and private incident text.
+
+## Webhook egress agent coverage
+
+Node tests cover strict webhook-job normalization, HTTPS/default-port destination policy, IP-literal and local/special-use hostname rejection, event-ID/body binding, timestamp freshness, canonical base64url and payload-size bounds, A/AAAA mixed-answer rejection, DNS pinning, original hostname/SNI and TLS verification, redirect non-following, bounded Retry-After, response classification, total-deadline enforcement, Worker-to-agent HMAC signing, route authentication/replay protection and separate webhook request-body limits.
+
+The existing focused Node runner/transport/client suite previously passed 18 tests on Node v22.16.0. That does not verify the newly added Worker dispatcher. The new Worker/D1 tests and current full repository typecheck, inline browser script check, migration validation, Vitest suite and Node suite must run on the latest branch head before webhook delivery can be considered verified. No production TLS handshake or live receiver delivery has been performed.
+
+
+## Webhook master-key rotation coverage
+
+- Unit tests verify legacy `v1` AAD compatibility, current/previous key selection, invalid key ids, missing/duplicate key configuration and unavailable-key fail-closed behavior.
+- D1 integration tests verify that both endpoint ciphertexts move to the current key while the destination, signing secret and suffix remain unchanged; bounded batches resume; concurrent rotation workers cannot overwrite one another; destination-hash/authentication failures leave rows untouched; and unknown key ids are reported as blocked rather than guessed.
+- Dispatcher integration tests verify that legacy rows remain deliverable through the previous key during rotation and that re-encrypted rows deliver with the new current key after the previous key is removed.
+- Migration validation checks the legacy `v1` default, accepted key-id syntax, rejected unsafe key ids and the key-rotation index.
+
+These tests use the isolated local D1/Workers runtime and test-only keys. They do not configure Cloudflare secrets, deploy a Worker, or exercise production key management. The new migration, keyring, rotation worker and integration tests must pass the complete pinned repository CI on the latest branch head before the feature is considered verified.
+
+
+## Durable probe-agent replay protection
+
+- The Worker/D1 integration suite verifies exact raw-body HMAC validation, timestamp freshness, nonce/header-body binding, browser-origin rejection, request-size bounds, expired-row pruning and atomic duplicate rejection under concurrent claims.
+- The Node agent suite verifies that production replay claims use the exact HTTPS Worker endpoint, sign the claim body with the shared secret, reject redirects, map D1 duplicate responses to replay rejection and fail closed when the Worker is unavailable. The standalone server requires `PROBE_REPLAY_URL`; the in-memory fallback is only for isolated handler tests.
+- The database stores only a SHA-256 nonce hash and expiry timestamp. These tests use isolated local D1 and test-only bindings; they do not prove a deployed Worker/agent network path or production secret configuration.
+
+
+Webhook/monitor URL-policy parity regression cases cover `localhost.localdomain`, common local-only `.home`/`.lan` names, `.onion`, and `.arpa` reverse/infrastructure names in both Worker endpoint validation and the Node agent. The shared hostname predicate prevents the control plane from accepting destinations that the egress agent will later reject. See the [IANA Special-Use Domain Names registry](https://www.iana.org/assignments/special-use-domain-names) for reserved names and subdomain rules.

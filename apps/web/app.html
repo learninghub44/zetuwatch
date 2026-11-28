@@ -1,17 +1,17 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#f7f8f5"><meta name="api-base" content="/api"><title>Workspace — ZetuWatch</title>
 <style>
-:root{--ink:#17211d;--muted:#6d7972;--line:#e4e9e5;--paper:#f7f8f6;--white:#fff;--green:#16794b;--pale:#e8f4ed;--amber:#95651b;font-family:Inter,"DM Sans",system-ui,sans-serif}*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font-size:14px}.shell{min-height:100vh;display:grid;grid-template-columns:248px 1fr}.side{background:#fff;border-right:1px solid var(--line);padding:22px 15px;display:flex;flex-direction:column}.brand{display:flex;align-items:center;gap:10px;font-size:18px;font-weight:750;padding:0 10px 25px;text-decoration:none;color:var(--ink)}.mark{width:31px;height:31px;border-radius:9px;background:var(--green);color:white;display:grid;place-items:center}.workspace{margin:0 4px 22px;padding:11px;border:1px solid var(--line);border-radius:10px;width:calc(100% - 8px);text-align:left;background:white;cursor:pointer}.workspace small{display:block;color:var(--muted);font-size:10px;margin-bottom:4px}.workspace strong{font-size:12px}.nav-label{font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#99a39c;padding:0 11px 8px}.nav a,.nav button{display:flex;align-items:center;gap:12px;padding:10px 11px;margin:2px 0;border:0;border-radius:8px;background:transparent;text-decoration:none;color:#56635b;font:500 13px system-ui;width:100%;text-align:left}.nav a.active{background:#edf5ef;color:#166b43;font-weight:700}.nav a.disabled{opacity:.45;cursor:not-allowed}.nav .ico{width:18px;text-align:center;font-size:15px}.side-bottom{margin-top:auto;border-top:1px solid var(--line);padding-top:14px}.profile{padding:10px;display:flex;gap:10px;align-items:center}.avatar{width:32px;height:32px;border-radius:50%;background:#e8efe9;color:#315b43;display:grid;place-items:center;font-weight:700}.profile small{display:block;color:var(--muted);font-size:11px;max-width:150px;overflow:hidden;text-overflow:ellipsis}.profile button{margin-left:auto;border:0;background:transparent;cursor:pointer;color:#66736b}.main{min-width:0}.top{height:66px;border-bottom:1px solid var(--line);background:#fff;display:flex;align-items:center;justify-content:space-between;padding:0 34px}.crumb{font-size:12px;color:var(--muted)}.top-actions{display:flex;gap:9px}.content{max-width:1240px;margin:auto;padding:34px}.heading{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;margin-bottom:27px}.heading h1{font-size:27px;letter-spacing:-1px;margin:0 0 6px}.heading p{color:var(--muted);margin:0;font-size:13px}.btn{border:1px solid var(--line);border-radius:9px;background:#fff;padding:10px 14px;font:650 12px system-ui;cursor:pointer;color:var(--ink)}.btn.primary{background:var(--green);border-color:var(--green);color:#fff}.setup{background:#fff;border:1px solid var(--line);border-radius:13px;padding:18px 19px;margin:0 0 22px}.setup-head{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:15px}.setup-head h2{font-size:14px;margin:0 0 4px}.setup-head p{font-size:11px;color:var(--muted);margin:0}.setup-progress{font-size:11px;color:var(--green);font-weight:700}.setup-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:9px}.setup-item{display:flex;align-items:center;gap:11px;padding:11px;border:1px solid #edf0ed;border-radius:9px;min-width:0}.setup-item .num{font-size:10px;color:#9aa49d;font-weight:750}.setup-item strong{display:block;font-size:11px}.setup-item small{display:block;color:var(--muted);font-size:10px;margin-top:3px}.setup-item .state{margin-left:auto;font-size:10px;color:var(--green);white-space:nowrap}.setup-item.pending .state{color:#9a7a43}.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:24px}.stat{background:#fff;border:1px solid var(--line);border-radius:12px;padding:17px}.stat small{display:block;color:var(--muted);font-size:11px;margin-bottom:8px}.stat strong{font-size:24px;letter-spacing:-.8px}.stat .foot{font-size:11px;color:#88938b;margin-top:5px}.panel{background:#fff;border:1px solid var(--line);border-radius:13px;overflow:hidden}.panel-head{display:flex;justify-content:space-between;align-items:center;padding:17px 19px;border-bottom:1px solid var(--line)}.panel-head h2{font-size:14px;margin:0}.panel-head span{font-size:11px;color:var(--muted)}table{width:100%;border-collapse:collapse;text-align:left}th{font-size:10px;text-transform:uppercase;letter-spacing:.7px;color:#87928b;font-weight:650;background:#fbfcfb}th,td{padding:13px 18px;border-bottom:1px solid #edf0ed}td{font-size:12px}tr:last-child td{border-bottom:0}.target{font-weight:650}.target small{display:block;color:var(--muted);font-weight:400;margin-top:4px}.pill{font-size:10px;font-weight:700;padding:4px 8px;border-radius:20px;background:#f3f4f2;color:#657168}.pill.incident-active{background:#fff0ed;color:#a33d2c}.pill.incident-monitoring{background:#fff6e8;color:#95651b}.pill.incident-resolved{background:#edf5ef;color:#166b43}.pill.check-up{background:#edf5ef;color:#166b43}.pill.check-down{background:#fff0ed;color:#a33d2c}.monitor-meta-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;padding:18px 19px}.monitor-meta-item{min-width:0;padding:12px;border:1px solid var(--line);border-radius:9px}.monitor-meta-item small{display:block;color:var(--muted);font-size:10px;margin-bottom:6px}.monitor-meta-item strong{display:block;font-size:12px;overflow-wrap:anywhere}.empty{padding:48px 22px;text-align:center}.empty-mark{width:42px;height:42px;border-radius:12px;background:#edf5ef;color:var(--green);display:grid;place-items:center;margin:0 auto 15px;font-size:20px}.empty h3{font-size:15px;margin:0 0 7px}.empty p{font-size:12px;color:var(--muted);max-width:390px;margin:0 auto 18px;line-height:1.6}.notice{margin-bottom:18px;padding:12px 14px;border-radius:9px;background:#edf4ee;color:#365943;font-size:12px}.notice.error{background:#fff0ed;color:#a33d2c}.modal-backdrop{position:fixed;inset:0;background:#12221b66;display:grid;place-items:center;padding:20px;z-index:5}.modal{width:min(520px,100%);background:#fff;border-radius:16px;padding:25px;box-shadow:0 24px 80px #101b1540}.modal h2{font-size:20px;letter-spacing:-.5px;margin:0 0 6px}.modal p{font-size:12px;color:var(--muted);margin:0 0 18px}.field{margin:14px 0}.field label{display:block;font-size:11px;font-weight:650;margin-bottom:6px}.field input,.field select,.field textarea{width:100%;border:1px solid #dce4dd;border-radius:8px;padding:11px;font:13px system-ui;background:white}.field textarea{resize:vertical;min-height:82px;font:13px/1.5 system-ui}.row{display:grid;grid-template-columns:1fr 1fr;gap:12px}.incident-status-grid{display:grid;grid-template-columns:minmax(130px,1fr) minmax(130px,1fr) minmax(180px,2fr) auto;align-items:end;gap:12px}.modal-actions{display:flex;justify-content:flex-end;gap:9px;margin-top:20px}.wizard-progress{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:18px 0 22px}.wizard-step{border-top:3px solid #e4e9e5;padding-top:8px;color:#8a958e;font-size:11px;font-weight:650}.wizard-step.active{border-color:var(--green);color:var(--green)}.wizard-step.done{border-color:#8bb89b;color:#456c53}.wizard-panel{min-height:225px}.review-list{display:grid;gap:10px;margin:18px 0}.review-item{padding:12px;border:1px solid var(--line);border-radius:9px;background:#fafbfa}.review-item small{display:block;color:var(--muted);font-size:10px;margin-bottom:4px}.review-item strong{font-size:13px;overflow-wrap:anywhere}.wizard-actions{display:flex;justify-content:space-between;gap:9px;margin-top:20px}.wizard-actions-right{display:flex;gap:9px}.status-monitor-options{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.status-monitor-option{display:flex;align-items:center;gap:9px;min-width:0;padding:10px;border:1px solid var(--line);border-radius:9px;font-size:12px}.status-monitor-option input{accent-color:var(--green)}.status-monitor-option span{overflow-wrap:anywhere}.status-page-actions{display:flex;gap:6px;flex-wrap:wrap}.mobile-nav{display:none}.hidden{display:none!important}.mobile-head{display:none}
+:root{--ink:#17211d;--muted:#6d7972;--line:#e4e9e5;--paper:#f7f8f6;--white:#fff;--green:#16794b;--pale:#e8f4ed;--amber:#95651b;font-family:Inter,"DM Sans",system-ui,sans-serif}*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font-size:14px}.shell{min-height:100vh;display:grid;grid-template-columns:248px 1fr}.side{background:#fff;border-right:1px solid var(--line);padding:22px 15px;display:flex;flex-direction:column}.brand{display:flex;align-items:center;gap:10px;font-size:18px;font-weight:750;padding:0 10px 25px;text-decoration:none;color:var(--ink)}.mark{width:31px;height:31px;border-radius:9px;background:var(--green);color:white;display:grid;place-items:center}.workspace{margin:0 4px 22px;padding:11px;border:1px solid var(--line);border-radius:10px;width:calc(100% - 8px);text-align:left;background:white;cursor:pointer}.workspace small{display:block;color:var(--muted);font-size:10px;margin-bottom:4px}.workspace strong{font-size:12px}.nav-label{font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#99a39c;padding:0 11px 8px}.nav a,.nav button{display:flex;align-items:center;gap:12px;padding:10px 11px;margin:2px 0;border:0;border-radius:8px;background:transparent;text-decoration:none;color:#56635b;font:500 13px system-ui;width:100%;text-align:left}.nav a.active{background:#edf5ef;color:#166b43;font-weight:700}.nav a.disabled{opacity:.45;cursor:not-allowed}.nav .ico{width:18px;text-align:center;font-size:15px}.side-bottom{margin-top:auto;border-top:1px solid var(--line);padding-top:14px}.profile{padding:10px;display:flex;gap:10px;align-items:center}.avatar{width:32px;height:32px;border-radius:50%;background:#e8efe9;color:#315b43;display:grid;place-items:center;font-weight:700}.profile small{display:block;color:var(--muted);font-size:11px;max-width:150px;overflow:hidden;text-overflow:ellipsis}.profile button{margin-left:auto;border:0;background:transparent;cursor:pointer;color:#66736b}.main{min-width:0}.top{height:66px;border-bottom:1px solid var(--line);background:#fff;display:flex;align-items:center;justify-content:space-between;padding:0 34px}.crumb{font-size:12px;color:var(--muted)}.top-actions{display:flex;gap:9px}.content{max-width:1240px;margin:auto;padding:34px}.heading{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;margin-bottom:27px}.heading h1{font-size:27px;letter-spacing:-1px;margin:0 0 6px}.heading p{color:var(--muted);margin:0;font-size:13px}.btn{border:1px solid var(--line);border-radius:9px;background:#fff;padding:10px 14px;font:650 12px system-ui;cursor:pointer;color:var(--ink)}.btn.primary{background:var(--green);border-color:var(--green);color:#fff}.setup{background:#fff;border:1px solid var(--line);border-radius:13px;padding:18px 19px;margin:0 0 22px}.setup-head{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:15px}.setup-head h2{font-size:14px;margin:0 0 4px}.setup-head p{font-size:11px;color:var(--muted);margin:0}.setup-progress{font-size:11px;color:var(--green);font-weight:700}.setup-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:9px}.setup-item{display:flex;align-items:center;gap:11px;padding:11px;border:1px solid #edf0ed;border-radius:9px;min-width:0}.setup-item .num{font-size:10px;color:#9aa49d;font-weight:750}.setup-item strong{display:block;font-size:11px}.setup-item small{display:block;color:var(--muted);font-size:10px;margin-top:3px}.setup-item .state{margin-left:auto;font-size:10px;color:var(--green);white-space:nowrap}.setup-item.pending .state{color:#9a7a43}.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:24px}.stat{background:#fff;border:1px solid var(--line);border-radius:12px;padding:17px}.stat small{display:block;color:var(--muted);font-size:11px;margin-bottom:8px}.stat strong{font-size:24px;letter-spacing:-.8px}.stat .foot{font-size:11px;color:#88938b;margin-top:5px}.panel{background:#fff;border:1px solid var(--line);border-radius:13px;overflow:hidden}.panel-head{display:flex;justify-content:space-between;align-items:center;padding:17px 19px;border-bottom:1px solid var(--line)}.panel-head h2{font-size:14px;margin:0}.panel-head span{font-size:11px;color:var(--muted)}table{width:100%;border-collapse:collapse;text-align:left}th{font-size:10px;text-transform:uppercase;letter-spacing:.7px;color:#87928b;font-weight:650;background:#fbfcfb}th,td{padding:13px 18px;border-bottom:1px solid #edf0ed}td{font-size:12px}tr:last-child td{border-bottom:0}.target{font-weight:650}.target small{display:block;color:var(--muted);font-weight:400;margin-top:4px}.pill{font-size:10px;font-weight:700;padding:4px 8px;border-radius:20px;background:#f3f4f2;color:#657168}.pill.incident-active{background:#fff0ed;color:#a33d2c}.pill.incident-monitoring{background:#fff6e8;color:#95651b}.pill.incident-resolved{background:#edf5ef;color:#166b43}.pill.check-up{background:#edf5ef;color:#166b43}.pill.check-down{background:#fff0ed;color:#a33d2c}.pill.check-delayed{background:#fff6e8;color:#95651b}.monitor-meta-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;padding:18px 19px}.monitor-meta-item{min-width:0;padding:12px;border:1px solid var(--line);border-radius:9px}.monitor-meta-item small{display:block;color:var(--muted);font-size:10px;margin-bottom:6px}.monitor-meta-item strong{display:block;font-size:12px;overflow-wrap:anywhere}.empty{padding:48px 22px;text-align:center}.empty-mark{width:42px;height:42px;border-radius:12px;background:#edf5ef;color:var(--green);display:grid;place-items:center;margin:0 auto 15px;font-size:20px}.empty h3{font-size:15px;margin:0 0 7px}.empty p{font-size:12px;color:var(--muted);max-width:390px;margin:0 auto 18px;line-height:1.6}.notice{margin-bottom:18px;padding:12px 14px;border-radius:9px;background:#edf4ee;color:#365943;font-size:12px}.notice.error{background:#fff0ed;color:#a33d2c}.modal-backdrop{position:fixed;inset:0;background:#12221b66;display:grid;place-items:center;padding:20px;z-index:5}.modal{width:min(520px,100%);background:#fff;border-radius:16px;padding:25px;box-shadow:0 24px 80px #101b1540}.modal h2{font-size:20px;letter-spacing:-.5px;margin:0 0 6px}.modal p{font-size:12px;color:var(--muted);margin:0 0 18px}.field{margin:14px 0}.field label{display:block;font-size:11px;font-weight:650;margin-bottom:6px}.field input,.field select,.field textarea{width:100%;border:1px solid #dce4dd;border-radius:8px;padding:11px;font:13px system-ui;background:white}.field textarea{resize:vertical;min-height:82px;font:13px/1.5 system-ui}.row{display:grid;grid-template-columns:1fr 1fr;gap:12px}.incident-status-grid{display:grid;grid-template-columns:minmax(130px,1fr) minmax(130px,1fr) minmax(180px,2fr) auto;align-items:end;gap:12px}.modal-actions{display:flex;justify-content:flex-end;gap:9px;margin-top:20px}.wizard-progress{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:18px 0 22px}.wizard-step{border-top:3px solid #e4e9e5;padding-top:8px;color:#8a958e;font-size:11px;font-weight:650}.wizard-step.active{border-color:var(--green);color:var(--green)}.wizard-step.done{border-color:#8bb89b;color:#456c53}.wizard-panel{min-height:225px}.review-list{display:grid;gap:10px;margin:18px 0}.review-item{padding:12px;border:1px solid var(--line);border-radius:9px;background:#fafbfa}.review-item small{display:block;color:var(--muted);font-size:10px;margin-bottom:4px}.review-item strong{font-size:13px;overflow-wrap:anywhere}.wizard-actions{display:flex;justify-content:space-between;gap:9px;margin-top:20px}.wizard-actions-right{display:flex;gap:9px}.status-monitor-options{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.status-monitor-option{display:flex;align-items:center;gap:9px;min-width:0;padding:10px;border:1px solid var(--line);border-radius:9px;font-size:12px}.status-monitor-option input{accent-color:var(--green)}.status-monitor-option span{overflow-wrap:anywhere}.status-page-actions{display:flex;gap:6px;flex-wrap:wrap}.mobile-nav{display:none}.hidden{display:none!important}.mobile-head{display:none}
 @media(max-width:850px){.shell{grid-template-columns:205px 1fr}.content{padding:25px}.top{padding:0 25px}}
 @media(max-width:650px){.monitor-meta-grid{grid-template-columns:1fr 1fr}.setup-grid{grid-template-columns:1fr}.shell{display:block}.side{display:none}.mobile-head{display:flex;align-items:center;justify-content:space-between;background:#fff;border-bottom:1px solid var(--line);padding:14px 17px}.mobile-nav{display:flex;gap:7px;overflow-x:auto;padding:8px 16px;background:#fff;border-bottom:1px solid var(--line)}.mobile-nav a{white-space:nowrap;text-decoration:none;color:#56635b;font-size:11px;font-weight:600;padding:7px 9px;border:1px solid var(--line);border-radius:8px}.status-monitor-options{grid-template-columns:1fr}.top{height:52px;padding:0 17px}.content{padding:22px 16px}.heading{align-items:flex-start;flex-direction:column}.stats{grid-template-columns:1fr 1fr}.stat:last-child{grid-column:span 2}table{min-width:620px}.panel{overflow-x:auto}.row{grid-template-columns:1fr}.incident-status-grid{grid-template-columns:1fr}.heading h1{font-size:24px}}
 </style></head><body>
-<div class="mobile-head"><a class="brand" href="./index.html" style="padding:0"><span class="mark">⌁</span>ZetuWatch</a><button class="btn" id="mobile-logout">Sign out</button></div><nav class="mobile-nav" aria-label="Workspace navigation"><a href="#monitors">Monitors</a><a href="#incidents">Incidents</a><a href="#status-pages">Status pages</a><a href="#team">Team</a><a href="#api-keys">API keys</a></nav>
-<div class="shell"><aside class="side"><a class="brand" href="./index.html"><span class="mark">⌁</span>ZetuWatch</a><button class="workspace" id="workspace-switch"><small>WORKSPACE</small><strong id="workspace-name">Loading workspace…</strong></button><div class="nav-label">Workspace</div><nav class="nav"><a class="active" href="./app.html"><span class="ico">◫</span>Overview</a><a href="#monitors" id="nav-monitors"><span class="ico">⌁</span>Monitors</a><a href="#incidents" id="nav-incidents"><span class="ico">◷</span>Incidents</a><a href="#status-pages" id="nav-status-pages"><span class="ico">▤</span>Status pages</a><a class="disabled" aria-disabled="true"><span class="ico">⌁</span>Analytics · coming soon</a><a class="disabled" aria-disabled="true"><span class="ico">◎</span>Alerts · coming soon</a><div class="nav-label" style="margin-top:20px">Manage</div><a href="#team" id="nav-team"><span class="ico">♧</span>Team</a><a href="#api-keys" id="nav-api-keys"><span class="ico">⌘</span>API keys</a><a class="disabled" aria-disabled="true"><span class="ico">▣</span>Billing · coming soon</a></nav><div class="side-bottom"><div class="profile"><div class="avatar" id="avatar">?</div><div><strong id="user-name">Loading</strong><small id="user-email"></small></div><button id="logout" title="Sign out" aria-label="Sign out">↗</button></div></div></aside>
+<div class="mobile-head"><a class="brand" href="./index.html" style="padding:0"><span class="mark">⌁</span>ZetuWatch</a><button class="btn" id="mobile-logout">Sign out</button></div><nav class="mobile-nav" aria-label="Workspace navigation"><a href="#monitors">Monitors</a><a href="#incidents">Incidents</a><a href="#status-pages">Status pages</a><a href="#alerts">Alerts</a><a href="#team">Team</a><a href="#api-keys">API keys</a></nav>
+<div class="shell"><aside class="side"><a class="brand" href="./index.html"><span class="mark">⌁</span>ZetuWatch</a><button class="workspace" id="workspace-switch"><small>WORKSPACE</small><strong id="workspace-name">Loading workspace…</strong></button><div class="nav-label">Workspace</div><nav class="nav"><a class="active" href="./app.html"><span class="ico">◫</span>Overview</a><a href="#monitors" id="nav-monitors"><span class="ico">⌁</span>Monitors</a><a href="#incidents" id="nav-incidents"><span class="ico">◷</span>Incidents</a><a href="#status-pages" id="nav-status-pages"><span class="ico">▤</span>Status pages</a><a class="disabled" aria-disabled="true"><span class="ico">⌁</span>Analytics · coming soon</a><a href="#alerts" id="nav-alerts"><span class="ico">◎</span>Alerts</a><div class="nav-label" style="margin-top:20px">Manage</div><a href="#team" id="nav-team"><span class="ico">♧</span>Team</a><a href="#api-keys" id="nav-api-keys"><span class="ico">⌘</span>API keys</a><a class="disabled" aria-disabled="true"><span class="ico">▣</span>Billing · coming soon</a></nav><div class="side-bottom"><div class="profile"><div class="avatar" id="avatar">?</div><div><strong id="user-name">Loading</strong><small id="user-email"></small></div><button id="logout" title="Sign out" aria-label="Sign out">↗</button></div></div></aside>
 <main class="main"><header class="top"><span class="crumb">Workspace / <strong>Overview</strong></span><div class="top-actions"><button class="btn" id="top-help">Help</button><button class="btn primary" id="top-add">Add monitor +</button></div></header><section class="content">
 <div id="notice" class="notice hidden" role="status" aria-live="polite"></div>
 <div class="heading"><div><h1 id="greeting">Workspace overview</h1><p>A clear view of the services you have configured.</p></div><button class="btn primary" id="add-monitor">Add monitor +</button></div>
 <div class="stats"><div class="stat"><small>Configured monitors</small><strong id="stat-total">—</strong><div class="foot">In this workspace</div></div><div class="stat"><small>Checks recorded</small><strong>—</strong><div class="foot">Scheduled checks are not enabled yet</div></div><div class="stat"><small>Open incidents</small><strong id="stat-incidents">0</strong><div class="foot">Confirmed, unresolved incidents</div></div></div>
-<section class="setup" id="onboarding"><div class="setup-head"><div><h2>Get your workspace ready</h2><p>A few steps to prepare your monitoring workspace.</p></div><span class="setup-progress" id="setup-progress">1 of 5 complete</span></div><div class="setup-grid"><div class="setup-item"><span class="num">01</span><div><strong>Verify your email</strong><small>Your account is verified.</small></div><span class="state">Complete</span></div><div class="setup-item pending" id="setup-monitor"><span class="num">02</span><div><strong>Add your first monitor</strong><small id="setup-monitor-copy">Choose a website or API to configure.</small></div><button class="btn" id="setup-add">Set up</button></div><div class="setup-item pending"><span class="num">03</span><div><strong>Configure alert channels</strong><small>Email and webhook routing.</small></div><span class="state">Coming soon</span></div><div class="setup-item pending"><span class="num">04</span><div><strong>Invite your team</strong><small>Bring collaborators into your workspace.</small></div><span class="state">Coming soon</span></div><div class="setup-item pending" id="setup-status-page"><span class="num">05</span><div><strong>Publish a status page</strong><small id="setup-status-page-copy">Share service health with customers.</small></div><a class="btn" id="setup-status-page-action" href="#status-pages">Set up</a></div></div></section><section class="panel" id="monitors"><div class="panel-head"><h2>Monitors</h2><span id="monitor-count">Loading…</span></div><div id="monitor-empty" class="empty hidden"><div class="empty-mark">⌁</div><h3>Start with your first website</h3><p>Add a website or API endpoint to configure what you want ZetuWatch to watch. Checks will begin when the secure scheduled runner is enabled.</p><button class="btn primary" id="empty-add">Add your first monitor</button></div><table id="monitor-table" class="hidden"><thead><tr><th>Monitor</th><th>Type</th><th>Interval</th><th>State</th><th></th></tr></thead><tbody id="monitor-rows"></tbody></table></section>
+<section class="setup" id="onboarding"><div class="setup-head"><div><h2>Get your workspace ready</h2><p>A few steps to prepare your monitoring workspace.</p></div><span class="setup-progress" id="setup-progress">1 of 5 complete</span></div><div class="setup-grid"><div class="setup-item"><span class="num">01</span><div><strong>Verify your email</strong><small>Your account is verified.</small></div><span class="state">Complete</span></div><div class="setup-item pending" id="setup-monitor"><span class="num">02</span><div><strong>Add your first monitor</strong><small id="setup-monitor-copy">Choose a website or API to configure.</small></div><button class="btn" id="setup-add">Set up</button></div><div class="setup-item pending" id="setup-alerts"><span class="num">03</span><div><strong>Configure alert channels</strong><small id="setup-alerts-copy">Subscribe your verified email to incident alerts.</small></div><a class="btn" id="setup-alerts-action" href="#alerts">Set up</a></div><div class="setup-item pending"><span class="num">04</span><div><strong>Invite your team</strong><small>Bring collaborators into your workspace.</small></div><span class="state">Coming soon</span></div><div class="setup-item pending" id="setup-status-page"><span class="num">05</span><div><strong>Publish a status page</strong><small id="setup-status-page-copy">Share service health with customers.</small></div><a class="btn" id="setup-status-page-action" href="#status-pages">Set up</a></div></div></section><section class="panel" id="monitors"><div class="panel-head"><h2>Monitors</h2><span id="monitor-count">Loading…</span></div><div id="monitor-empty" class="empty hidden"><div class="empty-mark">⌁</div><h3>Start with your first website</h3><p>Add a website or API endpoint to configure what you want ZetuWatch to watch. Checks will begin when the secure scheduled runner is enabled.</p><button class="btn primary" id="empty-add">Add your first monitor</button></div><table id="monitor-table" class="hidden"><thead><tr><th>Monitor</th><th>Type</th><th>Interval</th><th>State</th><th></th></tr></thead><tbody id="monitor-rows"></tbody></table></section>
 <section class="panel hidden" id="monitor-detail" style="margin-top:22px" aria-labelledby="monitor-detail-title">
   <div class="panel-head" style="align-items:flex-start;gap:14px;flex-wrap:wrap">
     <div style="min-width:0">
@@ -32,6 +32,71 @@
   <div style="overflow-x:auto"><table id="check-table" class="hidden"><thead><tr><th>Checked at</th><th>Result</th><th>HTTP status</th><th>Latency</th><th>Error category</th></tr></thead><tbody id="check-rows"></tbody></table></div>
 </section>
 <section class="panel" id="incidents" style="margin-top:22px"><div class="panel-head"><div><h2>Incidents</h2><span>Confirmed service interruptions and their timelines</span></div><span id="incident-count">Loading…</span></div><div id="incident-empty" class="empty hidden"><div class="empty-mark">◷</div><h3>No confirmed incidents</h3><p>There are no incident records in this workspace. Live checks are not enabled yet, so this list will only change when the secure monitoring runner is active.</p></div><div id="incident-table-wrap" style="overflow-x:auto"><table id="incident-table" class="hidden"><thead><tr><th>Monitor</th><th>Started</th><th>Status</th><th>Resolved</th><th></th></tr></thead><tbody id="incident-rows"></tbody></table></div><div id="incident-detail" class="hidden" style="padding:18px 19px"><button class="btn" id="incident-back" type="button">← All incidents</button><div id="incident-summary" style="padding:18px 0 12px"></div><h3 style="font-size:13px;margin:8px 0 6px">Timeline</h3><div id="incident-events"></div><div id="incident-actions" class="hidden" style="border-top:1px solid var(--line);margin-top:12px;padding-top:16px"><div id="incident-action-message" class="notice hidden" role="status" aria-live="polite"></div><form id="incident-status-form" class="incident-status-grid"><div class="field" style="margin:0"><label for="incident-next-status">Update status</label><select id="incident-next-status"></select></div><div class="field" style="margin:0"><label for="incident-status-visibility">Visibility</label><select id="incident-status-visibility"><option value="internal">Internal note</option><option value="public">Public update · not published yet</option></select></div><div class="field" style="margin:0"><label for="incident-status-message">Update message · optional</label><input id="incident-status-message" maxlength="500" placeholder="Share what changed"></div><button class="btn primary" type="submit">Save status</button></form><form id="incident-update-form" style="margin-top:14px"><div class="field"><label for="incident-update-message">Add a timeline update</label><textarea id="incident-update-message" maxlength="500" rows="3" required placeholder="Describe the investigation or customer impact"></textarea></div><div class="row" style="align-items:end"><div class="field" style="margin:0"><label for="incident-update-visibility">Visibility</label><select id="incident-update-visibility"><option value="internal">Internal note</option><option value="public">Public update · not published yet</option></select></div><button class="btn" type="submit">Post update</button></div></form></div></div></section>
+
+<section class="panel" id="alerts" style="margin-top:22px">
+  <div class="panel-head">
+    <div><h2>Alert channels</h2><span>Verified email destinations for workspace incident notifications</span></div>
+    <span id="alert-channel-count">Loading…</span>
+  </div>
+  <div style="padding:18px 19px">
+    <div id="alerts-message" class="notice hidden" role="status" aria-live="polite"></div>
+    <p style="font-size:12px;color:var(--muted);line-height:1.6;margin:0 0 14px">The first notification channel supports each member's own verified account email. Workspace owners and administrators can manage all channels; members can manage their own. Delivery requires the workspace operator to configure the Resend sender and API key.</p>
+    <form id="alert-channel-form" style="margin-bottom:12px">
+      <button class="btn primary" id="alert-channel-submit" type="submit">Add my verified email</button>
+    </form>
+    <div id="alert-channel-existing" class="notice hidden" role="status">Your verified email is already connected. You can enable, disable or remove it below.</div>
+    <div style="overflow-x:auto">
+      <table>
+        <thead><tr><th>Channel</th><th>Destination</th><th>Verification</th><th>Status</th><th>Added</th><th></th></tr></thead>
+        <tbody id="alert-channel-rows"><tr><td colspan="6">Loading alert channels…</td></tr></tbody>
+      </table>
+    </div>
+    <div class="panel-head" style="padding:20px 0 10px;margin-top:20px">
+      <div><h3 style="font-size:13px;margin:0">Webhook endpoints</h3><span>Encrypted endpoint configuration · delivery is not active yet</span></div>
+      <span id="webhook-endpoint-count">Loading…</span>
+    </div>
+        <form id="webhook-endpoint-form" class="row" style="align-items:end;margin:10px 0 14px;grid-template-columns:minmax(180px,0.7fr) minmax(260px,1.5fr) auto">
+      <div class="field" style="margin:0"><label for="webhook-endpoint-name">Endpoint name</label><input id="webhook-endpoint-name" maxlength="80" required placeholder="Production alerts"></div>
+      <div class="field" style="margin:0"><label for="webhook-endpoint-url">HTTPS destination</label><input id="webhook-endpoint-url" type="url" maxlength="2048" required placeholder="https://hooks.example.com/events"></div>
+      <button class="btn primary" id="webhook-endpoint-submit" type="submit">Save endpoint</button>
+    </form>
+    <div id="webhook-secret-created" class="notice hidden" role="status" aria-live="polite">
+      <strong>Copy this signing secret now. It will not be shown again.</strong>
+      <code id="webhook-secret-value" style="display:block;overflow-wrap:anywhere;padding:10px;margin:9px 0;background:#fff;border:1px solid var(--line);border-radius:8px"></code>
+      <button class="btn" id="webhook-secret-copy" type="button">Copy secret</button>
+      <button class="btn" id="webhook-secret-hide" type="button">Hide</button>
+    </div>
+    <div style="overflow-x:auto">
+      <table>
+        <thead><tr><th>Endpoint</th><th>Host</th><th>Secret</th><th>Delivery</th><th>Created</th><th></th></tr></thead>
+        <tbody id="webhook-endpoint-rows"><tr><td colspan="6">Loading webhook endpoints…</td></tr></tbody>
+      </table>
+    </div>
+    <p style="font-size:11px;color:var(--muted);line-height:1.6;margin:10px 0 0">Endpoint URLs and signing secrets are encrypted before storage. Creating or rotating an endpoint never sends a network request. Delivery stays disabled until DNS-pinned outbound transport, redirect validation and durable retries are verified. Workspace owners and admins can manage endpoints; all members can view safe metadata.</p>
+    <div class="panel-head" style="padding:20px 0 10px;margin-top:12px">
+      <div><h3 style="font-size:13px;margin:0">Email delivery history</h3><span>Latest verified-email notification deliveries</span></div>
+      <button class="btn" id="alert-delivery-refresh" type="button">Refresh</button>
+    </div>
+    <div style="overflow-x:auto">
+      <table>
+        <thead><tr><th>Event</th><th>Monitor</th><th>Recipient</th><th>Status</th><th>Attempts</th><th>Updated</th><th>Details</th></tr></thead>
+        <tbody id="alert-delivery-rows"><tr><td colspan="7">Loading delivery history…</td></tr></tbody>
+      </table>
+    </div>
+    <div class="panel-head" style="padding:20px 0 10px;margin-top:20px">
+      <div><h3 style="font-size:13px;margin:0">Webhook delivery history</h3><span id="webhook-history-title">Choose an endpoint to inspect attempts</span></div>
+      <button class="btn" id="webhook-delivery-refresh" type="button">Refresh</button>
+    </div>
+    <div style="overflow-x:auto">
+      <table>
+        <thead><tr><th>Event</th><th>Monitor</th><th>Status</th><th>Attempts</th><th>Response</th><th>Updated</th><th>Last error</th></tr></thead>
+        <tbody id="webhook-delivery-rows"><tr><td colspan="7">Select History on a webhook endpoint.</td></tr></tbody>
+      </table>
+    </div>
+    <p style="font-size:11px;color:var(--muted);line-height:1.6;margin:14px 0 0">Disabling or removing an endpoint cancels queued deliveries. A request already opened cannot be recalled. Delivery is available only when the operator has explicitly enabled the dispatcher and configured the encryption key and trusted DNS-pinning agent.</p>
+    <p style="font-size:11px;color:var(--muted);line-height:1.6;margin:10px 0 0">Email and webhook delivery histories are separate. Webhook payloads include a stable event ID; receivers should verify the timestamped HMAC signature and deduplicate that ID because retries are at-least-once.</p>
+  </div>
+</section>
 <section class="panel" id="team" style="margin-top:22px"><div class="panel-head"><div><h2>Workspace team</h2><span>Manage access to this workspace</span></div><span id="team-count">Loading…</span></div><div style="padding:18px 19px"><div id="team-message" class="notice hidden" role="status" aria-live="polite"></div><form id="invite-form" class="row" style="align-items:end;margin-bottom:18px;grid-template-columns:minmax(0,1fr) 180px auto"><div class="field" style="margin:0"><label for="invite-email">Invite by email</label><input id="invite-email" type="email" required maxlength="254" placeholder="teammate@example.com"></div><div class="field" style="margin:0"><label for="invite-role">Workspace role</label><select id="invite-role"><option value="member">Member</option><option value="viewer">Viewer</option><option value="admin">Admin</option></select></div><button class="btn primary" id="invite-submit" type="submit">Send invitation</button></form><div style="overflow-x:auto"><table><thead><tr><th>Member</th><th>Email</th><th>Role</th><th>Joined</th><th></th></tr></thead><tbody id="team-rows"><tr><td colspan="5">Loading members…</td></tr></tbody></table></div><div id="pending-invitations" style="margin-top:22px"><h3 style="font-size:13px;margin:0 0 10px">Pending invitations</h3><div id="invitation-rows" style="font-size:12px;color:var(--muted)">Loading invitations…</div></div></div></section><section class="panel" id="api-keys" style="margin-top:22px">
 <div class="panel-head"><div><h2>API keys</h2><span>Read-only access for workspace integrations</span></div><span id="api-key-count">Loading…</span></div>
 <div style="padding:18px 19px">
@@ -50,26 +115,30 @@
 <h2 id="modal-title">Add a monitor</h2><p>Set up an endpoint in three short steps. No network probe is sent during setup.</p>
 <div class="wizard-progress" aria-label="Monitor setup progress"><div class="wizard-step active" data-progress="0">01 · Target</div><div class="wizard-step" data-progress="1">02 · Behavior</div><div class="wizard-step" data-progress="2">03 · Review</div></div>
 <section class="wizard-panel" data-wizard="0"><div class="field"><label for="monitor-name">Monitor name</label><input id="monitor-name" maxlength="80" required placeholder="Main website"></div><div class="field"><label for="monitor-url">Website or API URL</label><input id="monitor-url" type="url" maxlength="2048" required placeholder="https://example.com"></div><div class="field"><label for="monitor-type">Monitor type</label><select id="monitor-type"><option value="http">Website (HTTP)</option><option value="api">API endpoint</option></select></div></section>
-<section class="wizard-panel hidden" data-wizard="1"><div class="row"><div class="field"><label for="monitor-method">Method</label><select id="monitor-method"><option>GET</option><option>HEAD</option></select></div><div class="field"><label for="monitor-interval">Check interval</label><select id="monitor-interval"><option value="300">5 minutes</option><option value="600">10 minutes</option><option value="900">15 minutes</option><option value="1800">30 minutes</option><option value="3600">60 minutes</option></select></div></div><div class="field"><label for="monitor-status">Expected HTTP status</label><input id="monitor-status" type="number" min="100" max="599" value="200" required></div><div class="notice">These are saved settings only. Scheduled checks are not enabled yet, so ZetuWatch will not send a request to the target during this step.</div></section>
+<section class="wizard-panel hidden" data-wizard="1"><div class="row"><div class="field"><label for="monitor-method">Method</label><select id="monitor-method"><option>GET</option><option>HEAD</option></select></div><div class="field"><label for="monitor-interval">Check interval</label><select id="monitor-interval"><option value="300">5 minutes</option><option value="600">10 minutes</option><option value="900">15 minutes</option><option value="1800">30 minutes</option><option value="3600">60 minutes</option></select></div></div><div class="field"><label for="monitor-status">Expected HTTP status</label><input id="monitor-status" type="number" min="100" max="599" value="200" required></div><div class="notice">Saving does not trigger an immediate probe. When scheduled execution is enabled, the first check runs at the monitor's next due time.</div></section>
 <section class="wizard-panel hidden" data-wizard="2"><p>Review your monitor before saving it to this workspace.</p><div class="review-list"><div class="review-item"><small>MONITOR</small><strong id="review-name">—</strong></div><div class="review-item"><small>TARGET</small><strong id="review-url">—</strong></div><div class="review-item"><small>CHECK BEHAVIOR</small><strong id="review-behavior">—</strong></div></div><div class="notice">Email alerts and a live test are not available yet. Your monitor will be saved as “Awaiting first check” until the secure scheduler is ready.</div></section>
 <div class="notice error hidden" id="form-error" role="alert"></div>
 <div class="wizard-actions"><button class="btn" type="button" id="wizard-back">Back</button><div class="wizard-actions-right"><button class="btn" type="button" id="cancel">Cancel</button><button class="btn primary" type="button" id="wizard-next">Continue</button><button class="btn primary hidden" type="submit" id="save">Save monitor</button></div></div>
 </form></div>
 <script>
-const API=(document.querySelector('meta[name="api-base"]')?.content||"/api").replace(/\/$/,"");let user=null,orgs=[],orgId=null,monitors=[],incidents=[],editingMonitorId=null,selectedIncidentId=null,selectedMonitorId=null,selectedMonitorEnabled=true;
+const API=(document.querySelector('meta[name="api-base"]')?.content||"/api").replace(/\/$/,"");let user=null,orgs=[],orgId=null,monitors=[],incidents=[],notificationChannels=[],notificationDeliveries=[],webhookEndpoints=[],teamMemberCount=0,editingMonitorId=null,selectedIncidentId=null,selectedMonitorId=null,selectedMonitorEnabled=true,executionEnabled=false,webhookHistoryEndpointId=null,webhookDeliveryConfigured=false;
 const $=id=>document.getElementById(id);
 function showNotice(text,error=false){$("notice").textContent=text;$("notice").classList.remove("hidden","error");if(error)$("notice").classList.add("error")}
 async function request(path,options={}){const r=await fetch(API+path,{credentials:"include",...options,headers:{"content-type":"application/json",...(options.headers||{})}});const d=await r.json().catch(()=>({}));if(r.status===401){location.href="./auth.html";throw new Error("Please sign in again.")}if(!r.ok)throw new Error(d.message||d.error||"Request failed");return d}
-async function load(){try{const me=await request("/auth/me");user=me.user;orgs=me.organizations||[];if(!orgs.length)throw new Error("No workspace is connected to this account.");orgId=orgs[0].id;$("workspace-name").textContent=orgs[0].name;$("user-name").textContent=user.name||"Account";$("user-email").textContent=user.email;$("avatar").textContent=(user.name||user.email||"?").slice(0,1).toUpperCase();$("greeting").textContent="Good to see you, "+(user.name||"there");await loadMonitors();await loadIncidents();await loadTeam();await loadApiKeys();await loadStatusPages()}catch(e){showNotice(e.message,true)}}
+async function load(){try{const me=await request("/auth/me");user=me.user;orgs=me.organizations||[];if(!orgs.length)throw new Error("No workspace is connected to this account.");orgId=orgs[0].id;$("workspace-name").textContent=orgs[0].name;$("user-name").textContent=user.name||"Account";$("user-email").textContent=user.email;$("avatar").textContent=(user.name||user.email||"?").slice(0,1).toUpperCase();$("greeting").textContent="Good to see you, "+(user.name||"there");await loadMonitors();await loadIncidents();await loadTeam();await loadApiKeys();await loadStatusPages();await loadAlerts()}catch(e){showNotice(e.message,true)}}
 async function loadMonitors(){
   const data=await request("/v1/monitors?organizationId="+encodeURIComponent(orgId));
   monitors=data.monitors||[];
+  executionEnabled=data.executionEnabled===true;
+  $("monitor-empty").querySelector("p").textContent=executionEnabled
+    ?"Add a website or API endpoint to configure what you want ZetuWatch to watch. Scheduled checks will begin at the monitor's next due time."
+    :"Add a website or API endpoint to configure what you want ZetuWatch to watch. Checks will begin when the secure scheduled runner is enabled.";
   const role=orgs.find(org=>org.id===orgId)?.role||"viewer";
   const canWrite=role!=="viewer";
   const canDelete=role==="owner"||role==="admin";
   $("stat-total").textContent=monitors.length;
   updateOnboarding();
-  $("monitor-count").textContent=monitors.length+" configured";
+  $("monitor-count").textContent=monitors.length+" configured · "+(executionEnabled?"probe dispatch configured":"probe dispatch disabled");
   $("monitor-empty").classList.toggle("hidden",monitors.length>0);
   $("monitor-table").classList.toggle("hidden",monitors.length===0);
   $("monitor-rows").innerHTML="";
@@ -87,8 +156,9 @@ async function loadMonitors(){
     interval.textContent=Math.round(m.interval_seconds/60)+" min";
     const state=document.createElement("td");
     const pill=document.createElement("span");
-    pill.className="pill";
-    pill.textContent=Number(m.is_enabled)===1?"Awaiting first check":"Paused";
+    pill.className="pill"+(m.state==="check_delayed"?" check-delayed":"");
+    const stateLabels={paused:"Paused",execution_disabled:"Checks disabled",awaiting_first_check:"Awaiting first check",healthy:"Healthy",suspect:"Suspect",check_delayed:"Check delayed",down:"Down",recovering:"Recovering",unknown:"Unknown"};
+    pill.textContent=stateLabels[m.state]||"Unknown";
     state.appendChild(pill);
     const action=document.createElement("td");
     const view=document.createElement("button");
@@ -139,6 +209,7 @@ async function openMonitor(monitorId){
     ]);
     if(selectedMonitorId!==monitorId)return;
     const monitor=detail.monitor||{};
+    executionEnabled=detail.executionEnabled===true;
     selectedMonitorEnabled=Number(monitor.is_enabled)===1;
     const role=orgs.find(org=>org.id===orgId)?.role||"viewer";
     const canWrite=role!=="viewer";
@@ -146,10 +217,21 @@ async function openMonitor(monitorId){
     $("monitor-edit").classList.toggle("hidden",!canWrite);
     $("monitor-toggle").textContent=selectedMonitorEnabled?"Pause monitor":"Resume monitor";
     $("monitor-toggle").setAttribute("aria-label",(selectedMonitorEnabled?"Pause ":"Resume ")+(monitor.name||"monitor"));
-    $("monitor-detail-notice").textContent=selectedMonitorEnabled
-      ?"Scheduled probes are disabled. This view only reads records already stored by the monitoring service."
-      :"This monitor is paused. Existing history is retained; resuming it will make it eligible for a future scheduled check.";
     const checks=Array.isArray(history.checks)?history.checks:[];
+    const monitorState=monitor.state||detail.state||"unknown";
+    $("monitor-detail-notice").textContent=!selectedMonitorEnabled
+      ?"This monitor is paused. Existing history is retained; resuming it will make it eligible for a future scheduled check."
+      :monitorState==="down"
+        ?"An incident remains open for this monitor. The history below shows its actual recorded checks."
+        :monitorState==="recovering"
+          ?"Checks are passing again; the incident remains in recovery monitoring until the recovery threshold is met."
+          :monitorState==="check_delayed"
+            ?"The next scheduled check is overdue. This state reflects scheduler freshness, not a confirmed outage; the last stored result may be old."
+            :!executionEnabled
+            ?"Probe dispatch is disabled. This view only reads records already stored by the monitoring service."
+            :checks.length===0
+              ?"Probe dispatch is configured. This monitor is waiting for its first recorded check."
+              :"Probe dispatch is configured. The history below shows only actual recorded checks.";
     $("monitor-detail-title").textContent=monitor.name||"Monitor details";
     $("monitor-detail-target").textContent=monitor.target_url||"";
     $("monitor-detail-meta").innerHTML="";
@@ -163,7 +245,9 @@ async function openMonitor(monitorId){
     addMeta("Request",String(monitor.method||"GET")+" · expects "+String(monitor.expected_status||200));
     addMeta("Interval",Math.round(Number(monitor.interval_seconds||300)/60)+" minutes");
     addMeta("Configured state",selectedMonitorEnabled?"Enabled":"Paused");
-    addMeta("Execution","Scheduled checks not active");
+    addMeta("Execution",executionEnabled?"Probe dispatch configured":"Probe dispatch disabled");
+    addMeta("Last check",monitor.last_checked_at?formatCheckDate(monitor.last_checked_at):"Not yet checked");
+    addMeta("Latest state",String(monitorState).replace(/_/g," "));
     $("check-count").textContent=checks.length+" stored "+(checks.length===1?"check":"checks");
     $("check-rows").innerHTML="";
     $("check-empty").classList.toggle("hidden",checks.length>0);
@@ -196,7 +280,9 @@ function showMonitorList(){
 async function toggleMonitorEnabled(monitorId,action){
   try{
     const result=await request("/v1/monitors/"+encodeURIComponent(monitorId)+"/"+action,{method:"POST"});
-    showNotice((result.message||"Monitor state updated.")+" Scheduled probes remain disabled until secure execution is enabled.");
+    showNotice(result.executionEnabled===true
+      ?(result.message||"Monitor state updated.")+" The scheduler will honor the updated state on its next pass."
+      :(result.message||"Monitor state updated.")+" Probe execution is disabled; no network request was made.");
     await loadMonitors();
     if(selectedMonitorId===monitorId)await openMonitor(monitorId);
   }catch(error){
@@ -213,6 +299,7 @@ async function loadTeam(){
   for(const [value,label] of options){const option=document.createElement("option");option.value=value;option.textContent=label;$("invite-role").appendChild(option)}
   const result=await request("/v1/organizations/"+encodeURIComponent(orgId)+"/members");
   const members=result.members||[];
+  teamMemberCount=members.length;
   $("team-count").textContent=members.length+" members";
   $("team-rows").innerHTML="";
   for(const member of members){
@@ -235,6 +322,7 @@ async function loadTeam(){
   if(canManage){
     try{const pending=await request("/v1/organizations/"+encodeURIComponent(orgId)+"/invitations");const rows=pending.invitations||[];$("invitation-rows").innerHTML="";if(!rows.length){$("invitation-rows").textContent="No pending invitations."}else for(const item of rows){const line=document.createElement("div");line.style.padding="9px 0";line.style.borderBottom="1px solid var(--line)";line.textContent=item.email+" · "+item.role+" · expires "+new Date(item.expires_at.replace(" ","T")+"Z").toLocaleDateString();$("invitation-rows").appendChild(line)}}catch(e){$("invitation-rows").textContent="Pending invitations could not be loaded."}
   }
+  updateOnboarding();
 }
 
 function apiKeyMessage(text,error=false){const node=$("api-key-message");node.textContent=text;node.classList.remove("hidden","error");if(error)node.classList.add("error")}
@@ -506,7 +594,265 @@ $("api-key-copy").addEventListener("click",async()=>{
   }catch(error){apiKeyMessage(error.message||"Could not copy the API key.",true)}
 });
 
-function updateOnboarding(){const hasMonitor=monitors.length>0;const hasPublishedStatusPage=statusPages.some(page=>Number(page.isPublished)===1);$("setup-status-page").classList.toggle("pending",!hasPublishedStatusPage);$("setup-status-page-copy").textContent=hasPublishedStatusPage?"A public status page is published.":"Create and publish a customer-facing page.";$("setup-status-page-action").textContent=hasPublishedStatusPage?"View pages":"Set up";$("setup-progress").textContent=(1+(hasMonitor?1:0)+(hasPublishedStatusPage?1:0))+" of 5 complete";$("setup-monitor").classList.toggle("pending",!hasMonitor);$("setup-monitor-copy").textContent=hasMonitor?monitors.length+" monitor(s) configured.":"Choose a website or API to configure.";$("setup-add").textContent=hasMonitor?"Add another":"Set up";if(hasMonitor){$("setup-monitor").querySelector(".btn").textContent="Add another"}else{$("setup-monitor").querySelector(".btn").textContent="Set up"}}let wizardStep=0;
+
+function alertsMessage(text,error=false){
+  const node=$("alerts-message");
+  node.textContent=text;
+  node.classList.remove("hidden","error");
+  if(error)node.classList.add("error");
+}
+async function loadAlerts(){
+  const role=orgs.find(org=>org.id===orgId)?.role||"viewer";
+  const canWrite=role!=="viewer";
+  const canManageAll=role==="owner"||role==="admin";
+  $("alert-channel-form").classList.toggle("hidden",!canWrite);
+  $("webhook-endpoint-form").classList.toggle("hidden",!canManageAll);
+  const [channelResult,deliveryResult,webhookResult]=await Promise.all([
+    request("/v1/organizations/"+encodeURIComponent(orgId)+"/notification-channels"),
+    request("/v1/organizations/"+encodeURIComponent(orgId)+"/notification-deliveries"),
+    request("/v1/organizations/"+encodeURIComponent(orgId)+"/webhooks")
+  ]);
+  notificationChannels=channelResult.channels||[];
+  notificationDeliveries=deliveryResult.deliveries||[];
+  webhookEndpoints=webhookResult.endpoints||[];
+  webhookDeliveryConfigured=webhookResult.deliveryConfigured===true;
+  const ownChannel=notificationChannels.some(channel=>channel.createdBy===user.id);
+  $("alert-channel-existing").classList.toggle("hidden",!ownChannel);
+  $("alert-channel-submit").disabled=ownChannel;
+  $("alert-channel-submit").textContent=ownChannel?"Email already added":"Add my verified email";
+  $("alert-channel-count").textContent=notificationChannels.length+" channel(s)";
+  $("alert-channel-rows").innerHTML="";
+  if(!notificationChannels.length){
+    const row=document.createElement("tr"),cell=document.createElement("td");
+    cell.colSpan=6;cell.textContent="No email alert channels are configured.";
+    row.appendChild(cell);$("alert-channel-rows").appendChild(row);
+  }
+  for(const channel of notificationChannels){
+    const row=document.createElement("tr");
+    const type=document.createElement("td");type.textContent="Email";
+    const destination=document.createElement("td");destination.textContent=channel.destination||"";
+    const verified=document.createElement("td");verified.textContent=channel.verifiedAt?"Verified":"Not verified";
+    const state=document.createElement("td");state.textContent=Number(channel.isEnabled)===1?"Enabled":"Disabled";
+    const added=document.createElement("td");added.textContent=formatIncidentDate(channel.createdAt);
+    const actions=document.createElement("td");
+    if(canManageAll||channel.createdBy===user.id){
+      const toggle=document.createElement("button");
+      toggle.className="btn";toggle.textContent=Number(channel.isEnabled)===1?"Disable":"Enable";
+      toggle.addEventListener("click",()=>setEmailChannelEnabled(channel.id,Number(channel.isEnabled)!==1));
+      const remove=document.createElement("button");
+      remove.className="btn";remove.style.marginLeft="6px";remove.textContent="Remove";
+      remove.addEventListener("click",()=>removeEmailChannel(channel.id,channel.destination));
+      actions.append(toggle,remove);
+    }else actions.textContent="Managed by workspace admin";
+    row.append(type,destination,verified,state,added,actions);
+    $("alert-channel-rows").appendChild(row);
+  }
+  $("webhook-endpoint-count").textContent=webhookEndpoints.length+" endpoint(s)";
+  $("webhook-endpoint-rows").textContent="";
+  if(!webhookEndpoints.length){
+    const row=document.createElement("tr"),cell=document.createElement("td");
+    cell.colSpan=6;cell.textContent="No webhook endpoints configured.";
+    row.appendChild(cell);$("webhook-endpoint-rows").appendChild(row);
+  }
+  for(const endpoint of webhookEndpoints){
+    const row=document.createElement("tr");
+    const name=document.createElement("td");name.textContent=endpoint.name||"Unnamed endpoint";
+    const host=document.createElement("td");host.textContent=endpoint.destinationHost||"Unavailable";
+    const suffix=document.createElement("td");suffix.textContent=endpoint.secretLast4?"••••"+endpoint.secretLast4:"Rotated";
+    const endpointEnabled=Number(endpoint.isEnabled)===1;
+    const delivery=document.createElement("td");
+    delivery.textContent=endpointEnabled
+      ?(webhookDeliveryConfigured?"Enabled":"Paused · dispatcher unavailable")
+      :(webhookDeliveryConfigured?"Disabled":"Paused · operator setup pending");
+    const created=document.createElement("td");created.textContent=formatIncidentDate(endpoint.createdAt);
+    const actions=document.createElement("td");
+    const history=document.createElement("button");history.className="btn";history.textContent="History";
+    history.addEventListener("click",()=>loadWebhookDeliveryHistory(endpoint.id));
+    actions.appendChild(history);
+    if(canManageAll){
+      const toggle=document.createElement("button");toggle.className="btn";toggle.style.marginLeft="6px";
+      toggle.textContent=endpointEnabled?"Disable":"Enable";
+      toggle.disabled=!endpointEnabled&&!webhookDeliveryConfigured;
+      if(toggle.disabled)toggle.title="The operator has not configured secure webhook delivery.";
+      toggle.addEventListener("click",()=>toggleWebhookEndpoint(endpoint.id,!endpointEnabled));
+      const rotate=document.createElement("button");rotate.className="btn";rotate.style.marginLeft="6px";rotate.textContent="Rotate secret";
+      rotate.addEventListener("click",()=>rotateWebhookEndpoint(endpoint.id,endpoint.name));
+      const remove=document.createElement("button");remove.className="btn";remove.style.marginLeft="6px";remove.textContent="Remove";
+      remove.addEventListener("click",()=>removeWebhookEndpoint(endpoint.id,endpoint.name));
+      actions.append(toggle,rotate,remove);
+    }else{
+      const note=document.createElement("span");note.style.marginLeft="6px";note.textContent="Managed by workspace admin";
+      actions.appendChild(note);
+    }
+    row.append(name,host,suffix,delivery,created,actions);
+    $("webhook-endpoint-rows").appendChild(row);
+  }
+  if(webhookHistoryEndpointId&&!webhookEndpoints.some(endpoint=>endpoint.id===webhookHistoryEndpointId)){
+    webhookHistoryEndpointId=null;
+    $("webhook-history-title").textContent="Choose an endpoint to inspect attempts";
+    $("webhook-delivery-rows").innerHTML="<tr><td colspan='7'>Select History on a webhook endpoint.</td></tr>";
+  }
+  if(!webhookHistoryEndpointId&&webhookEndpoints.length)webhookHistoryEndpointId=webhookEndpoints[0].id;
+  if(webhookHistoryEndpointId)await loadWebhookDeliveryHistory(webhookHistoryEndpointId);
+  $("alert-delivery-rows").innerHTML="";
+  if(!notificationDeliveries.length){
+    const row=document.createElement("tr"),cell=document.createElement("td");
+    cell.colSpan=7;cell.textContent="No notification deliveries have been recorded yet.";
+    row.appendChild(cell);$("alert-delivery-rows").appendChild(row);
+  }
+  for(const delivery of notificationDeliveries){
+    const row=document.createElement("tr");
+    const event=document.createElement("td");event.textContent=String(delivery.eventType||"notification").replace(/^incident\./,"").replace(/_/g," ");
+    const monitor=document.createElement("td");monitor.textContent=delivery.monitorName||"Monitor removed";
+    const recipient=document.createElement("td");recipient.textContent=delivery.recipientEmail||"Unavailable";
+    const status=document.createElement("td");status.textContent=String(delivery.status||"unknown").replace(/_/g," ");
+    const attempts=document.createElement("td");attempts.textContent=String(delivery.attemptCount??0);
+    const updated=document.createElement("td");updated.textContent=formatIncidentDate(delivery.deliveredAt||delivery.nextAttemptAt||delivery.createdAt);
+    const details=document.createElement("td");details.textContent=delivery.lastErrorCode||"—";
+    row.append(event,monitor,recipient,status,attempts,updated,details);
+    $("alert-delivery-rows").appendChild(row);
+  }
+  updateOnboarding();
+}
+async function loadWebhookDeliveryHistory(endpointId){
+  webhookHistoryEndpointId=endpointId;
+  const endpoint=webhookEndpoints.find(item=>item.id===endpointId);
+  $("webhook-history-title").textContent=endpoint
+    ?(endpoint.name||"Webhook endpoint")+" · "+(endpoint.destinationHost||"destination")
+    :"Webhook endpoint delivery history";
+  $("webhook-delivery-rows").innerHTML="<tr><td colspan='7'>Loading webhook delivery history…</td></tr>";
+  try{
+    const result=await request("/v1/organizations/"+encodeURIComponent(orgId)+"/webhooks/"+encodeURIComponent(endpointId)+"/deliveries?limit=25");
+    const deliveries=result.deliveries||[];
+    $("webhook-delivery-rows").innerHTML="";
+    if(!deliveries.length){
+      const row=document.createElement("tr"),cell=document.createElement("td");
+      cell.colSpan=7;cell.textContent="No webhook deliveries have been recorded for this endpoint.";
+      row.appendChild(cell);$("webhook-delivery-rows").appendChild(row);return;
+    }
+    for(const item of deliveries){
+      const row=document.createElement("tr");
+      const event=document.createElement("td");event.textContent=String(item.eventType||"incident event").replace(/^incident\./,"").replace(/_/g," ");
+      const monitor=document.createElement("td");monitor.textContent=item.monitorName||"Monitor removed";
+      const status=document.createElement("td");status.textContent=String(item.status||"unknown").replace(/_/g," ");
+      const attempts=document.createElement("td");attempts.textContent=String(item.attemptCount??0);
+      const response=document.createElement("td");response.textContent=item.responseStatus?"HTTP "+item.responseStatus:"—";
+      const updated=document.createElement("td");updated.textContent=formatIncidentDate(item.deliveredAt||item.nextAttemptAt||item.updatedAt||item.createdAt);
+      const details=document.createElement("td");details.textContent=item.lastErrorCode||"—";
+      if(Array.isArray(item.attempts)&&item.attempts.length){
+        details.title=item.attempts.map(attempt=>"Attempt "+attempt.attemptNumber+": "+attempt.status+(attempt.responseStatus?" · HTTP "+attempt.responseStatus:"")+(attempt.errorCode?" · "+attempt.errorCode:"")).join(" | ");
+      }
+      row.append(event,monitor,status,attempts,response,updated,details);
+      $("webhook-delivery-rows").appendChild(row);
+    }
+  }catch(error){
+    $("webhook-delivery-rows").innerHTML="";
+    const row=document.createElement("tr"),cell=document.createElement("td");
+    cell.colSpan=7;cell.textContent=error.message||"Webhook delivery history could not be loaded.";
+    row.appendChild(cell);$("webhook-delivery-rows").appendChild(row);
+  }
+}
+async function toggleWebhookEndpoint(endpointId,enabled){
+  try{
+    const result=await request("/v1/organizations/"+encodeURIComponent(orgId)+"/webhooks/"+encodeURIComponent(endpointId),{
+      method:"PATCH",body:JSON.stringify({enabled})
+    });
+    alertsMessage(result.message||"Webhook endpoint state updated.");
+    await loadAlerts();
+  }catch(error){alertsMessage(error.message||"Webhook endpoint state could not be updated.",true)}
+}
+function showWebhookSecret(secret){
+  $("webhook-secret-value").textContent=secret;
+  $("webhook-secret-created").classList.remove("hidden");
+  $("webhook-secret-created").scrollIntoView({behavior:"smooth",block:"nearest"});
+}
+async function rotateWebhookEndpoint(endpointId,name){
+  if(!confirm("Rotate the signing secret for "+(name||"this endpoint")+"? The old secret will stop matching new signatures."))return;
+  try{
+    const result=await request("/v1/organizations/"+encodeURIComponent(orgId)+"/webhooks/"+encodeURIComponent(endpointId)+"/rotate",{method:"POST"});
+    showWebhookSecret(result.secret);
+    alertsMessage("Signing secret rotated. Copy the new secret; it is shown only once.");
+    await loadAlerts();
+  }catch(error){alertsMessage(error.message||"The signing secret could not be rotated.",true)}
+}
+async function removeWebhookEndpoint(endpointId,name){
+  if(!confirm("Remove "+(name||"this webhook endpoint")+"? Its encrypted URL and signing secret will be scrubbed."))return;
+  try{
+    await request("/v1/organizations/"+encodeURIComponent(orgId)+"/webhooks/"+encodeURIComponent(endpointId),{method:"DELETE"});
+    if(webhookHistoryEndpointId===endpointId)webhookHistoryEndpointId=null;
+    alertsMessage("Webhook endpoint removed and encrypted values scrubbed.");
+    await loadAlerts();
+  }catch(error){alertsMessage(error.message||"The webhook endpoint could not be removed.",true)}
+}
+$("webhook-endpoint-form").addEventListener("submit",async event=>{
+  event.preventDefault();
+  const button=$("webhook-endpoint-submit");button.disabled=true;button.textContent="Saving…";
+  try{
+    const result=await request("/v1/organizations/"+encodeURIComponent(orgId)+"/webhooks",{
+      method:"POST",
+      body:JSON.stringify({name:$("webhook-endpoint-name").value.trim(),url:$("webhook-endpoint-url").value.trim()})
+    });
+    $("webhook-endpoint-form").reset();
+    showWebhookSecret(result.secret);
+    alertsMessage("Endpoint saved. Delivery remains disabled; no network request was sent.");
+    await loadAlerts();
+  }catch(error){alertsMessage(error.message||"The webhook endpoint could not be saved.",true)}
+  finally{button.disabled=false;button.textContent="Save endpoint"}
+});
+$("webhook-secret-copy").addEventListener("click",async()=>{
+  try{
+    await navigator.clipboard.writeText($("webhook-secret-value").textContent||"");
+    alertsMessage("Signing secret copied. Store it in your receiver's secret manager.");
+  }catch{alertsMessage("Clipboard access is unavailable. Select and copy the secret manually.",true)}
+});
+$("webhook-secret-hide").addEventListener("click",()=>{
+  $("webhook-secret-value").textContent="";
+  $("webhook-secret-created").classList.add("hidden");
+});
+async function setEmailChannelEnabled(channelId,enabled){
+  try{
+    await request("/v1/organizations/"+encodeURIComponent(orgId)+"/notification-channels/"+encodeURIComponent(channelId),{
+      method:"PATCH",body:JSON.stringify({enabled})
+    });
+    alertsMessage(enabled?"Email alerts enabled.":"Email alerts disabled.");
+    await loadAlerts();
+  }catch(error){alertsMessage(error.message,true)}
+}
+async function removeEmailChannel(channelId,destination){
+  if(!confirm("Remove email alerts for "+destination+"? Pending deliveries will be cancelled."))return;
+  try{
+    await request("/v1/organizations/"+encodeURIComponent(orgId)+"/notification-channels/"+encodeURIComponent(channelId),{method:"DELETE"});
+    alertsMessage("Email alert channel removed.");
+    await loadAlerts();
+  }catch(error){alertsMessage(error.message,true)}
+}
+$("alert-channel-form").addEventListener("submit",async event=>{
+  event.preventDefault();
+  const button=$("alert-channel-submit");button.disabled=true;
+  try{
+    await request("/v1/organizations/"+encodeURIComponent(orgId)+"/notification-channels",{
+      method:"POST",body:JSON.stringify({channelType:"email"})
+    });
+    alertsMessage("Your verified account email is now subscribed to workspace incident alerts.");
+    await loadAlerts();
+  }catch(error){alertsMessage(error.message,true)}
+  finally{button.disabled=false}
+});
+$("alert-delivery-refresh").addEventListener("click",async()=>{
+  const button=$("alert-delivery-refresh");button.disabled=true;
+  try{await loadAlerts()}catch(error){alertsMessage(error.message,true)}
+  finally{button.disabled=false}
+});
+$("webhook-delivery-refresh").addEventListener("click",async()=>{
+  const button=$("webhook-delivery-refresh");button.disabled=true;
+  try{
+    if(webhookHistoryEndpointId)await loadWebhookDeliveryHistory(webhookHistoryEndpointId);
+    else alertsMessage("Choose a webhook endpoint first.");
+  }catch(error){alertsMessage(error.message,true)}
+  finally{button.disabled=false}
+});
+
+function updateOnboarding(){const hasMonitor=monitors.length>0;const hasAlertChannel=notificationChannels.some(channel=>Number(channel.isEnabled)===1);const hasTeam=teamMemberCount>1;const hasPublishedStatusPage=statusPages.some(page=>Number(page.isPublished)===1);$("setup-alerts").classList.toggle("pending",!hasAlertChannel);$("setup-alerts-copy").textContent=hasAlertChannel?"Your verified email is subscribed to incident alerts.":"Subscribe your verified email to incident alerts.";$("setup-alerts-action").textContent=hasAlertChannel?"Manage alerts":"Set up";$("setup-status-page").classList.toggle("pending",!hasPublishedStatusPage);$("setup-status-page-copy").textContent=hasPublishedStatusPage?"A public status page is published.":"Create and publish a customer-facing page.";$("setup-status-page-action").textContent=hasPublishedStatusPage?"View pages":"Set up";$("setup-progress").textContent=(1+(hasMonitor?1:0)+(hasAlertChannel?1:0)+(hasTeam?1:0)+(hasPublishedStatusPage?1:0))+" of 5 complete";$("setup-monitor").classList.toggle("pending",!hasMonitor);$("setup-monitor-copy").textContent=hasMonitor?monitors.length+" monitor(s) configured.":"Choose a website or API to configure.";$("setup-add").textContent=hasMonitor?"Add another":"Set up";if(hasMonitor){$("setup-monitor").querySelector(".btn").textContent="Add another"}else{$("setup-monitor").querySelector(".btn").textContent="Set up"}}
 function renderWizard(){
   document.querySelectorAll("[data-wizard]").forEach(panel=>panel.classList.toggle("hidden",Number(panel.dataset.wizard)!==wizardStep));
   document.querySelectorAll("[data-progress]").forEach(step=>{const n=Number(step.dataset.progress);step.classList.toggle("active",n===wizardStep);step.classList.toggle("done",n<wizardStep)});
@@ -564,10 +910,10 @@ $("monitor-form").addEventListener("submit",async e=>{
     const payload={organizationId:orgId,name:$("monitor-name").value.trim(),targetUrl:$("monitor-url").value.trim(),monitorType:$("monitor-type").value,method:$("monitor-method").value,intervalSeconds:Number($("monitor-interval").value),expectedStatus:Number($("monitor-status").value),timeoutMs:10000};
     if(editingMonitorId){
       await request("/v1/monitors/"+editingMonitorId,{method:"PATCH",body:JSON.stringify(payload)});
-      closeModal();showNotice("Monitor updated. It is awaiting the secure scheduled check service.");
+      closeModal();showNotice(executionEnabled?"Monitor updated. The scheduler will use the saved settings on the next due check.":"Monitor updated. Probe execution is disabled; the target has not been contacted.");
     }else{
       await request("/v1/monitors",{method:"POST",body:JSON.stringify(payload)});
-      closeModal();showNotice("Monitor saved. It is awaiting the secure scheduled check service.");
+      closeModal();showNotice(executionEnabled?"Monitor saved. It will be eligible for the next scheduled probe.":"Monitor saved. Scheduled probes are disabled; the target has not been contacted.");
     }
     await loadMonitors();
     if(selectedMonitorId)await openMonitor(selectedMonitorId);

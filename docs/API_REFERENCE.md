@@ -46,12 +46,12 @@ SQLite triggers enforce same-workspace component membership even if a future cod
 
 All monitor endpoints require a verified signed-in session and an organization membership.
 
-- `GET /v1/monitors?organizationId=<id>` — list up to 100 monitors in the selected workspace.
-- `POST /v1/monitors` — create a monitor. Body: `{ organizationId, name, targetUrl, monitorType: "http"|"api", method: "GET"|"HEAD", expectedStatus, intervalSeconds, timeoutMs }`.
-- `GET /v1/monitors/<uuid>` — retrieve a monitor.
-- `GET /v1/monitors/<uuid>/checks` — retrieve up to 100 stored checks, newest first. Each row includes its timestamp, pass/fail result, HTTP status, response time and error category. The response includes `executionEnabled: false`; this read does not trigger a probe.
+- `GET /v1/monitors?organizationId=<id>` — list up to 100 monitors in the selected workspace. Each row includes a state derived from persisted checks and any unresolved incident.
+- `POST /v1/monitors` — create a monitor. Body: `{ organizationId, name, targetUrl, monitorType: "http"|"api", method: "GET"|"HEAD", expectedStatus, intervalSeconds, timeoutMs }`. It stores the configuration and makes the monitor due; it does not synchronously probe the target.
+- `GET /v1/monitors/<uuid>` — retrieve a monitor and its derived state.
+- `GET /v1/monitors/<uuid>/checks` — retrieve up to 100 stored checks, newest first. Each row includes its timestamp, pass/fail result, HTTP status, response time and error category. The response includes the current `executionEnabled` configuration signal; this read never triggers a probe.
 - `PATCH /v1/monitors/<uuid>` — update name, target URL, method, expected status, interval or timeout.
-- `POST /v1/monitors/<uuid>/pause` and `POST /v1/monitors/<uuid>/resume` — pause or resume future scheduling. Owners/admins/members may manage monitor state; viewers are read-only. Actions are idempotent, clear any active lease, and resume makes the monitor due. Both return `executionEnabled: false`; neither sends a probe while the secure runner is disabled.
+- `POST /v1/monitors/<uuid>/pause` and `POST /v1/monitors/<uuid>/resume` — pause or resume future scheduling. Owners/admins/members may manage monitor state; viewers are read-only. Actions are idempotent, clear any active lease, and resume makes the monitor due. Both return the current `executionEnabled` configuration signal; neither sends a probe synchronously.
 - `DELETE /v1/monitors/<uuid>` — owner/admin only; soft-deletes and disables the monitor, removes it from monitor list/detail APIs, and retains check, incident and timeline rows. There is no hard-delete endpoint yet.
 
 Viewers can read. Members/admins/owners can create and update. Only owners/admins can delete. Every query is scoped through the monitor's organization membership; never trust an organization ID supplied by a client without checking membership.
@@ -83,12 +83,50 @@ Timeline visibility is `internal` by default or `public` when explicitly selecte
 
 ## Monitor detail and check history
 
-The workspace monitor list provides a **View** action that opens a detail panel. It loads the tenant-authorized monitor record and persisted check history, and renders stored values using text-only DOM nodes. An empty history is explicitly shown as no checks recorded; the UI does not invent status, uptime or latency values. Refreshing history only reads the API and never sends a request to the monitored target.
+The workspace monitor list provides a **View** action that opens a detail panel. It loads the tenant-authorized monitor record and persisted check history, and renders stored values using text-only DOM nodes. State labels are derived from the latest persisted check and unresolved incident: paused, execution disabled, awaiting first check, healthy, suspect, check delayed, down or recovering. An unresolved incident remains down/recovering even if probe dispatch is later disabled; other enabled monitors show execution disabled rather than a stale healthy state. When `next_check_at` is overdue by more than the greater of two minutes or two configured intervals, the API returns `check_delayed` instead of presenting an old successful result as current health. This is a scheduler-freshness warning, not a confirmed outage. An empty history is explicitly shown as no checks recorded; the UI does not invent status, uptime or latency values. Refreshing history only reads the API and never sends a request to the monitored target.
 
 ## Monitor execution status
 
-The current API deliberately returns `executionEnabled: false`. Creating a monitor stores its configuration but does not run a network request or schedule a check. Pausing and resuming only changes its persisted enabled state and due time; it does not activate execution. The current URL validator is preliminary and does not provide DNS resolution/pinning or DNS-rebinding protection. Do not enable scheduled probes until the egress security architecture is implemented and reviewed.
+The API returns `executionEnabled: true` only when the operator explicitly sets `PROBES_ENABLED=true`, supplies a valid HTTPS `PROBE_AGENT_URL` ending in `/v1/probe`, and provides a `PROBE_SHARED_SECRET` of at least 32 bytes. Otherwise it returns false and a disabled-state note. This is a configuration signal, not proof that the external agent is reachable or that a target has passed a check. Monitor state is never inferred from configuration alone: before the first persisted result it remains awaiting first check; later states are derived from check history and unresolved incident status. Creating/updating/resuming a monitor changes its due time but does not synchronously send a probe. The one-minute Cron handler dispatches only when the operator gate and agent configuration are valid. The DNS-pinned probe agent and bounded D1 dispatcher are implemented on the integration branch, but full CI, live DNS/TLS verification, agent deployment and production-like Worker-to-agent-to-D1 verification remain launch gates. Keep `PROBES_ENABLED` unset until those gates pass.
 
 ## Error responses
 
 Errors use JSON such as `{ "error": "UNAUTHENTICATED" }`. Common status codes: 400 invalid input, 401 no valid session, 403 insufficient membership/role, 404 missing resource, 405 unsupported method, 429 rate limit, and 503 unconfigured provider. Error messages must not include secrets, full response bodies or internal network details.
+
+
+## Email notification channels and delivery history
+
+All notification-management routes require a verified browser session and workspace membership. Read-only API keys are denied.
+
+- `GET /v1/organizations/<organization-id>/notification-channels` — list up to 50 channels. Owners/admins see all workspace channels; members/viewers see only channels they created.
+- `POST /v1/organizations/<organization-id>/notification-channels` — create an email channel with body `{ "channelType": "email" }`. The destination must be the signed-in user's own verified account email; arbitrary recipients and webhook destinations are rejected. Owners/admins/members may add their own address; viewers cannot.
+- `PATCH /v1/organizations/<organization-id>/notification-channels/<channel-id>` — enable or disable with `{ "enabled": true|false }`. Owners/admins can manage all workspace channels; members can manage their own.
+- `DELETE /v1/organizations/<organization-id>/notification-channels/<channel-id>` — remove a channel. Owners/admins can remove any workspace channel; members can remove their own. Pending deliveries are cancelled.
+- `GET /v1/organizations/<organization-id>/notification-deliveries` — return the latest 100 delivery records. Owners/admins see all workspace deliveries; members/viewers see only deliveries for their own channels. The response includes event type, recipient, monitor name, status, attempt count, sanitized error code and delivery/retry timestamps.
+
+Incident lifecycle events and customer-authored incident updates are inserted into a durable D1 outbox in the same database batch as the timeline event. The one-minute Cron Trigger dispatches at most five queued deliveries per invocation. Claims use 90-second leases; the dispatcher retries transient provider/network failures at 30 seconds, 2 minutes, 10 minutes, 1 hour and 6 hours, then marks the sixth attempt failed. Provider `Retry-After` values are honored up to six hours. A stable event/channel idempotency key is sent to Resend on every attempt.
+
+Configure `RESEND_API_KEY` and `EMAIL_FROM` in the Worker environment and set `PUBLIC_APP_URL` to the public HTTPS application origin. If the provider credentials or sender are absent, the scheduled dispatcher skips sending and leaves queued rows available for a later run. See [EMAIL_NOTIFICATIONS.md](EMAIL_NOTIFICATIONS.md) for setup and operational limitations.
+
+Disabling/removing a channel cancels queued work. It cannot recall an email already accepted by the provider. Delivery records are operational logs, not proof that the recipient's mailbox accepted or displayed a message.
+
+
+Delivery history retains the channel creator identifier independently of the channel row. Removing a channel sets the delivery's channel reference to null but does not erase the delivery record; the original member can still inspect their own retained log while they remain in the workspace. Workspace owners/admins can inspect all retained delivery records.
+
+
+## Encrypted webhook endpoint configuration and delivery
+
+All routes require a verified browser session and organization membership. Read-only API keys are denied. Owners/admins may create, rename, enable/disable, rotate and remove endpoints; all workspace members may read safe metadata and delivery history.
+
+- `GET /v1/organizations/{organizationId}/webhooks` — returns endpoint ID, name, destination hostname, secret suffix, enabled state, timestamps and `deliveryConfigured`. It never returns the URL, ciphertext or secret. `deliveryConfigured` describes operator configuration only; it does not prove agent reachability or receiver delivery.
+- `POST /v1/organizations/{organizationId}/webhooks` — body `{"name":"Production alerts","url":"https://hooks.example.com/events"}`. Returns a new `whsec_` secret once; new endpoints are disabled.
+- `PATCH /v1/organizations/{organizationId}/webhooks/{endpointId}` — rename with `{"name":"Updated name"}`, enable with `{"enabled":true}`, or disable with `{"enabled":false}`. Enabling requires `WEBHOOKS_ENABLED=true`, valid operator key/agent configuration, and successful decryption/authentication of the stored endpoint values. Disable remains available when operator delivery is unavailable.
+- `POST /v1/organizations/{organizationId}/webhooks/{endpointId}/rotate` — returns a replacement signing secret once.
+- `GET /v1/organizations/{organizationId}/webhooks/{endpointId}/deliveries?limit=25` — returns up to 50 recent delivery records with attempt number, status, response status, sanitized error code and timestamps. It never returns payloads, endpoint URLs, ciphertext or secrets.
+- `DELETE /v1/organizations/{organizationId}/webhooks/{endpointId}` — scrubs encrypted URL/secret material, disables the endpoint, cancels queued deliveries and retains the audit event.
+
+A workspace may configure up to 10 active endpoint records. URL validation at creation is syntactic only; it does not resolve DNS. No test request or DNS query is made during creation, rename, rotation or enablement. Each actual delivery resolves and pins public A/AAAA answers in the dedicated agent.
+
+The Worker requires a 32-byte base64url `WEBHOOK_ENCRYPTION_KEY`, a trusted HTTPS `PROBE_AGENT_URL` ending in `/v1/probe`, and a `PROBE_SHARED_SECRET` of at least 32 bytes. The non-secret `WEBHOOKS_ENABLED` variable defaults to `false` in `wrangler.toml`. The one-minute scheduled handler claims at most three webhook deliveries with at most two concurrent agent requests. Delivery uses 90-second leases and up to eight attempts with bounded backoff. It is at-least-once; receivers must verify `X-ZetuWatch-Signature` over the exact raw body and durably deduplicate `eventId`.
+
+See [WEBHOOK_DELIVERY.md](WEBHOOK_DELIVERY.md) for the payload contract, egress model, operator setup and outstanding verification gates.
